@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow-semi-condensed/500.css";
+@import "@fontsource/barlow-semi-condensed/600.css";
+@import "@fontsource/barlow-semi-condensed/700.css";
+
+/*
+  PresApp tokens. Indigo/violet follow the EnerMech Power App; status colours carry meaning
+  only (gate Completed / Ongoing / Hold / Not Applicable) and are never used as decoration.
+*/
+@theme {
+  --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Barlow Semi Condensed", "Barlow", ui-sans-serif, sans-serif;
+
+  --color-ink: #1e1b4b;
+  --color-ink-2: #2e2a6b;
+  --color-violet: #6d28d9;
+  --color-violet-dark: #5b21b6;
+  --color-violet-soft: #ede9fe;
+  --color-lilac: #c4b5fd;
+  --color-surface: #f6f5fa;
+  --color-panel: #ffffff;
+  --color-line: #e3e0ee;
+  --color-text: #1c1a33;
+  --color-muted: #5e5a78;
+
+  --color-done: #15803d;
+  --color-ongoing: #b45309;
+  --color-hold: #b91c1c;
+  --color-na: #64748b;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-surface text-text font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+    font-feature-settings: "tnum" 1;
+  }
+  h1, h2, h3 {
+    @apply font-display text-ink;
+    letter-spacing: -0.005em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-violet);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

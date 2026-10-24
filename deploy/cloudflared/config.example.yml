@@ -1,0 +1,10 @@
+# Cloudflare Tunnel for PresApp — copy to C:\ProgramData\Cloudflare\cloudflared\config.yml on the server.
+# Created with: cloudflared tunnel create presapp  (gives the tunnel id and the credentials file)
+tunnel: <TUNNEL-ID>
+credentials-file: C:\ProgramData\Cloudflare\cloudflared\<TUNNEL-ID>.json
+
+ingress:
+  # Only the public port 5080. NEVER publish 5081: it is the local emergency login.
+  - hostname: presapp.<your-domain>
+    service: http://127.0.0.1:5080
+  - service: http_status:404

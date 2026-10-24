@@ -1,0 +1,16 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/*
+!.vscode/extensions.json
+node_modules/
+web/dist/
+src/PresApp.Api/wwwroot/
+logs/
+*.log
+appsettings.Production.json
+appsettings.Local.json
+publish/
+TestResults/
+*.tsbuildinfo
