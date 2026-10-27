@@ -14,3 +14,6 @@ appsettings.Local.json
 publish/
 TestResults/
 *.tsbuildinfo
+
+# Local files with production data (never committed)
+local/

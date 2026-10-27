@@ -23,7 +23,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     staleTime: 5 * 60_000,
   });
 
-  if (query.isPending) return <FullPageMessage title="Cargando PresApp" />;
+  if (query.isPending) return <FullPageMessage title="Loading K Data" />;
 
   if (query.error) {
     const error = query.error as ApiError;
@@ -31,9 +31,9 @@ export function SessionGate({ children }: { children: ReactNode }) {
     if (error.code === "emergency_login") return <EmergencyLoginPage />;
     return (
       <FullPageMessage
-        title="No se pudo abrir tu sesión"
+        title="Your session could not be opened"
         detail={error.message}
-        action={{ label: "Volver a intentar", onClick: () => window.location.reload() }}
+        action={{ label: "Try again", onClick: () => window.location.reload() }}
       />
     );
   }

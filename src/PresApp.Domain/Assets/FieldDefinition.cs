@@ -28,7 +28,12 @@ public class FieldDefinition
     public bool IsRequired { get; set; }
     public string? Section { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>Shown as a column of the register of its asset type.</summary>
+    public bool ShowInRegister { get; set; }
     public bool IsActive { get; set; } = true;
+
+    public const int DefaultTextLength = 500;
 }
 
 /// <summary>Value of a dynamic field for one asset. Only the column matching the data type is used.</summary>

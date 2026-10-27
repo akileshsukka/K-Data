@@ -56,6 +56,7 @@ public class ImportRun
     public int AppliedCount { get; set; }
     public int IssueCount { get; set; }
     public int WarningCount { get; set; }
+    public int RowsInFile { get; set; }
     public string? Message { get; set; }
     public List<ImportChange> Changes { get; set; } = [];
 }
@@ -68,6 +69,10 @@ public class ImportChange
     public ImportRun ImportRun { get; set; } = null!;
     public Guid? AssetId { get; set; }
     public string? AssetCode { get; set; }
+    public string? AssetTag { get; set; }
+
+    /// <summary>Row of the file (1 = first data row), to find the cell quickly.</summary>
+    public int? RowNumber { get; set; }
     public string Field { get; set; } = "";
     public string? BaseValue { get; set; }
     public string? ExcelValue { get; set; }

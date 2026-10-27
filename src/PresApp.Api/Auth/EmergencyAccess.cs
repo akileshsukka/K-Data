@@ -39,7 +39,7 @@ public static class EmergencyAccess
             var now = clock.GetUtcNow().UtcDateTime;
             if (Failures.TryGetValue(email, out var f) && f.Count >= MaxFailures && f.Until > now)
             {
-                return Results.Problem("Demasiados intentos. Espera 15 minutos.", statusCode: 429);
+                return Results.Problem("Too many attempts. Wait 15 minutes.", statusCode: 429);
             }
 
             var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Email == email && u.IsActive);
@@ -58,7 +58,7 @@ public static class EmergencyAccess
             if (!ok)
             {
                 Failures.AddOrUpdate(email, _ => (1, now + LockTime), (_, old) => (old.Count + 1, now + LockTime));
-                return Results.Problem("Correo o contraseña incorrectos.", statusCode: 401);
+                return Results.Problem("Wrong e-mail or password.", statusCode: 401);
             }
 
             Failures.TryRemove(email, out _);
@@ -88,20 +88,20 @@ public static class EmergencyAccess
         var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Email == normalized);
         if (user is null || user.Role.Name != RoleNames.Admin)
         {
-            Console.Error.WriteLine($"{normalized} no existe o no es Admin.");
+            Console.Error.WriteLine($"{normalized} does not exist or is not an Admin.");
             return 1;
         }
 
-        Console.Write("Nueva contraseña de emergencia (mínimo 14 caracteres): ");
+        Console.Write("New emergency password (at least 14 characters): ");
         var password = ReadHidden();
         if (password.Length < 14)
         {
-            Console.Error.WriteLine("Demasiado corta.");
+            Console.Error.WriteLine("Too short.");
             return 1;
         }
         user.EmergencyPasswordHash = new PasswordHasher<AppUser>().HashPassword(user, password);
         await db.SaveChangesAsync();
-        Console.WriteLine("Contraseña de emergencia guardada.");
+        Console.WriteLine("Emergency password saved.");
         return 0;
     }
 

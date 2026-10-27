@@ -1,3 +1,4 @@
+using PresApp.Domain.Assets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PresApp.Domain.Catalog;
@@ -18,6 +19,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         await SeedRolesAsync(ct);
         await SeedOptionSetsAsync(ct);
         await SeedDisciplinesAsync(ct);
+        await SeedLineCodesAsync(ct);
         await SeedPlantsAsync(ct);
         await SeedMeasurementsAsync(ct);
         await SeedGroupTypesAsync(ct);
@@ -86,6 +88,9 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
     private async Task SeedDisciplinesAsync(CancellationToken ct)
     {
         var existing = await db.Disciplines.Select(d => d.Name).ToListAsync(ct);
+        // Pipelines need an Equipment ID prefix (PL) where an older database has none.
+        var piping = await db.Disciplines.FirstOrDefaultAsync(d => d.AssetType == AssetType.Pipeline && d.Prefix == null, ct);
+        if (piping is not null) piping.Prefix = "PL";
         foreach (var d in SeedData.Disciplines.Where(d => !existing.Contains(d.Name)))
         {
             db.Disciplines.Add(new Discipline
@@ -93,6 +98,13 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                 Name = d.Name, AssetType = d.Type, Prefix = d.Prefix, SyncToSimpro = d.Simpro, SortOrder = d.Sort
             });
         }
+    }
+
+    private async Task SeedLineCodesAsync(CancellationToken ct)
+    {
+        var existing = (await db.LineCodes.Select(c => new { c.Kind, c.Code }).ToListAsync(ct)).Select(c => (c.Kind, c.Code)).ToHashSet();
+        foreach (var c in SeedData.LineCodes.Where(c => !existing.Contains((c.Kind, c.Code))))
+            db.LineCodes.Add(new LineCode { Kind = c.Kind, Code = c.Code, Description = c.Description });
     }
 
     private async Task SeedPlantsAsync(CancellationToken ct)
@@ -130,10 +142,24 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
 
     private async Task SeedGroupTypesAsync(CancellationToken ct)
     {
-        var existing = await db.GroupTypes.Select(g => g.Name).ToListAsync(ct);
-        foreach (var name in SeedData.GroupTypes.Where(n => !existing.Contains(n)))
+        // An early version seeded Spanish names: their groups move to the English type and the Spanish type is removed.
+        var spanish = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            db.GroupTypes.Add(new GroupType { Name = name });
+            ["Paquete de trabajo"] = "Workpack", ["Paquete"] = "Workpack", ["Circuito"] = "Circuit", ["Sistema"] = "System"
+        };
+        var types = await db.GroupTypes.ToListAsync(ct);
+        foreach (var name in SeedData.GroupTypes.Where(n => !types.Any(t => string.Equals(t.Name, n, StringComparison.OrdinalIgnoreCase))))
+        {
+            var t = new GroupType { Name = name };
+            db.GroupTypes.Add(t);
+            types.Add(t);
+        }
+        await db.SaveChangesAsync(ct);
+        foreach (var old in types.Where(t => spanish.ContainsKey(t.Name)).ToList())
+        {
+            var target = types.First(t => t.Name == spanish[old.Name]);
+            await db.Groups.Where(g => g.GroupTypeId == old.Id).ExecuteUpdateAsync(u => u.SetProperty(g => g.GroupTypeId, target.Id), ct);
+            db.GroupTypes.Remove(old);
         }
     }
 

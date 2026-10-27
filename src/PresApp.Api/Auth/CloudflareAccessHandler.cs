@@ -82,10 +82,10 @@ public sealed class CloudflareAccessHandler(
         var notRegistered = failure == "NotRegistered";
         await AuthProblems.WriteAsync(Context, 401, notRegistered ? "not_registered" : "no_session",
             notRegistered
-                ? "Tu correo no está registrado en PresApp o está inactivo. Pide acceso a un administrador."
-                : "Sesión no válida. Vuelve a entrar por el enlace de PresApp.");
+                ? "Your e-mail is not registered in PresApp or is inactive. Ask an administrator for access."
+                : "Your session is not valid. Open PresApp again from its link.");
     }
 
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) =>
-        AuthProblems.WriteAsync(Context, 403, "forbidden", "No tienes permiso para esta acción.");
+        AuthProblems.WriteAsync(Context, 403, "forbidden", "You do not have permission for this action.");
 }

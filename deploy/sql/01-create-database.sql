@@ -1,5 +1,5 @@
 /*
-  PresApp — create the database and the login of the Windows service.
+  PresApp — create the empty database.
   Run ONCE on EM-L-5236 in SSMS, connected as a sysadmin.
   The tables are created by PresApp itself on first start (migrations), so the database starts empty.
 */
@@ -13,19 +13,10 @@ BEGIN
 END
 GO
 
--- The service runs as the virtual account NT SERVICE\PresApp (created by install-service.ps1).
-IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'NT SERVICE\PresApp')
-    CREATE LOGIN [NT SERVICE\PresApp] FROM WINDOWS WITH DEFAULT_DATABASE = [PresApp];
-GO
-
-USE [PresApp];
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'NT SERVICE\PresApp')
-    CREATE USER [NT SERVICE\PresApp] FOR LOGIN [NT SERVICE\PresApp];
-ALTER ROLE [db_owner] ADD MEMBER [NT SERVICE\PresApp];
-GO
+-- The login of the service (NT SERVICE\PresApp) is created by deploy\install-service.ps1:
+-- that Windows account only exists once the "PresApp" service is installed.
 
 /*
-  Access to Simpro (database Preservation) is granted in Phase 3, limited to the tables the
-  sync writes. Nothing here touches Preservation.
+  Access to Simpro (database Preservation) is granted later with 03-simpro-access.sql,
+  limited to the tables the sync writes. Nothing here touches Preservation.
 */

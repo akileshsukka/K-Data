@@ -56,7 +56,7 @@ public sealed class AuditSaveChangesInterceptor(IAuditContext audit, TimeProvide
                 }
             }
 
-            if (entry.Entity is IFieldAudited audited)
+            if (entry.Entity is IFieldAudited audited && !audit.SuppressFieldAudit)
             {
                 logs.AddRange(Describe(entry, audited, now));
             }
@@ -84,7 +84,7 @@ public sealed class AuditSaveChangesInterceptor(IAuditContext audit, TimeProvide
                 if (Ignored.Contains(meta.Name) || meta.IsShadowProperty() || meta.IsPrimaryKey() || meta.IsForeignKey()) continue;
                 var value = Format(property.CurrentValue);
                 if (string.IsNullOrEmpty(value) || IsDefault(property.CurrentValue)) continue;
-                yield return NewLog(entry, audited, entityType, meta.Name, null, value, now);
+                yield return NewLog(entry, audited, entityType, FieldName(entry, meta.Name), null, value, now);
             }
             yield break;
         }
@@ -100,9 +100,13 @@ public sealed class AuditSaveChangesInterceptor(IAuditContext audit, TimeProvide
             var newValue = Format(property.CurrentValue);
             if (oldValue == newValue) continue;
 
-            yield return NewLog(entry, audited, entityType, name, oldValue, newValue, now);
+            yield return NewLog(entry, audited, entityType, FieldName(entry, name), oldValue, newValue, now);
         }
     }
+
+    /// <summary>A custom field value is logged as "cf:{field id}" whatever column holds it (text, number or date).</summary>
+    private static string FieldName(EntityEntry entry, string property) =>
+        entry.Entity is Domain.Assets.AssetFieldValue v && property.StartsWith("Value", StringComparison.Ordinal) ? $"cf:{v.FieldDefinitionId}" : property;
 
     private ChangeLog NewLog(EntityEntry entry, IFieldAudited audited, string entityType, string field,
         string? oldValue, string? newValue, DateTime now) => new()

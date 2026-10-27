@@ -1,3 +1,4 @@
+using PresApp.Api.Hosting;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Hosting;
@@ -11,6 +12,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using PresApp.Api.Auth;
+using PresApp.Api.Simpro;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using PresApp.Domain.Security;
 using PresApp.Infrastructure.Auditing;
 using PresApp.Infrastructure.Data;
@@ -29,6 +32,9 @@ public sealed class TestApp : WebApplicationFactory<Program>
 
     private readonly SqliteConnection connection = new("DataSource=:memory:");
     public RsaSecurityKey SigningKey { get; } = new(RSA.Create(2048)) { KeyId = "test-key" };
+
+    /// <summary>An in-memory copy of the Simpro tables (empty until a test creates them).</summary>
+    public FakeSimpro Simpro { get; } = new();
 
     public TestApp() => connection.Open();
 
@@ -52,6 +58,9 @@ public sealed class TestApp : WebApplicationFactory<Program>
                 .UseSqlite(connection)
                 .AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>()));
 
+            services.RemoveAll<ISimproConnectionFactory>();
+            services.AddSingleton<ISimproConnectionFactory>(Simpro);
+
             services.AddSingleton(sp => new CloudflareKeyProvider(
                 new HttpClient(new FakeCertsHandler(SigningKey)),
                 sp.GetRequiredService<IOptions<PresAppAuthOptions>>(),
@@ -73,6 +82,12 @@ public sealed class TestApp : WebApplicationFactory<Program>
             Expires = expires ?? now.AddHours(1),
             SigningCredentials = new SigningCredentials(key ?? SigningKey, SecurityAlgorithms.RsaSha256)
         });
+    }
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.Add(CsrfHeaderMiddleware.HeaderName, CsrfHeaderMiddleware.HeaderValue);
     }
 
     public HttpClient ClientFor(string email)
@@ -101,7 +116,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing) connection.Dispose();
+        if (disposing) { connection.Dispose(); Simpro.Dispose(); }
     }
 
     private sealed class FakeCertsHandler(RsaSecurityKey key) : HttpMessageHandler

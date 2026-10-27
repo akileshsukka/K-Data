@@ -8,6 +8,9 @@ public interface IAuditContext
     string UserName { get; }
     ChangeSource Source { get; }
     Guid BatchId { get; }
+
+    /// <summary>True during bulk data loads (migration) that bring their own history.</summary>
+    bool SuppressFieldAudit { get; }
 }
 
 /// <summary>Mutable implementation used by the API (scoped per request) and by background jobs.</summary>
@@ -16,4 +19,5 @@ public sealed class AuditContext : IAuditContext
     public string UserName { get; set; } = "system";
     public ChangeSource Source { get; set; } = ChangeSource.App;
     public Guid BatchId { get; set; } = Guid.NewGuid();
+    public bool SuppressFieldAudit { get; set; }
 }

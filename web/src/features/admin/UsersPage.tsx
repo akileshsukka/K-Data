@@ -11,7 +11,7 @@ import { formatDateTime } from "../../components/dates";
 import { AdminTabs } from "./AdminTabs";
 import { useRoles, useSaveUser, useSetUserActive, useUsers, type SaveUser } from "./useAdmin";
 
-/** Who can enter PresApp and with which role. The e-mail is the login: Cloudflare sends the code there. */
+/** Who can enter K Data and with which role. The e-mail is the login: Cloudflare sends the code there. */
 export function UsersPage() {
   const users = useUsers();
   const [search, setSearch] = useState("");
@@ -27,27 +27,27 @@ export function UsersPage() {
     <div>
       <AdminTabs />
       <PageHeader
-        title="Usuarios"
-        description="Cada persona entra con su correo: Cloudflare le envía un código y PresApp le aplica su rol."
-        actions={<Button onClick={() => setEditing("new")}>Agregar usuario</Button>}
+        title="Users"
+        description="People sign in with their e-mail: Cloudflare sends them a code and K Data applies their role."
+        actions={<Button onClick={() => setEditing("new")}>Add user</Button>}
       />
 
       <div className="mt-6 max-w-sm">
-        <TextInput type="search" placeholder="Buscar por nombre, correo o rol" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar usuarios" />
+        <TextInput type="search" placeholder="Search by name, e-mail or role" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
       </div>
 
-      {users.isPending && <p className="mt-6 text-muted">Cargando usuarios…</p>}
+      {users.isPending && <p className="mt-6 text-muted">Loading users…</p>}
       {users.error && <p className="mt-6 text-hold">{users.error.message}</p>}
-      {users.data && filtered.length === 0 && <p className="mt-6 text-muted">Ningún usuario coincide con «{search}».</p>}
+      {users.data && filtered.length === 0 && <p className="mt-6 text-muted">No user matches “{search}”.</p>}
 
       {filtered.length > 0 && (
         <>
           <table className="mt-6 hidden w-full border-separate border-spacing-0 overflow-hidden rounded-lg border border-line bg-panel md:table">
             <thead>
               <tr className="text-left font-display text-[15px] text-muted">
-                <th className="border-b border-line px-4 py-3 font-semibold">Nombre</th>
-                <th className="border-b border-line px-4 py-3 font-semibold">Rol</th>
-                <th className="border-b border-line px-4 py-3 font-semibold">Último ingreso</th>
+                <th className="border-b border-line px-4 py-3 font-semibold">Name</th>
+                <th className="border-b border-line px-4 py-3 font-semibold">Role</th>
+                <th className="border-b border-line px-4 py-3 font-semibold">Last sign-in</th>
                 <th className="border-b border-line px-4 py-3" />
               </tr>
             </thead>
@@ -60,9 +60,9 @@ export function UsersPage() {
                   </td>
                   <td className="border-b border-line px-4 py-3">
                     {u.role}
-                    {!u.isActive && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-sm">Inactivo</span>}
+                    {!u.isActive && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-sm">Inactive</span>}
                   </td>
-                  <td className="border-b border-line px-4 py-3 text-sm">{u.lastLoginAtUtc ? formatDateTime(u.lastLoginAtUtc) : "Nunca"}</td>
+                  <td className="border-b border-line px-4 py-3 text-sm">{u.lastLoginAtUtc ? formatDateTime(u.lastLoginAtUtc) : "Never"}</td>
                   <td className="border-b border-line px-4 py-3 text-right">
                     <UserActions user={u} onEdit={() => setEditing(u)} />
                   </td>
@@ -78,7 +78,7 @@ export function UsersPage() {
                 <p className="text-sm break-all text-muted">{u.email}</p>
                 <p className="mt-1 text-sm">
                   {u.role}
-                  {!u.isActive && " — inactivo"}
+                  {!u.isActive && " — inactive"}
                 </p>
                 <div className="mt-3">
                   <UserActions user={u} onEdit={() => setEditing(u)} />
@@ -102,24 +102,24 @@ function UserActions({ user, onEdit }: { user: AppUser; onEdit: () => void }) {
 
   async function toggle() {
     const active = !user.isActive;
-    if (!active && !window.confirm(`¿Desactivar a ${user.displayName}? Perderá el acceso de inmediato.`)) return;
+    if (!active && !window.confirm(`Deactivate ${user.displayName}? They lose access immediately.`)) return;
     try {
       const result = await setActive.mutateAsync({ id: user.id, active });
-      toast(active ? `${user.displayName} puede volver a entrar` : `${user.displayName} ya no puede entrar`);
+      toast(active ? `${user.displayName} can sign in again` : `${user.displayName} can no longer sign in`);
       reportCloudflare(toast, result.cloudflare);
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "No se pudo cambiar el usuario.", "error");
+      toast(err instanceof ApiError ? err.message : "The user could not be changed.", "error");
     }
   }
 
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <Button variant="secondary" onClick={onEdit}>
-        Editar
+        Edit
       </Button>
       {!isSelf && (
         <Button variant={user.isActive ? "danger" : "secondary"} busy={setActive.isPending} onClick={toggle}>
-          {user.isActive ? "Desactivar" : "Reactivar"}
+          {user.isActive ? "Deactivate" : "Reactivate"}
         </Button>
       )}
     </div>
@@ -130,7 +130,7 @@ function UserDialog({ user, onClose }: { user: AppUser | "new" | null; onClose: 
   const isNew = user === "new";
   const existing = user && user !== "new" ? user : undefined;
   return (
-    <Dialog open={user !== null} title={isNew ? "Agregar usuario" : "Editar usuario"} onClose={onClose}>
+    <Dialog open={user !== null} title={isNew ? "Add user" : "Edit user"} onClose={onClose}>
       {user !== null && <UserForm key={existing?.id ?? "new"} existing={existing} onDone={onClose} />}
     </Dialog>
   );
@@ -152,30 +152,30 @@ function UserForm({ existing, onDone }: { existing?: AppUser; onDone: () => void
     setErrors({});
     try {
       const result = await save.mutateAsync({ id: existing?.id, data: form });
-      toast(existing ? "Usuario guardado" : `${result.user.displayName} agregado`);
+      toast(existing ? "User saved" : `${result.user.displayName} added`);
       reportCloudflare(toast, result.cloudflare);
       onDone();
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(Object.fromEntries(Object.entries(err.fieldErrors).map(([k, v]) => [k, v[0]])));
       } else {
-        toast(err instanceof ApiError ? err.message : "No se pudo guardar.", "error");
+        toast(err instanceof ApiError ? err.message : "Could not save.", "error");
       }
     }
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <Field label="Correo" error={errors.email} hint="Es el que usará para recibir el código de acceso.">
+      <Field label="E-mail" error={errors.email} hint="The address that receives the sign-in code.">
         <TextInput type="email" required autoFocus value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
       </Field>
-      <Field label="Nombre" error={errors.displayName}>
+      <Field label="Name" error={errors.displayName}>
         <TextInput required value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
       </Field>
-      <Field label="Rol" error={errors.roleId}>
+      <Field label="Role" error={errors.roleId}>
         <SelectInput required value={form.roleId || ""} onChange={(e) => setForm({ ...form, roleId: Number(e.target.value) })}>
           <option value="" disabled>
-            Elige un rol
+            Choose a role
           </option>
           {roles.data?.map((r) => (
             <option key={r.id} value={r.id}>
@@ -186,10 +186,10 @@ function UserForm({ existing, onDone }: { existing?: AppUser; onDone: () => void
       </Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="secondary" onClick={onDone}>
-          Cancelar
+          Cancel
         </Button>
         <Button type="submit" busy={save.isPending}>
-          {existing ? "Guardar" : "Agregar usuario"}
+          {existing ? "Save" : "Add user"}
         </Button>
       </div>
     </form>

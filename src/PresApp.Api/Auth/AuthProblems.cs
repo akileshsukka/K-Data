@@ -10,7 +10,7 @@ public static class AuthProblems
         {
             status,
             code,
-            title = status == 401 ? "Sin acceso" : "Prohibido",
+            title = status == 401 ? "No access" : "Forbidden",
             detail
         });
     }

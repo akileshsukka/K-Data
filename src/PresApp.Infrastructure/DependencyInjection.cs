@@ -23,6 +23,7 @@ public static class DependencyInjection
             options.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
         });
         services.AddScoped<DatabaseSeeder>();
+        services.AddScoped<SharePointMigration.SharePointImporter>();
         return services;
     }
 }

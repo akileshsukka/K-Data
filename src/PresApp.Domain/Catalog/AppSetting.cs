@@ -13,4 +13,6 @@ public static class AppSettingKeys
     public const string ExcelMaxAgeHours = "Excel.MaxAgeHours";
     public const string SimproScheduleEnabled = "Simpro.Schedule.Enabled";
     public const string SimproScheduleTime = "Simpro.Schedule.TimeLocal";
+    public const string MonitoringIntervalDays = "Monitoring.IntervalDays";
+    public const string MonitoringMinN2Barg = "Monitoring.MinN2Barg";
 }

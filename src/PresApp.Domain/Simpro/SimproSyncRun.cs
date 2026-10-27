@@ -32,6 +32,7 @@ public class SimproSyncRun
     public int FieldCount { get; set; }
     public int HeldCount { get; set; }
     public int RejectedCount { get; set; }
+    public int NotInAppCount { get; set; }
     public string? Message { get; set; }
     public long? UndoOfRunId { get; set; }
     public List<SimproSyncItem> Items { get; set; } = [];
@@ -45,8 +46,11 @@ public class SimproSyncItem
     public SimproSyncRun Run { get; set; } = null!;
     public Guid AssetId { get; set; }
     public string AssetCode { get; set; } = "";
+    public string? AssetTag { get; set; }
+    public int? UnitId { get; set; }
     public string Field { get; set; } = "";
     public string? SimproValue { get; set; }
+    public string? LastSyncedValue { get; set; }
     public string? NewValue { get; set; }
     public string Outcome { get; set; } = "";
     public string? Reason { get; set; }
@@ -60,4 +64,12 @@ public class SimproBeforeImage
     public string TableName { get; set; } = "";
     public string RowKey { get; set; } = "";
     public string RowJson { get; set; } = "";
+}
+
+/// <summary>An equipment an administrator decided K Data wins for (conflict or Simpro edit); used by the next sync.</summary>
+public class SimproForcedAsset
+{
+    public Guid AssetId { get; set; }
+    public string RequestedBy { get; set; } = "";
+    public DateTime RequestedAtUtc { get; set; }
 }

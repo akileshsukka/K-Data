@@ -55,7 +55,7 @@ public static class AdminUserEndpoints
             if (problem is not null) return problem;
             if (await WouldRemoveLastAdminAsync(db, user, request.RoleId, stillActive: user.IsActive, ct))
             {
-                return Results.Problem("Debe quedar al menos un administrador activo.", statusCode: 409);
+                return Results.Problem("At least one active administrator must remain.", statusCode: 409);
             }
 
             var oldEmail = user.Email;
@@ -66,7 +66,7 @@ public static class AdminUserEndpoints
             directory.Invalidate(oldEmail);
             directory.Invalidate(user.Email);
 
-            var cf = new CloudflareResult(cloudflare.IsConfigured, true, "Sin cambios en Cloudflare.");
+            var cf = new CloudflareResult(cloudflare.IsConfigured, true, "No changes in Cloudflare.");
             if (oldEmail != user.Email)
             {
                 cf = await SyncCloudflareAsync(db, cloudflare, ct);
@@ -82,11 +82,11 @@ public static class AdminUserEndpoints
             if (user is null) return Results.NotFound();
             if (!active && string.Equals(user.Email, http.User.Identity?.Name, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Problem("No puedes desactivar tu propio usuario.", statusCode: 409);
+                return Results.Problem("You cannot deactivate your own user.", statusCode: 409);
             }
             if (!active && await WouldRemoveLastAdminAsync(db, user, user.RoleId, stillActive: false, ct))
             {
-                return Results.Problem("Debe quedar al menos un administrador activo.", statusCode: 409);
+                return Results.Problem("At least one active administrator must remain.", statusCode: 409);
             }
 
             user.IsActive = active;
@@ -118,9 +118,9 @@ public static class AdminUserEndpoints
         {
             var role = await db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Id == id, ct);
             if (role is null) return Results.NotFound();
-            if (role.Name == RoleNames.Admin) return Results.Problem("Los permisos del rol Admin no se pueden reducir.", statusCode: 409);
+            if (role.Name == RoleNames.Admin) return Results.Problem("The Admin role always keeps every permission.", statusCode: 409);
             var unknown = request.Permissions.Where(p => !Permissions.IsKnown(p)).ToList();
-            if (unknown.Count > 0) return Results.Problem($"Permisos desconocidos: {string.Join(", ", unknown)}", statusCode: 400);
+            if (unknown.Count > 0) return Results.Problem($"Unknown permissions: {string.Join(", ", unknown)}", statusCode: 400);
 
             role.Permissions.RemoveAll(p => !request.Permissions.Contains(p.Permission));
             foreach (var p in request.Permissions.Distinct().Where(p => role.Permissions.All(x => x.Permission != p)))
@@ -150,15 +150,15 @@ public static class AdminUserEndpoints
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(request.Email) || !MailAddress.TryCreate(request.Email.Trim(), out _))
         {
-            errors["email"] = ["Correo no válido."];
+            errors["email"] = ["Enter a valid e-mail."];
         }
         else
         {
             var email = AppUser.NormalizeEmail(request.Email);
-            if (await db.Users.AnyAsync(u => u.Email == email && u.Id != id, ct)) errors["email"] = ["Ese correo ya existe."];
+            if (await db.Users.AnyAsync(u => u.Email == email && u.Id != id, ct)) errors["email"] = ["That e-mail is already registered."];
         }
-        if (string.IsNullOrWhiteSpace(request.DisplayName)) errors["displayName"] = ["Escribe el nombre."];
-        if (!await db.Roles.AnyAsync(r => r.Id == request.RoleId, ct)) errors["roleId"] = ["Rol no válido."];
+        if (string.IsNullOrWhiteSpace(request.DisplayName)) errors["displayName"] = ["Enter the name."];
+        if (!await db.Roles.AnyAsync(r => r.Id == request.RoleId, ct)) errors["roleId"] = ["Choose a valid role."];
         return errors.Count == 0 ? null : Results.ValidationProblem(errors);
     }
 

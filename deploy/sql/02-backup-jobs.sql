@@ -21,7 +21,9 @@ DECLARE @JobName     sysname       = N'PresApp - Backups';
 IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = @JobName)
     EXEC msdb.dbo.sp_delete_job @job_name = @JobName;
 
-EXEC msdb.dbo.sp_add_job @job_name = @JobName, @description = N'Full daily, differential every 4 h, 30-day retention, second copy.';
+-- Owner "sa": a local Windows user as owner fails with error 15404 (SQL Agent cannot resolve it).
+EXEC msdb.dbo.sp_add_job @job_name = @JobName, @owner_login_name = N'sa',
+     @description = N'Full daily, differential every 4 h, 30-day retention, second copy.';
 
 DECLARE @full nvarchar(max) = N'
 DECLARE @f nvarchar(400) = N''' + @LocalFolder + N'\PresApp_FULL_'' + FORMAT(SYSDATETIME(), ''yyyyMMdd_HHmm'') + N''.bak'';

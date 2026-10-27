@@ -452,6 +452,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<bool>("ShowInRegister")
+                        .HasColumnType("bit");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
@@ -545,6 +548,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasPrecision(12, 3)
                         .HasColumnType("decimal(12,3)");
 
+                    b.Property<string>("PidNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("PipeSpec")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -554,6 +561,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<string>("Service")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal?>("SizeIn")
                         .HasPrecision(8, 3)
@@ -631,6 +642,40 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Discipline", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Catalog.LineCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Code")
+                        .IsUnique();
+
+                    b.ToTable("LineCode", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Catalog.MeasurementType", b =>
@@ -740,6 +785,46 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("OptionValue", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Catalog.PipeSpec", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FlangeType")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Gasket")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PressureClass")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("PipeSpec", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Catalog.Plant", b =>
@@ -985,6 +1070,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<string>("BaseJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("ExportedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -993,11 +1082,19 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
                     b.Property<int>("FormatVersion")
                         .HasColumnType("int");
 
                     b.Property<DateTime?>("ProcessedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("RowCount")
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1013,9 +1110,36 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UnitId");
+                    b.HasIndex("UnitId", "ExportedAtUtc");
 
                     b.ToTable("ExcelSession", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Imports.ExcelTemplate", b =>
+                {
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("UnitId");
+
+                    b.ToTable("ExcelTemplate", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Imports.ImportChange", b =>
@@ -1032,6 +1156,10 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("AssetId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AssetTag")
+                        .HasMaxLength(55)
+                        .HasColumnType("nvarchar(55)");
 
                     b.Property<string>("BaseValue")
                         .HasColumnType("nvarchar(max)");
@@ -1078,6 +1206,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<int?>("RowNumber")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AssetId");
@@ -1087,6 +1218,20 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.HasIndex("Resolution", "ImportRunId");
 
                     b.ToTable("ImportChange", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Imports.ImportFile", b =>
+                {
+                    b.Property<long>("ImportRunId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.HasKey("ImportRunId");
+
+                    b.ToTable("ImportFile", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Imports.ImportRun", b =>
@@ -1119,6 +1264,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Property<string>("Message")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("RowsInFile")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uniqueidentifier");
@@ -1466,6 +1614,25 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.ToTable("SimproBeforeImage", (string)null);
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Simpro.SimproForcedAsset", b =>
+                {
+                    b.Property<Guid>("AssetId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("AssetId");
+
+                    b.ToTable("SimproForcedAsset", (string)null);
+                });
+
             modelBuilder.Entity("PresApp.Domain.Simpro.SimproSyncItem", b =>
                 {
                     b.Property<long>("Id")
@@ -1482,10 +1649,17 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Property<Guid>("AssetId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AssetTag")
+                        .HasMaxLength(55)
+                        .HasColumnType("nvarchar(55)");
+
                     b.Property<string>("Field")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("LastSyncedValue")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("NewValue")
                         .HasColumnType("nvarchar(max)");
@@ -1504,6 +1678,9 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.Property<string>("SimproValue")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("UnitId")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -1542,6 +1719,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("NotInAppCount")
+                        .HasColumnType("int");
 
                     b.Property<int>("RejectedCount")
                         .HasColumnType("int");
@@ -1723,11 +1903,33 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Navigation("Unit");
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Imports.ExcelTemplate", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
+                        .WithOne()
+                        .HasForeignKey("PresApp.Domain.Imports.ExcelTemplate", "UnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Unit");
+                });
+
             modelBuilder.Entity("PresApp.Domain.Imports.ImportChange", b =>
                 {
                     b.HasOne("PresApp.Domain.Imports.ImportRun", "ImportRun")
                         .WithMany("Changes")
                         .HasForeignKey("ImportRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ImportRun");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Imports.ImportFile", b =>
+                {
+                    b.HasOne("PresApp.Domain.Imports.ImportRun", "ImportRun")
+                        .WithOne()
+                        .HasForeignKey("PresApp.Domain.Imports.ImportFile", "ImportRunId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

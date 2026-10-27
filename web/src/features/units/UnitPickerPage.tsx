@@ -8,10 +8,10 @@ export function UnitPickerPage() {
 
   return (
     <section>
-      <h1 className="text-[2rem] leading-tight font-semibold">¿En qué unidad vas a trabajar?</h1>
-      <p className="mt-1 text-muted">Todo lo que veas y cargues quedará dentro de esa unidad. Puedes cambiarla cuando quieras.</p>
+      <h1 className="text-[2rem] leading-tight font-semibold">Which unit are you working on?</h1>
+      <p className="mt-1 text-muted">Everything you see and record stays within that unit. You can change it at any time.</p>
 
-      {plants.isPending && <p className="mt-8 text-muted">Cargando unidades…</p>}
+      {plants.isPending && <p className="mt-8 text-muted">Loading units…</p>}
       {plants.error && <p className="mt-8 text-hold">{plants.error.message}</p>}
 
       <div className="mt-8 space-y-10">
@@ -26,7 +26,7 @@ export function UnitPickerPage() {
                     onClick={() => lastUnit.set(unit.id)}
                     className="group flex h-full flex-col rounded-lg border border-line bg-panel px-4 pt-3 pb-4 transition-colors hover:border-violet focus-visible:border-violet"
                   >
-                    <span className="text-sm text-muted">{unit.id === last ? "Última que usaste" : "Unit"}</span>
+                    <span className="text-sm text-muted">{unit.id === last ? "Last used" : "Unit"}</span>
                     <span className="font-display text-[3.25rem] leading-none font-bold tracking-tight text-ink group-hover:text-violet">
                       {unit.number}
                     </span>

@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="ClosedXML" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="PresApp.Tests" />

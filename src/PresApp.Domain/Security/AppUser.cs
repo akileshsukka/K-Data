@@ -44,9 +44,9 @@ public class RolePermission
 
 public static class RoleNames
 {
-    public const string Viewer = "Consulta";
-    public const string FieldTechnician = "Técnico de campo";
-    public const string Engineer = "Ingeniero";
+    public const string Viewer = "Viewer";
+    public const string FieldTechnician = "Field Technician";
+    public const string Engineer = "Engineer";
     public const string Admin = "Admin";
 }
 

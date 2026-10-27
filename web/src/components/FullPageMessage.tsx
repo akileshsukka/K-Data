@@ -13,7 +13,7 @@ export function FullPageMessage({
   return (
     <main className="grid min-h-dvh place-items-center bg-ink px-6 text-white">
       <div className="max-w-md">
-        <p className="font-display text-lg font-semibold text-lilac">PresApp</p>
+        <p className="font-display text-lg font-semibold text-lilac">K Data</p>
         <h1 className="mt-2 font-display text-3xl font-semibold text-white">{title}</h1>
         {detail && <p className="mt-3 text-white/80">{detail}</p>}
         {action && (

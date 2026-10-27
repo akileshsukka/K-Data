@@ -6,7 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 export function RequirePermission({ permission }: { permission: string }) {
   const session = useSession();
   if (!session.can(permission)) {
-    return <PageHeader title="Sin permiso" description="Tu rol no incluye esta sección. Si la necesitas, pídela a un administrador." />;
+    return <PageHeader title="No permission" description="Your role does not include this section. Ask an administrator if you need it." />;
   }
   return <Outlet />;
 }

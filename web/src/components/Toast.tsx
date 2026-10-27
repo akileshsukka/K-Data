@@ -17,7 +17,7 @@ const toneStyle: Record<Tone, string> = {
   info: "border-l-violet",
 };
 
-/** Short confirmations of what just happened ("Usuario creado"). Errors stay longer. */
+/** Short confirmations of what just happened ("User added"). Errors stay longer. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
 

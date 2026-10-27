@@ -82,3 +82,29 @@ internal sealed class AppSettingConfiguration : IEntityTypeConfiguration<AppSett
         b.Property(x => x.Description).HasMaxLength(500);
     }
 }
+
+internal sealed class LineCodeConfiguration : IEntityTypeConfiguration<LineCode>
+{
+    public void Configure(EntityTypeBuilder<LineCode> b)
+    {
+        b.ToTable("LineCode");
+        b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
+        b.Property(x => x.Code).HasMaxLength(LineCode.CodeLength).IsRequired();
+        b.Property(x => x.Description).HasMaxLength(LineCode.DescriptionLength).IsRequired();
+        b.HasIndex(x => new { x.Kind, x.Code }).IsUnique();
+    }
+}
+
+internal sealed class PipeSpecConfiguration : IEntityTypeConfiguration<PipeSpec>
+{
+    public void Configure(EntityTypeBuilder<PipeSpec> b)
+    {
+        b.ToTable("PipeSpec");
+        b.Property(x => x.Code).HasMaxLength(PipeSpec.CodeLength).IsRequired();
+        b.Property(x => x.PressureClass).HasMaxLength(PipeSpec.ClassLength);
+        b.Property(x => x.FlangeType).HasMaxLength(PipeSpec.FlangeLength);
+        b.Property(x => x.Gasket).HasMaxLength(PipeSpec.GasketLength);
+        b.Property(x => x.Description).HasMaxLength(PipeSpec.DescriptionLength);
+        b.HasIndex(x => x.Code).IsUnique();
+    }
+}

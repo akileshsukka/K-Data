@@ -77,4 +77,26 @@ public sealed class AuthorizationTests : IClassFixture<TestApp>
             .PutAsJsonAsync($"/api/admin/roles/{adminRole}/permissions", new { permissions = new[] { Permissions.AssetsView } });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Only_roles_with_the_permission_see_the_Excel_page_and_where_changes_came_from()
+    {
+        const string email = "engineer-src@enermech.com";
+        await app.AddUserAsync(email, RoleNames.Engineer);
+        var engineer = app.ClientFor(email);
+        var admin = app.ClientFor(TestApp.AdminEmail);
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 39").Select(u => u.Id).FirstAsync());
+        var disciplineId = await app.WithDbAsync(db => db.Disciplines.Where(d => d.Name == "Static").Select(d => d.Id).FirstAsync());
+        var created = await (await admin.PostAsJsonAsync("/api/assets", new { type = "Equipment", unitId, disciplineId, tag = "39-SRC-1" })).Content.ReadFromJsonAsync<JsonElement>();
+        var id = created.GetProperty("id").GetString();
+
+        var forAdmin = await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{id}/history");
+        Assert.All(forAdmin.EnumerateArray(), h => Assert.Equal(JsonValueKind.String, h.GetProperty("source").ValueKind));
+        var forEngineer = await engineer.GetFromJsonAsync<JsonElement>($"/api/assets/{id}/history");
+        Assert.NotEmpty(forEngineer.EnumerateArray());
+        Assert.All(forEngineer.EnumerateArray(), h => Assert.Equal(JsonValueKind.Null, h.GetProperty("source").ValueKind));
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await engineer.GetAsync($"/api/units/{unitId}/excel")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync($"/api/units/{unitId}/excel")).StatusCode);
+    }
 }

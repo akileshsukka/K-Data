@@ -49,8 +49,8 @@ public static class AuthSetup
                         if (!EmergencyAccess.IsEmergencyRequest(ctx.HttpContext, options)) ctx.RejectPrincipal();
                         return Task.CompletedTask;
                     },
-                    OnRedirectToLogin = ctx => AuthProblems.WriteAsync(ctx.HttpContext, 401, "emergency_login", "Inicia sesión de emergencia."),
-                    OnRedirectToAccessDenied = ctx => AuthProblems.WriteAsync(ctx.HttpContext, 403, "forbidden", "No tienes permiso para esta acción.")
+                    OnRedirectToLogin = ctx => AuthProblems.WriteAsync(ctx.HttpContext, 401, "emergency_login", "Sign in with the emergency login."),
+                    OnRedirectToAccessDenied = ctx => AuthProblems.WriteAsync(ctx.HttpContext, 403, "forbidden", "You do not have permission for this action.")
                 };
             });
 

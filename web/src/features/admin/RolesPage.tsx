@@ -38,9 +38,9 @@ export function RolesPage() {
     try {
       for (const role of dirty) await save.mutateAsync({ id: role.id, permissions: [...current(role)] });
       setDraft({});
-      toast("Permisos guardados. Se aplican en menos de un minuto.");
+      toast("Permissions saved. They apply within a minute.");
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "No se pudieron guardar los permisos.", "error");
+      toast(err instanceof ApiError ? err.message : "Could not save the permissions.", "error");
     }
   }
 
@@ -48,35 +48,35 @@ export function RolesPage() {
     <div>
       <AdminTabs />
       <PageHeader
-        title="Roles y permisos"
-        description="Marca lo que puede hacer cada rol. El servidor revisa estos permisos en cada acción."
+        title="Roles and permissions"
+        description="Tick what each role can do. The server checks these permissions on every action."
         actions={
           <>
             {dirty.length > 0 && (
               <Button variant="secondary" onClick={() => setDraft({})}>
-                Descartar
+                Discard
               </Button>
             )}
             <Button disabled={dirty.length === 0} busy={save.isPending} onClick={saveAll}>
-              Guardar cambios
+              Save changes
             </Button>
           </>
         }
       />
 
-      {(roles.isPending || catalog.isPending) && <p className="mt-6 text-muted">Cargando…</p>}
+      {(roles.isPending || catalog.isPending) && <p className="mt-6 text-muted">Loading…</p>}
 
       {roles.data && catalog.data && (
         <div className="mt-6 overflow-x-auto rounded-lg border border-line bg-panel">
           <table className="w-full min-w-[44rem] border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 border-b border-line bg-panel px-4 py-3 text-left font-display font-semibold text-muted">Permiso</th>
+                <th className="sticky left-0 border-b border-line bg-panel px-4 py-3 text-left font-display font-semibold text-muted">Permission</th>
                 {roles.data.map((r) => (
                   <th key={r.id} className="border-b border-line px-3 py-3 text-center font-display font-semibold text-ink">
                     {r.name}
                     <span className="block text-sm font-normal text-muted">
-                      {r.userCount} {r.userCount === 1 ? "usuario" : "usuarios"}
+                      {r.userCount} {r.userCount === 1 ? "user" : "users"}
                     </span>
                   </th>
                 ))}

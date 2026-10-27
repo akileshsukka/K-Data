@@ -28,6 +28,8 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<OptionSet> OptionSets => Set<OptionSet>();
     public DbSet<OptionValue> OptionValues => Set<OptionValue>();
     public DbSet<Discipline> Disciplines => Set<Discipline>();
+    public DbSet<LineCode> LineCodes => Set<LineCode>();
+    public DbSet<PipeSpec> PipeSpecs => Set<PipeSpec>();
     public DbSet<MeasurementType> MeasurementTypes => Set<MeasurementType>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
 
@@ -47,9 +49,12 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<ExcelSession> ExcelSessions => Set<ExcelSession>();
     public DbSet<ImportRun> ImportRuns => Set<ImportRun>();
     public DbSet<ImportChange> ImportChanges => Set<ImportChange>();
+    public DbSet<ImportFile> ImportFiles => Set<ImportFile>();
+    public DbSet<ExcelTemplate> ExcelTemplates => Set<ExcelTemplate>();
     public DbSet<SimproSyncRun> SimproSyncRuns => Set<SimproSyncRun>();
     public DbSet<SimproSyncItem> SimproSyncItems => Set<SimproSyncItem>();
     public DbSet<SimproBeforeImage> SimproBeforeImages => Set<SimproBeforeImage>();
+    public DbSet<SimproForcedAsset> SimproForcedAssets => Set<SimproForcedAsset>();
 
     // Security
     public DbSet<AppUser> Users => Set<AppUser>();

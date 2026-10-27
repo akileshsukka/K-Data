@@ -23,6 +23,15 @@ public class ExcelSession
     public DateTime? ProcessedAtUtc { get; set; }
     public int FormatVersion { get; set; }
 
+    public string FileName { get; set; } = "";
+    public int RowCount { get; set; }
+
     /// <summary>JSON of the exact table headers and positions, checked before any import.</summary>
     public string StructureSignature { get; set; } = "";
+
+    /// <summary>
+    /// JSON of every exported value per asset (kept on the server, not in the file), used to tell
+    /// which cells the engineer changed and whether the app changed them meanwhile.
+    /// </summary>
+    public string BaseJson { get; set; } = "";
 }

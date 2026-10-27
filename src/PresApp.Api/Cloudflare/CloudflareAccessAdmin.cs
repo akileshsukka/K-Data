@@ -56,12 +56,12 @@ public sealed class CloudflareAccessAdmin(HttpClient http, IOptions<CloudflareOp
             put.Content = new StringContent(payload.ToJsonString(), System.Text.Encoding.UTF8, "application/json");
             using var response = await http.SendAsync(put, ct);
             await ReadAsync(response, ct);
-            return new CloudflareResult(true, true, "Lista de Cloudflare actualizada.");
+            return new CloudflareResult(true, true, "Cloudflare allow-list updated.");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Cloudflare allow-list sync failed");
-            return new CloudflareResult(true, false, "No se pudo actualizar Cloudflare: " + ex.Message);
+            return new CloudflareResult(true, false, "Could not update Cloudflare: " + ex.Message);
         }
     }
 
@@ -75,12 +75,12 @@ public sealed class CloudflareAccessAdmin(HttpClient http, IOptions<CloudflareOp
             post.Content = new StringContent(JsonSerializer.Serialize(new { email }), System.Text.Encoding.UTF8, "application/json");
             using var response = await http.SendAsync(post, ct);
             await ReadAsync(response, ct);
-            return new CloudflareResult(true, true, "Sesiones de Cloudflare revocadas.");
+            return new CloudflareResult(true, true, "Cloudflare sessions revoked.");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Cloudflare session revoke failed for {Email}", email);
-            return new CloudflareResult(true, false, "No se pudieron revocar las sesiones en Cloudflare: " + ex.Message);
+            return new CloudflareResult(true, false, "Could not revoke the Cloudflare sessions: " + ex.Message);
         }
     }
 
@@ -104,5 +104,5 @@ public sealed class CloudflareAccessAdmin(HttpClient http, IOptions<CloudflareOp
     }
 
     private static CloudflareResult NotConfigured() =>
-        new(false, false, "Cloudflare no está configurado: agrega o quita el correo a mano en Cloudflare Access.");
+        new(false, false, "Cloudflare is not configured: add or remove the e-mail by hand in Cloudflare Access.");
 }

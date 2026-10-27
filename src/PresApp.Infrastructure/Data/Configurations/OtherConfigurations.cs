@@ -124,7 +124,31 @@ internal sealed class ExcelSessionConfiguration : IEntityTypeConfiguration<Excel
         b.Property(x => x.AssetType).HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         b.Property(x => x.ExportedBy).HasMaxLength(256);
+        b.Property(x => x.FileName).HasMaxLength(260);
+        b.HasIndex(x => new { x.UnitId, x.ExportedAtUtc });
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class ExcelTemplateConfiguration : IEntityTypeConfiguration<ExcelTemplate>
+{
+    public void Configure(EntityTypeBuilder<ExcelTemplate> b)
+    {
+        b.ToTable("ExcelTemplate");
+        b.HasKey(x => x.UnitId);
+        b.Property(x => x.FileName).HasMaxLength(260);
+        b.Property(x => x.UploadedBy).HasMaxLength(256);
+        b.HasOne(x => x.Unit).WithOne().HasForeignKey<ExcelTemplate>(x => x.UnitId);
+    }
+}
+
+internal sealed class ImportFileConfiguration : IEntityTypeConfiguration<ImportFile>
+{
+    public void Configure(EntityTypeBuilder<ImportFile> b)
+    {
+        b.ToTable("ImportFile");
+        b.HasKey(x => x.ImportRunId);
+        b.HasOne(x => x.ImportRun).WithOne().HasForeignKey<ImportFile>(x => x.ImportRunId);
     }
 }
 
@@ -149,6 +173,7 @@ internal sealed class ImportChangeConfiguration : IEntityTypeConfiguration<Impor
     {
         b.ToTable("ImportChange");
         b.Property(x => x.AssetCode).HasMaxLength(40);
+        b.Property(x => x.AssetTag).HasMaxLength(55);
         b.Property(x => x.Field).HasMaxLength(128);
         b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(20);
         b.Property(x => x.Resolution).HasConversion<string>().HasMaxLength(20);
@@ -181,10 +206,21 @@ internal sealed class SimproSyncItemConfiguration : IEntityTypeConfiguration<Sim
         b.ToTable("SimproSyncItem");
         b.Property(x => x.AssetCode).HasMaxLength(40);
         b.Property(x => x.Field).HasMaxLength(128);
+        b.Property(x => x.AssetTag).HasMaxLength(55);
         b.Property(x => x.Outcome).HasMaxLength(30);
         b.Property(x => x.Reason).HasMaxLength(1000);
         b.HasIndex(x => x.AssetId);
         b.HasOne(x => x.Run).WithMany(x => x.Items).HasForeignKey(x => x.RunId);
+    }
+}
+
+internal sealed class SimproForcedAssetConfiguration : IEntityTypeConfiguration<SimproForcedAsset>
+{
+    public void Configure(EntityTypeBuilder<SimproForcedAsset> b)
+    {
+        b.ToTable("SimproForcedAsset");
+        b.HasKey(x => x.AssetId);
+        b.Property(x => x.RequestedBy).HasMaxLength(256);
     }
 }
 

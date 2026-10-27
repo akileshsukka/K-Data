@@ -4,7 +4,7 @@
 .DESCRIPTION
   - Copies .\publish to the install folder (default C:\PresApp\app), keeping appsettings.Production.json.
   - Creates the "PresApp" service (automatic start, restart on failure) running as the
-    virtual account NT SERVICE\PresApp, which needs the SQL login from sql\01-create-database.sql.
+    virtual account NT SERVICE\PresApp, and gives that account its SQL login on the database (sqlcmd).
   - On updates, backs up the database first (requires sqlcmd).
 .EXAMPLE
   .\deploy\install-service.ps1 -SqlServer "localhost"
@@ -42,7 +42,8 @@ if (-not (Test-Path $prod)) {
     @"
 {
   "ConnectionStrings": {
-    "PresApp": "Server=$SqlServer;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True;Application Name=PresApp"
+    "PresApp": "Server=$SqlServer;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True;Application Name=PresApp",
+    "Simpro": "Server=$SqlServer;Database=Preservation;Trusted_Connection=True;TrustServerCertificate=True;Application Name=K Data sync"
   },
   "Auth": {
     "CloudflareTeamDomain": "<team>.cloudflareaccess.com",
@@ -68,6 +69,20 @@ if (-not $service) {
     sc.exe failure $serviceName reset= 86400 actions= restart/10000/restart/30000/restart/60000 | Out-Null
     [Environment]::SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Production", "Machine")
 }
+
+# The service account NT SERVICE\PresApp exists now: give it its SQL login and db_owner on the PresApp database
+# (safe to repeat on every update).
+Write-Host "Granting the service access to $Database..." -ForegroundColor Cyan
+$grant = @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'NT SERVICE\$serviceName')
+    CREATE LOGIN [NT SERVICE\$serviceName] FROM WINDOWS WITH DEFAULT_DATABASE = [$Database];
+USE [$Database];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'NT SERVICE\$serviceName')
+    CREATE USER [NT SERVICE\$serviceName] FOR LOGIN [NT SERVICE\$serviceName];
+ALTER ROLE [db_owner] ADD MEMBER [NT SERVICE\$serviceName];
+"@
+sqlcmd -S $SqlServer -E -b -Q $grant
+if ($LASTEXITCODE -ne 0) { throw "Could not grant the service access to $Database. Run deploy\sql\01-create-database.sql first and check that you are a SQL Server sysadmin." }
 
 Start-Service $serviceName
 Start-Sleep -Seconds 5

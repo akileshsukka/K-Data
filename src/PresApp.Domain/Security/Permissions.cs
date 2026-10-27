@@ -15,6 +15,8 @@ public static class Permissions
     public const string BulkEdit = "bulk.edit";
     public const string AssetsManage = "assets.manage";
     public const string ExcelImport = "excel.import";
+    public const string ExcelPage = "excel.page";
+    public const string HistorySource = "history.source";
     public const string GroupsManage = "groups.manage";
     public const string CategoriesManage = "categories.manage";
     public const string SimproSync = "simpro.sync";
@@ -23,20 +25,22 @@ public static class Permissions
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
-        new(AssetsView, "Ver registros, dashboards e historial"),
-        new(ExcelExport, "Descargar Excel de una unidad"),
-        new(ReadingsWrite, "Registrar lecturas de monitoreo"),
-        new(GatesEdit, "Editar estados de gates y comentarios"),
-        new(AssetsEdit, "Editar el resto de campos y la documentación por gate"),
-        new(AssetsMarkPreserved, "Marcar un activo como preservado"),
-        new(BulkEdit, "Edición masiva"),
-        new(AssetsManage, "Crear, desactivar o reactivar activos"),
-        new(ExcelImport, "Cargar Excel y resolver incidencias de carga"),
-        new(GroupsManage, "Workpacks"),
-        new(CategoriesManage, "Categorías del dashboard"),
-        new(SimproSync, "Sincronizar con Simpro"),
-        new(CatalogManage, "Catálogos y campos dinámicos"),
-        new(UsersManage, "Usuarios y roles"),
+        new(AssetsView, "View registers, dashboards and history"),
+        new(ExcelExport, "Download a unit Excel"),
+        new(ReadingsWrite, "Record monitoring readings"),
+        new(GatesEdit, "Edit gate statuses and comments"),
+        new(AssetsEdit, "Edit all other fields and gate documentation"),
+        new(AssetsMarkPreserved, "Mark an asset as preserved"),
+        new(BulkEdit, "Bulk edit"),
+        new(AssetsManage, "Create, deactivate or reactivate assets"),
+        new(ExcelImport, "Upload Excel files and resolve import issues"),
+        new(ExcelPage, "See the Excel page (downloads and uploads of the unit file)"),
+        new(HistorySource, "See where each change came from in the history (App, Excel, Bulk edit, Simpro…)"),
+        new(GroupsManage, "Manage workpacks"),
+        new(CategoriesManage, "Manage dashboard categories"),
+        new(SimproSync, "Sync with Simpro"),
+        new(CatalogManage, "Manage lists and custom fields"),
+        new(UsersManage, "Manage users and roles"),
     ];
 
     public static bool IsKnown(string permission) => All.Any(p => p.Key == permission);
