@@ -8,6 +8,7 @@ import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 import { PipingSummaryCards } from "../lines/PipingSummaryCards";
+import { ExportPdfButton } from "./UnitDashboardPdf";
 
 /**
  * Unit overview = the client dashboard, computed by the API exactly like the Dashboard sheet of the unit Excel
@@ -45,6 +46,7 @@ export function UnitHomePage() {
         description={`${plantName} · preservation dashboard`}
         actions={
           <>
+            {d && d.totalTags + d.lineCount > 0 && <ExportPdfButton unitName={unit.name} plantName={plantName ?? ""} dashboard={d} />}
             {session.can(Perm.excelExport) && <DownloadExcelButton unitId={unit.id} variant="secondary" />}
             {session.can(Perm.assetsManage) && (
               <Link to={`/u/${unit.id}/new`} className="inline-flex min-h-10 items-center rounded-md bg-violet px-4 font-semibold text-white hover:bg-violet-dark">New equipment</Link>
@@ -66,12 +68,7 @@ export function UnitHomePage() {
       {d && d.totalTags > 0 && (
         <>
           <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Key figures">
-            <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" />
-            <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis />
-            <Stat label="Ready for preservation" value={d.readyForPreservation} detail="G4 ongoing" />
-            <Stat label="On hold" value={d.totalHold} detail="By hold category" />
-            <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" />
-            <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" />
+            <KeyFigures d={d} />
           </section>
 
           <section className="mt-6 rounded-lg border border-line bg-panel p-5">
@@ -89,33 +86,7 @@ export function UnitHomePage() {
           <section className="mt-6 rounded-lg border border-line bg-panel">
             <h2 className="px-5 pt-5 text-xl font-semibold">Discipline-wise status</h2>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-left">
-                <thead className="text-sm text-muted">
-                  <tr>
-                    {["Discipline", "Total tags", "Walkdown", "G1", "G2", "G3", "G4", "EU preserved", "Overall progress"].map((h, i) => (
-                      <th key={h} className={`border-b border-line px-4 py-2 font-semibold ${i > 0 ? "text-right" : ""}`}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.disciplines.map((r) => (
-                    <tr key={r.discipline} className="border-b border-line last:border-0">
-                      <td className="px-4 py-2.5 font-semibold text-ink">{r.discipline}</td>
-                      {[r.total, r.walkdown, r.g1, r.g2, r.g3, r.g4, r.euPreserved].map((n, i) => (
-                        <td key={i} className="px-4 py-2.5 text-right tabular-nums">{n}</td>
-                      ))}
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-end gap-2">
-                          <span className="h-2 w-20 rounded-full bg-surface">
-                            <span className="block h-2 rounded-full bg-violet" style={{ width: `${Math.min(100, r.progressPct)}%` }} />
-                          </span>
-                          <span className="w-12 text-right tabular-nums">{r.progressPct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DisciplineTable rows={d.disciplines} className="min-w-[40rem]" />
             </div>
           </section>
 
@@ -141,6 +112,59 @@ export function UnitHomePage() {
   );
 }
 
+/** The six key figures; the caller sets the grid. Also used by the PDF export. */
+export function KeyFigures({ d }: { d: Dashboard }) {
+  return (
+    <>
+      <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" />
+      <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis />
+      <Stat label="Ready for preservation" value={d.readyForPreservation} detail="G4 ongoing" />
+      <Stat label="On hold" value={d.totalHold} detail="By hold category" />
+      <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" />
+      <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" />
+    </>
+  );
+}
+
+/** Discipline-wise status table. Also used by the PDF export. */
+export function DisciplineTable({ rows, className = "" }: { rows: Dashboard["disciplines"]; className?: string }) {
+  return (
+    <table className={`w-full text-left ${className}`}>
+      <thead className="text-sm text-muted">
+        <tr>
+          {["Discipline", "Total tags", "Walkdown", "G1", "G2", "G3", "G4", "EU preserved", "Overall progress"].map((h, i) => (
+            <th key={h} className={`border-b border-line px-4 py-2 font-semibold ${i > 0 ? "text-right" : ""}`}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.discipline} className="border-b border-line last:border-0">
+            <td className="px-4 py-2.5 font-semibold text-ink">{r.discipline}</td>
+            {[r.total, r.walkdown, r.g1, r.g2, r.g3, r.g4, r.euPreserved].map((n, i) => (
+              <td key={i} className="px-4 py-2.5 text-right tabular-nums">{n}</td>
+            ))}
+            <td className="px-4 py-2.5">
+              <div className="flex items-center justify-end gap-2">
+                <span className="h-2 w-20 rounded-full bg-surface">
+                  <span className="block h-2 rounded-full bg-violet" style={{ width: `${Math.min(100, r.progressPct)}%` }} />
+                </span>
+                <span className="w-12 text-right tabular-nums">{r.progressPct}%</span>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** The line under a category name (action by, e-mail action, recommendation, note, or its keywords). */
+export function categoryDetail(c: CategoryRow, byKeyword: boolean) {
+  return [c.actionBy && `Action by ${c.actionBy}`, c.emailAction, c.recommendation, c.note].filter(Boolean).join(" · ") ||
+    (byKeyword && c.keywords.length > 0 ? `Keywords: ${c.keywords.join(", ")}` : "");
+}
+
 function Stat({ label, value, detail, emphasis = false }: { label: string; value: number; detail: string; emphasis?: boolean }) {
   return (
     <div className={`rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`}>
@@ -158,7 +182,7 @@ const segments = [
   { key: "other", label: "N/A or other", color: "bg-na/45" },
 ] as const;
 
-function Legend() {
+export function Legend() {
   return (
     <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
       {segments.map((s) => (
@@ -169,7 +193,7 @@ function Legend() {
 }
 
 /** One stacked bar per activity; the numbers are always written next to it, so colour never carries meaning alone. */
-function ActivityBar({ row }: { row: ActivityRow }) {
+export function ActivityBar({ row }: { row: ActivityRow }) {
   const visible = segments.filter((s) => row[s.key] > 0);
   return (
     <li>
@@ -219,8 +243,7 @@ function CategoryPanel({ title, rows, total, unitId, canEdit, byKeyword }: { tit
                     {c.label}
                   </span>
                   <span className="block text-sm text-muted">
-                    {[c.actionBy && `Action by ${c.actionBy}`, c.emailAction, c.recommendation, c.note].filter(Boolean).join(" · ") ||
-                      (byKeyword && c.keywords.length > 0 ? `Keywords: ${c.keywords.join(", ")}` : "")}
+                    {categoryDetail(c, byKeyword)}
                   </span>
                 </span>
                 <span className="font-display text-2xl font-bold text-ink tabular-nums">{c.count}</span>

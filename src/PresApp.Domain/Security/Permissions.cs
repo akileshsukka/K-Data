@@ -25,7 +25,7 @@ public static class Permissions
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
-        new(AssetsView, "View registers, dashboards and history"),
+        new(AssetsView, "View registers, dashboards (piping cards included), history and export the Unit overview PDF"),
         new(ExcelExport, "Download a unit Excel"),
         new(ReadingsWrite, "Record monitoring readings"),
         new(GatesEdit, "Edit gate statuses and comments"),

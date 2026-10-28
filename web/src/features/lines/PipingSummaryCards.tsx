@@ -13,8 +13,9 @@ export function PipingSummaryCards({ unitId, title = "Piping status" }: { unitId
   const [open, setOpen] = useState(false);
   const q = useQuery({ queryKey: ["piping-summary", unitId], queryFn: ({ signal }) => api<PipingSummary>(`/api/units/${unitId}/piping-summary`, { signal }) });
   const s = q.data;
+  // Say so instead of hiding the section: a role without access must be visible, not silently missing.
+  if (q.isError) return <p className="mt-6 text-hold">{title}: {q.error.message}</p>;
   if (!s || s.lines === 0) return null;
-  const scope = s.cleaning.filter((c) => c.inScope).reduce((a, c) => a + c.lines, 0);
 
   return (
     <section className="mt-6" aria-label={title}>
@@ -23,55 +24,71 @@ export function PipingSummaryCards({ unitId, title = "Piping status" }: { unitId
         <button className="text-sm font-semibold text-violet" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide by service" : "Show by service"}</button>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <div className="rounded-lg border border-line bg-panel p-4">
-          <p className="text-sm font-semibold text-muted">Lines</p>
-          <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{s.lines}</p>
-          <p className="mt-1 text-sm text-muted">{s.lengthM > 0 ? `${Math.round(s.lengthM).toLocaleString("en")} m` : "Active lines"}</p>
-        </div>
-        <Progress label="Walkdown" count={s.walkdown} detail="EM walkdown completed" />
-        <Progress label="Drained" count={s.drained} detail="Bulk liquid drained" />
-        <Progress label="Inspected" count={s.inspected} detail="Inspection done" />
-        <div className="rounded-lg border border-line bg-panel p-4">
-          <p className="text-sm font-semibold text-muted">Cleaning scope</p>
-          <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{scope}</p>
-          <p className="mt-1 text-sm text-muted">
-            {s.cleaning.map((c) => `${c.lines} ${c.value}`).join(" · ") || "No values"}
-            {s.noCleaningSet > 0 && ` · ${s.noCleaningSet} not set`}
-          </p>
-        </div>
-        <Progress label="Cleaned" count={s.cleaned} detail={s.cleaned.total > 0 ? "of the cleaning scope" : "No lines to clean yet"} emphasis />
+        <PipingCards s={s} />
       </div>
-
       {open && (
         <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-panel">
-          <table className="w-full min-w-[44rem] text-left text-[15px]">
-            <thead className="text-sm text-muted">
-              <tr>
-                {["Service", "Lines", "Walkdown", "Drained", "Inspected", "Cleaning scope", "Cleaned"].map((h, i) => (
-                  <th key={h} className={`border-b border-line px-4 py-2 font-semibold ${i > 0 ? "text-right" : ""}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {s.byService.map((r) => (
-                <tr key={r.code} className="border-b border-line last:border-0">
-                  <td className="px-4 py-2">
-                    <span className="font-semibold text-ink">{r.code || "—"}</span>
-                    {r.description && <span className="ml-2 text-sm text-muted">{r.description}</span>}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{r.lines}</td>
-                  <Cell done={r.walkdown} total={r.lines} />
-                  <Cell done={r.drained} total={r.lines} />
-                  <Cell done={r.inspected} total={r.lines} />
-                  <td className="px-4 py-2 text-right tabular-nums">{r.scope || "—"}</td>
-                  <Cell done={r.cleaned} total={r.scope} />
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <PipingServiceTable rows={s.byService} className="min-w-[44rem]" />
         </div>
       )}
     </section>
+  );
+}
+
+/** The six cards (lines, walkdown, drained, inspected, cleaning scope, cleaned); the caller sets the grid. Also used by the PDF export. */
+export function PipingCards({ s }: { s: PipingSummary }) {
+  const scope = s.cleaning.filter((c) => c.inScope).reduce((a, c) => a + c.lines, 0);
+  return (
+    <>
+      <div className="rounded-lg border border-line bg-panel p-4">
+        <p className="text-sm font-semibold text-muted">Lines</p>
+        <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{s.lines}</p>
+        <p className="mt-1 text-sm text-muted">{s.lengthM > 0 ? `${Math.round(s.lengthM).toLocaleString("en")} m` : "Active lines"}</p>
+      </div>
+      <Progress label="Walkdown" count={s.walkdown} detail="EM walkdown completed" />
+      <Progress label="Drained" count={s.drained} detail="Bulk liquid drained" />
+      <Progress label="Inspected" count={s.inspected} detail="Inspection done" />
+      <div className="rounded-lg border border-line bg-panel p-4">
+        <p className="text-sm font-semibold text-muted">Cleaning scope</p>
+        <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{scope}</p>
+        <p className="mt-1 text-sm text-muted">
+          {s.cleaning.map((c) => `${c.lines} ${c.value}`).join(" · ") || "No values"}
+          {s.noCleaningSet > 0 && ` · ${s.noCleaningSet} not set`}
+        </p>
+      </div>
+      <Progress label="Cleaned" count={s.cleaned} detail={s.cleaned.total > 0 ? "of the cleaning scope" : "No lines to clean yet"} emphasis />
+    </>
+  );
+}
+
+/** Lines per service code with each activity done (and %). Also used by the PDF export. */
+export function PipingServiceTable({ rows, className = "" }: { rows: PipingSummary["byService"]; className?: string }) {
+  return (
+    <table className={`w-full text-left text-[15px] ${className}`}>
+      <thead className="text-sm text-muted">
+        <tr>
+          {["Service", "Lines", "Walkdown", "Drained", "Inspected", "Cleaning scope", "Cleaned"].map((h, i) => (
+            <th key={h} className={`border-b border-line px-4 py-2 font-semibold ${i > 0 ? "text-right" : ""}`}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.code} className="border-b border-line last:border-0">
+            <td className="px-4 py-2">
+              <span className="font-semibold text-ink">{r.code || "—"}</span>
+              {r.description && <span className="ml-2 text-sm text-muted">{r.description}</span>}
+            </td>
+            <td className="px-4 py-2 text-right tabular-nums">{r.lines}</td>
+            <Cell done={r.walkdown} total={r.lines} />
+            <Cell done={r.drained} total={r.lines} />
+            <Cell done={r.inspected} total={r.lines} />
+            <td className="px-4 py-2 text-right tabular-nums">{r.scope || "—"}</td>
+            <Cell done={r.cleaned} total={r.scope} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

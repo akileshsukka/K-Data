@@ -10,7 +10,8 @@ namespace PresApp.Infrastructure.Seeding;
 
 /// <summary>
 /// Adds missing catalog rows at startup. Never changes or re-enables rows an admin already edited,
-/// so it is safe to run on every start.
+/// so it is safe to run on every start. One exception: the built-in roles always keep "assets.view"
+/// (reading the registers and the Unit overview), because without it a role sees nothing at all.
 /// </summary>
 public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> logger)
 {
@@ -42,6 +43,14 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                 IsSystem = true,
                 Permissions = permissions.Select(p => new RolePermission { Permission = p }).ToList()
             });
+        }
+
+        // Every built-in role can at least read: registers, the Unit overview (piping cards included), history and the PDF.
+        var builtIn = SeedData.Roles.Select(r => r.Role).ToList();
+        foreach (var role in await db.Roles.Include(r => r.Permissions).Where(r => builtIn.Contains(r.Name)).ToListAsync(ct))
+        {
+            if (role.Permissions.All(x => x.Permission != Permissions.AssetsView))
+                role.Permissions.Add(new RolePermission { Permission = Permissions.AssetsView });
         }
 
         // Admin always holds every permission, including ones added in later versions.
