@@ -23,7 +23,14 @@ public sealed record AssetProfile(
     Guid Id, string Code, string Type, NamedRef Discipline, UnitRef Unit, bool IsActive, Guid? SimproFlangeId,
     string CurrentGate, string SuggestedCurrentGate, IReadOnlyDictionary<string, string?> Values,
     IReadOnlyList<GateDocDto> GateDocuments, IReadOnlyList<GroupRefDto> Groups,
-    DateTime? PreservedAtUtc, string? PreservedBy, string UpdatedBy, DateTime UpdatedAtUtc);
+    DateTime? PreservedAtUtc, string? PreservedBy, string UpdatedBy, DateTime UpdatedAtUtc,
+    AssetCategoryDto? DashboardCategory = null);
+
+/// <summary>Hold / N/A dashboard category of an asset (template v4).</summary>
+public sealed record AssetCategoryDto(int Id, string? Code, string Label, string Section);
+
+/// <summary>Sets the asset's category (null = none). Expected = the category id the user saw.</summary>
+public sealed record SetCategoryRequest(int? CategoryId, int? Expected);
 
 public sealed record FieldChange(string Field, string? From, string? To);
 public sealed record PatchRequest(IReadOnlyList<FieldChange> Changes);

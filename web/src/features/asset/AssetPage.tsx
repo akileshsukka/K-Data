@@ -14,6 +14,7 @@ import { FieldSection } from "./FieldSection";
 import { GatesTab } from "./GatesTab";
 import { HistoryList } from "./HistoryList";
 import { ReadingsTab } from "./ReadingsTab";
+import { CategoryCard } from "./CategoryCard";
 import { useAsset, useAssetHistory, useMarkPreserved, usePatchAsset, useSetActive, useSetCurrentGate } from "./useAsset";
 
 const tabs = [
@@ -87,6 +88,7 @@ export function AssetPage() {
                 </div>
               )}
               <FieldSection title="Status" fields={section("Status")} asset={a} options={opts} onProposals={setProposals} />
+              {a.type !== "Pipeline" && <CategoryCard asset={a} />}
               <CustomFieldsCards asset={a} />
             </div>
             <div className="space-y-5">

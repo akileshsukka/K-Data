@@ -35,4 +35,5 @@ public static class OptionSetKeys
     public const string PreservedByEu = "PreservedByEU";
     public const string EmWalkdown = "EMWalkdown";
     public const string ActionBy = "ActionBy";
+    public const string ReadyForPreservation = "ReadyForPreservation";
 }

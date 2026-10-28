@@ -82,6 +82,25 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         return new PatchResponse(await queries.ProfileAsync(id, ct), ToProposals(outcome));
     }
 
+    /// <summary>Sets the Hold / N/A dashboard category of an asset (an active category of the asset's unit, or none).</summary>
+    public async Task<AssetProfile> SetCategoryAsync(Guid id, SetCategoryRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        var asset = await queries.LoadAsync(id, tracking: true, ct);
+        if (!asset.IsActive && !user.HasPermission(Permissions.AssetsManage))
+            throw ApiProblem.Forbidden("The asset is inactive. Only an administrator can edit it.");
+        var p = asset.Preservation!;
+        if (p.DashboardCategoryId != request.Expected)
+            throw ApiProblem.Conflict("Someone else changed the dashboard category while you were editing. Check it and try again.");
+        if (request.CategoryId is { } categoryId
+            && !await db.DashboardCategories.AnyAsync(c => c.Id == categoryId && c.UnitId == asset.UnitId && c.IsActive && c.Code != null, ct))
+            throw ApiProblem.Invalid("That category is not an active category of this unit.");
+        if (p.DashboardCategoryId == request.CategoryId) return await queries.ProfileAsync(id, ct);
+        p.DashboardCategoryId = request.CategoryId;
+        p.DashboardCategory = null;
+        await db.SaveChangesAsync(ct);
+        return await queries.ProfileAsync(id, ct);
+    }
+
     public async Task<AssetProfile> SetCurrentGateAsync(Guid id, SetCurrentGateRequest request, CancellationToken ct)
     {
         if (!FieldValues.TryParseCurrentGate(request.Value, out var gate)) throw ApiProblem.Invalid($"\"{request.Value}\" is not a gate.");

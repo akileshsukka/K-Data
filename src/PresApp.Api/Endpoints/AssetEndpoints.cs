@@ -34,6 +34,9 @@ public static class AssetEndpoints
         view.MapPatch("/assets/{id:guid}", (Guid id, PatchRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.PatchAsync(id, request, user, ct));
 
+        app.MapPut("/api/assets/{id:guid}/dashboard-category", (Guid id, SetCategoryRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
+            e.SetCategoryAsync(id, request, user, ct)).RequirePermission(Permissions.AssetsEdit);
+
         app.MapPost("/api/assets/{id:guid}/current-gate", (Guid id, SetCurrentGateRequest request, AssetEditor e, CancellationToken ct) =>
             e.SetCurrentGateAsync(id, request, ct)).RequirePermission(Permissions.GatesEdit);
 

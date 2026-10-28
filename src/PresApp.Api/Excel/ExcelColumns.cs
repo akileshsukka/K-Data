@@ -16,7 +16,11 @@ public enum ColumnRole
     Field,
     /// <summary>The template row holds a formula (e.g. "Category"): copied to every row.</summary>
     Formula,
-    Key
+    Key,
+    /// <summary>Template v4: code of the asset's Hold category (Cat1, Cat2…). Read back by the import.</summary>
+    HoldCategory,
+    /// <summary>Template v4: code of the asset's N/A category. Read back by the import.</summary>
+    NaCategory
 }
 
 public sealed record ExcelColumn(int Index, string Header, ColumnRole Role, FieldDef? Field, bool Editable);
@@ -32,13 +36,17 @@ public static partial class ExcelColumns
     public const string MasterTable = "MasterList";
     public const string CategoriesTable = "Categories";
 
+    /// <summary>Template v4 named ranges: dashboard rows of the Hold and N/A categories (one row per category).</summary>
+    public const string HoldSlotsName = "KD_HoldSlots";
+    public const string NaSlotsName = "KD_NASlots";
+
     /// <summary>Fields the engineers may change in the unit Excel (same set as the Power Automate flow).</summary>
     private static readonly HashSet<string> EditableInUnitFile = new(StringComparer.Ordinal)
     {
         nameof(AssetPreservation.ThirdPartyInspectionStatus), nameof(AssetPreservation.PreservationStatusAdnoc),
         nameof(AssetPreservation.PreservationRemarks), nameof(AssetPreservation.RemarksAdnoc), nameof(AssetPreservation.EmComments),
         nameof(AssetPreservation.EmWalkdownStatus), nameof(AssetPreservation.PreservedByEu), nameof(AssetPreservation.ActionBy),
-        nameof(AssetPreservation.CurrentStatusAdnoc), nameof(AssetPreservation.Response),
+        nameof(AssetPreservation.CurrentStatusAdnoc), nameof(AssetPreservation.Response), nameof(AssetPreservation.ReadyForPreservation),
         "G1Status", "G2Status", "G3Status", "G4Status", "G5Status", "G6Status", "G7Status", "G8Status"
     };
 
@@ -68,6 +76,8 @@ public static partial class ExcelColumns
                 case "equipno" or "equipmentno" or "tag" or "equipmenttag": role = ColumnRole.Tag; break;
                 case "lineno" or "linenumber" when onboarding: role = ColumnRole.Tag; break;
                 case "equipdescription" or "description" or "equipmentdescription": role = ColumnRole.Description; break;
+                case "holdcategory" when !onboarding: role = ColumnRole.HoldCategory; break;
+                case "nacategory" when !onboarding: role = ColumnRole.NaCategory; break;
                 default:
                     role = ColumnRole.Field;
                     if (k is "preservation" or "preservation2")
@@ -103,6 +113,7 @@ public static partial class ExcelColumns
         if (k.StartsWith("expecteddispatch", StringComparison.Ordinal)) return nameof(AssetPreservation.CurrentStatusAdnoc);
         if (k == "response") return nameof(AssetPreservation.Response);
         if (k == "oemname") return nameof(AssetPreservation.OemName);
+        if (k == "readyforpreservation") return nameof(AssetPreservation.ReadyForPreservation);
         if (!onboarding) return null;
 
         // Long client master list (first load of a unit)

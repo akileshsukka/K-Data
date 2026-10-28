@@ -68,11 +68,15 @@ internal sealed class DashboardCategoryConfiguration : IEntityTypeConfiguration<
     {
         b.ToTable("DashboardCategory");
         b.Property(x => x.Section).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.Label).HasMaxLength(200).IsRequired();
-        b.Property(x => x.ActionBy).HasMaxLength(200);
-        b.Property(x => x.EmailAction).HasMaxLength(200);
-        b.Property(x => x.Note).HasMaxLength(1000);
+        b.Property(x => x.Label).HasMaxLength(DashboardCategory.ShortText).IsRequired();
+        b.Property(x => x.Code).HasMaxLength(DashboardCategory.CodeMaxLength);
+        b.Property(x => x.ActionBy).HasMaxLength(DashboardCategory.ShortText);
+        b.Property(x => x.EmailAction).HasMaxLength(DashboardCategory.ShortText);
+        b.Property(x => x.Recommendation).HasMaxLength(DashboardCategory.LongText);
+        b.Property(x => x.Note).HasMaxLength(DashboardCategory.LongText);
         b.HasIndex(x => new { x.UnitId, x.Label }).IsUnique();
+        // Hold Cat1 and N/A Cat1 can coexist; rows without a code yet are not checked.
+        b.HasIndex(x => new { x.UnitId, x.Section, x.Code }).IsUnique().HasFilter("[Code] IS NOT NULL");
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId);
     }
 }

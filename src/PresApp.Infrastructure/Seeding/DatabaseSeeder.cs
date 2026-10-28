@@ -30,6 +30,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
 
     private async Task SeedRolesAsync(CancellationToken ct)
     {
+        await MergeSpanishRolesAsync(ct);
         var existing = await db.Roles.Select(r => r.Name).ToListAsync(ct);
         foreach (var (name, description, permissions) in SeedData.Roles.Where(r => !existing.Contains(r.Role)))
         {
@@ -50,6 +51,39 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
             {
                 admin.Permissions.Add(new RolePermission { Permission = p.Key });
             }
+        }
+    }
+
+    /// <summary>
+    /// Databases created before the translation hold the Spanish system roles. If the English role does not
+    /// exist yet the Spanish one is renamed (keeping its permissions); otherwise its users move to the
+    /// English role and the Spanish one is removed.
+    /// </summary>
+    private async Task MergeSpanishRolesAsync(CancellationToken ct)
+    {
+        var spanish = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Consulta"] = RoleNames.Viewer,
+            ["Técnico de campo"] = RoleNames.FieldTechnician,
+            ["Tecnico de campo"] = RoleNames.FieldTechnician,
+            ["Ingeniero"] = RoleNames.Engineer,
+            ["Administrador"] = RoleNames.Admin,
+        };
+        var roles = await db.Roles.ToListAsync(ct);
+        foreach (var old in roles.Where(r => spanish.ContainsKey(r.Name)).ToList())
+        {
+            var target = roles.FirstOrDefault(r => string.Equals(r.Name, spanish[old.Name], StringComparison.OrdinalIgnoreCase));
+            if (target is null)
+            {
+                old.Name = spanish[old.Name];
+                old.IsSystem = true;
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+            await db.Users.Where(u => u.RoleId == old.Id).ExecuteUpdateAsync(u => u.SetProperty(x => x.RoleId, target.Id), ct);
+            await db.Set<RolePermission>().Where(p => p.RoleId == old.Id).ExecuteDeleteAsync(ct);
+            await db.Roles.Where(r => r.Id == old.Id).ExecuteDeleteAsync(ct);
+            logger.LogInformation("Merged role {Old} into {New}", old.Name, target.Name);
         }
     }
 

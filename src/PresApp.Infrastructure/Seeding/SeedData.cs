@@ -51,6 +51,7 @@ internal static class SeedData
         (OptionSetKeys.EmWalkdown, "EM Walkdown", ["Completed", "Ongoing", NotApplicable], []),
         // Exact spellings of the remaining values come with the SharePoint migration.
         (OptionSetKeys.ActionBy, "Action By", ["ADNOC", "Enermech", "Petrofac"], []),
+        (OptionSetKeys.ReadyForPreservation, "Ready For Preservation", ["Yes", "No"], []),
     ];
 
     /// <summary>(name, asset type, prefix, sync to Simpro, sort).</summary>

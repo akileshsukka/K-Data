@@ -6,6 +6,7 @@ using PresApp.Api.Hosting;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Imports;
+using PresApp.Domain.Reporting;
 using PresApp.Domain.Rules;
 using PresApp.Infrastructure.Data;
 
@@ -36,7 +37,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                        ?? throw ApiProblem.Invalid($"There is no Excel template for {unit.Name} yet. An administrator can upload it in Excel templates.");
 
         var assets = (await db.Assets.AsNoTracking()
-                .Include(a => a.Preservation).Include(a => a.Discipline)
+                .Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.Discipline)
                 .Where(a => a.UnitId == unitId && a.IsActive && a.Type != AssetType.Pipeline)
                 .ToListAsync(ct))
             .OrderBy(a => AssetQueries.DisciplineRank(a.Discipline.Name)).ThenBy(a => a.Tag ?? a.Code, NaturalComparer.Instance)
@@ -53,6 +54,9 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var sessionId = Guid.NewGuid();
 
         using var wb = OpenTemplate(template.Content);
+        var v4 = TemplateV4.IsV4(wb);
+        var formatVersion = v4 ? TemplateV4.FormatVersion : WorkbookFormat.FormatVersion;
+        if (v4 && TemplateV4.ShowSlots(wb, categories.Where(c => c.Code is not null).ToList()) is { } slotProblem) throw ApiProblem.Invalid(slotProblem);
         var table = WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable)!;
         var sheet = table.Worksheet;
         var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
@@ -79,6 +83,12 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                     case ColumnRole.Tag: cell.Value = a.Tag ?? ""; break;
                     case ColumnRole.Description: cell.Value = a.Description ?? ""; break;
                     case ColumnRole.Formula: cell.FormulaR1C1 = formulas[col.Index]; break;
+                    case ColumnRole.HoldCategory or ColumnRole.NaCategory:
+                        var category = a.Preservation?.DashboardCategory;
+                        var section = col.Role == ColumnRole.HoldCategory ? CategorySection.Hold : CategorySection.NotApplicable;
+                        cell.Style.NumberFormat.Format = "@";
+                        cell.SetValue(category is { IsActive: true, Code: not null } && category.Section == section ? category.Code : "");
+                        break;
                     case ColumnRole.Field:
                         var text = FieldValues.Read(col.Field!, a) ?? "";
                         if (col.Editable) { cell.Style.NumberFormat.Format = "@"; cell.SetValue(text); }
@@ -142,12 +152,34 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                 dv.ErrorMessage = "Select a value from the list.";
             }
         }
+        // v4: Hold / N/A category columns take the active codes of their section
+        foreach (var (role, section) in new[] { (ColumnRole.HoldCategory, CategorySection.Hold), (ColumnRole.NaCategory, CategorySection.NotApplicable) })
+        {
+            if (!columns.Any(c => c.Role == role)) continue;
+            var codes = TemplateV4.Ordered(categories).Where(c => c.Section == section).Select(c => c.Code!).ToList();
+            listColumn++;
+            lists.Cell(1, listColumn).Value = section == CategorySection.Hold ? "HoldCategory" : "NACategory";
+            if (codes.Count == 0 || n == 0) continue;
+            for (var v = 0; v < codes.Count; v++) lists.Cell(v + 2, listColumn).SetValue(codes[v]);
+            var source = lists.Range(2, listColumn, codes.Count + 1, listColumn);
+            foreach (var c in columns.Where(c => c.Role == role))
+            {
+                var dv = body.Column(c.Index + 1).CreateDataValidation();
+                dv.List(source, true);
+                dv.IgnoreBlanks = true;
+                dv.ShowErrorMessage = true;
+                dv.ErrorStyle = XLErrorStyle.Stop;
+                dv.ErrorTitle = "Invalid category";
+                dv.ErrorMessage = "Pick a category code of this section. Categories are created in K Data.";
+            }
+        }
         lists.Visibility = XLWorksheetVisibility.VeryHidden;
 
         // ---- placeholders, categories and dashboard
         var reportDate = local.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
         ReplacePlaceholders(wb, unit.Number.ToString(CultureInfo.InvariantCulture), reportDate);
-        DashboardSheetWriter.Write(wb, categories);
+        if (v4) TemplateV4.WriteCategories(wb, categories.Where(c => c.Code is not null).ToList());
+        else DashboardSheetWriter.Write(wb, categories);
 
         // ---- session sheet
         var meta = wb.Worksheets.Add(WorkbookFormat.MetaSheet);
@@ -157,7 +189,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
             ["Unit", unit.Name],
             ["ExportedAtUtc", now.ToString("O", CultureInfo.InvariantCulture)],
             ["ExportedBy", exportedBy],
-            ["FormatVersion", WorkbookFormat.FormatVersion.ToString(CultureInfo.InvariantCulture)],
+            ["FormatVersion", formatVersion.ToString(CultureInfo.InvariantCulture)],
             ["RowCount", n.ToString(CultureInfo.InvariantCulture)],
             ["App", WorkbookFormat.AppName]
         ];
@@ -190,13 +222,17 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
             ExportedAtUtc = now,
             ExportedBy = exportedBy,
             Status = ExcelSessionStatus.Open,
-            FormatVersion = WorkbookFormat.FormatVersion,
+            FormatVersion = formatVersion,
             FileName = fileName,
             RowCount = n,
             StructureSignature = new StructureSignature(table.Name, table.HeadersRow().RowNumber(),
                 table.HeadersRow().FirstCell().Address.ColumnNumber, finalHeaders).ToJson(),
-            BaseJson = new BaseSnapshot(assets.Select(a => new BaseRow(a.Id, a.Tag, a.Code,
-                editable.ToDictionary(f => f.Key, f => FieldValues.Read(f, a)))).ToList()).ToJson()
+            BaseJson = new BaseSnapshot(assets.Select(a =>
+            {
+                var values = editable.ToDictionary(f => f.Key, f => FieldValues.Read(f, a));
+                if (v4) values[TemplateV4.CategoryField] = a.Preservation?.DashboardCategory is { IsActive: true } c ? TemplateV4.Token(c) : null;
+                return new BaseRow(a.Id, a.Tag, a.Code, values);
+            }).ToList()).ToJson()
         });
         await db.SaveChangesAsync(ct);
 
@@ -229,7 +265,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
             if (wb.TryGetWorksheet(name, out _)) return $"The template must not have a sheet named {name}. Upload the clean template, not an exported file.";
         }
         if (wb.Worksheets.Any(w => w.IsProtected)) return "The template has a protected sheet. Remove the protection and upload it again.";
-        return null;
+        return TemplateV4.IsV4(wb) ? TemplateV4.Problem(wb) : null;
     }
 
     private static void ReplacePlaceholders(XLWorkbook wb, string unitNumber, string reportDate)

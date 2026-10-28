@@ -13,7 +13,7 @@ namespace PresApp.Api.Excel;
 /// the categories are taken from the template (Categories table + the Action By / Email Action / note
 /// columns of the dashboard), so the app becomes their single place from then on.
 /// </summary>
-public sealed class ExcelTemplateService(PresAppDbContext db, TimeProvider clock)
+public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvider clock)
 {
     public async Task<List<TemplateDto>> ListAsync(CancellationToken ct)
     {
@@ -38,8 +38,15 @@ public sealed class ExcelTemplateService(PresAppDbContext db, TimeProvider clock
         if (buffer.Length == 0 || buffer.Length > ExcelImportService.MaxFileBytes) throw ApiProblem.Invalid("Upload an .xlsx file of at most 20 MB.");
         var bytes = buffer.ToArray();
 
-        List<DashboardCategory> fromTemplate;
-        using (var wb = UnitWorkbookExporter.OpenTemplate(bytes)) fromTemplate = ReadCategories(wb, unitId);
+        List<DashboardCategory> fromTemplate = [];
+        List<TemplateCategory> v4Categories = [];
+        bool v4;
+        using (var wb = UnitWorkbookExporter.OpenTemplate(bytes))
+        {
+            v4 = TemplateV4.IsV4(wb);
+            if (v4) v4Categories = TemplateV4.ReadCategories(wb);
+            else fromTemplate = ReadCategories(wb, unitId);
+        }
 
         var template = await db.ExcelTemplates.FirstOrDefaultAsync(t => t.UnitId == unitId, ct);
         if (template is null) db.ExcelTemplates.Add(template = new ExcelTemplate { UnitId = unitId });
@@ -48,7 +55,12 @@ public sealed class ExcelTemplateService(PresAppDbContext db, TimeProvider clock
         template.UploadedAtUtc = clock.GetUtcNow().UtcDateTime;
         template.UploadedBy = user;
 
-        if (!await db.DashboardCategories.AnyAsync(c => c.UnitId == unitId, ct)) db.DashboardCategories.AddRange(fromTemplate);
+        if (v4) await MergeV4CategoriesAsync(unitId, v4Categories, ct);
+        else if (!await db.DashboardCategories.AnyAsync(c => c.UnitId == unitId, ct))
+        {
+            Reporting.UnitDashboard.AssignCodes(fromTemplate);
+            db.DashboardCategories.AddRange(fromTemplate);
+        }
         await db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).First(t => t.UnitId == unit.Id);
     }
@@ -59,6 +71,61 @@ public sealed class ExcelTemplateService(PresAppDbContext db, TimeProvider clock
                 ?? throw ApiProblem.NotFound("This unit has no template.");
         return (t.FileName, t.Content);
     }
+
+    /// <summary>
+    /// A v4 template moves the unit to category codes. The app stays the source of truth:
+    /// <list type="bullet">
+    /// <item>a unit without categories takes the template's list as it is;</item>
+    /// <item>otherwise existing categories are kept: their label loses the "Cat 2 :" prefix (the code is now its own
+    /// column), empty notes are filled from the template's row with the same section and code, and codes the unit
+    /// does not have yet are added.</item>
+    /// </list>
+    /// </summary>
+    private async Task MergeV4CategoriesAsync(int unitId, List<TemplateCategory> fromTemplate, CancellationToken ct)
+    {
+        var existing = await db.DashboardCategories.Where(c => c.UnitId == unitId).ToListAsync(ct);
+        foreach (var c in existing)
+        {
+            var stripped = StripCodePrefix(c.Label);
+            if (stripped != c.Label && !existing.Any(o => o != c && string.Equals(o.Label, stripped, StringComparison.OrdinalIgnoreCase))) c.Label = stripped;
+        }
+        Reporting.UnitDashboard.AssignCodes(existing);
+
+        var order = existing.Select(c => c.SortOrder).DefaultIfEmpty(0).Max();
+        foreach (var t in fromTemplate)
+        {
+            var match = existing.FirstOrDefault(c => c.Section == t.Section && c.Code == t.Code);
+            if (match is not null)
+            {
+                match.ActionBy ??= t.ActionBy;
+                match.EmailAction ??= t.EmailAction;
+                match.Recommendation ??= t.Recommendation;
+                match.Note ??= t.Note;
+                continue;
+            }
+            var label = existing.Any(c => string.Equals(c.Label, t.Description, StringComparison.OrdinalIgnoreCase)) ? $"{t.Description} ({t.Code})" : t.Description;
+            var created = new DashboardCategory
+            {
+                UnitId = unitId, Section = t.Section, Code = t.Code, Label = Truncate(label, DashboardCategory.ShortText)!,
+                Priority = 100 + t.Order, SortOrder = existing.Count == 0 ? t.Order : ++order,
+                ActionBy = t.ActionBy, EmailAction = t.EmailAction, Recommendation = t.Recommendation, Note = t.Note
+            };
+            db.DashboardCategories.Add(created);
+            existing.Add(created);
+        }
+    }
+
+    /// <summary>"Cat 2 :Level transferred" → "Level transferred"; a label that is only the prefix stays as it is.</summary>
+    public static string StripCodePrefix(string label)
+    {
+        var m = CodePrefix().Match(label);
+        if (!m.Success) return label;
+        var rest = label[m.Length..].Trim();
+        return rest.Length == 0 ? label : rest;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*Cat\s*\d+\s*[:\-–.]?\s*", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex CodePrefix();
 
     /// <summary>Categories defined in a template: one per Category label, with all its keywords.</summary>
     public static List<DashboardCategory> ReadCategories(XLWorkbook wb, int unitId)

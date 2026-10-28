@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
+using PresApp.Domain.Reporting;
 using PresApp.Infrastructure.Auditing;
 using PresApp.Infrastructure.Data;
 using PresApp.Infrastructure.Seeding;
@@ -36,6 +37,35 @@ public sealed class DataTests : IClassFixture<TestApp>
         }
 
         Assert.Equal(before, await app.WithDbAsync(db => Task.FromResult(Count(db))));
+    }
+
+    [Fact]
+    public async Task Spanish_roles_from_old_databases_merge_into_the_English_ones()
+    {
+        var engineerId = await app.WithDbAsync(db => db.Roles.Where(r => r.Name == "Engineer").Select(r => r.Id).FirstAsync());
+        var userId = await app.WithDbAsync(async db =>
+        {
+            var role = new PresApp.Domain.Security.Role { Name = "Ingeniero", IsSystem = true };
+            role.Permissions.Add(new PresApp.Domain.Security.RolePermission { Permission = "assets.view" });
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            var user = new PresApp.Domain.Security.AppUser
+            {
+                Email = "ingeniero@enermech.com", DisplayName = "Ingeniero", RoleId = role.Id,
+                CreatedAtUtc = DateTime.UtcNow, CreatedBy = "test"
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            return user.Id;
+        });
+
+        await using (var scope = app.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<DatabaseSeeder>().SeedAsync(TestApp.AdminEmail);
+        }
+
+        Assert.False(await app.WithDbAsync(db => db.Roles.AnyAsync(r => r.Name == "Ingeniero")));
+        Assert.Equal(engineerId, await app.WithDbAsync(db => db.Users.Where(u => u.Id == userId).Select(u => u.RoleId).FirstAsync()));
     }
 
     [Fact]
@@ -101,6 +131,58 @@ public sealed class DataTests : IClassFixture<TestApp>
         var p = new AssetPreservation { G1Status = "Completed", G2Status = "Ongoing", G5Status = " completed " , G6Status = "Not Applicable" };
         Assert.Equal(5, p.HighestCompletedGate());
         Assert.Null(new AssetPreservation { G1Status = "Hold" }.HighestCompletedGate());
+    }
+
+    [Fact]
+    public async Task Category_codes_are_unique_per_unit_and_section()
+    {
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 42").Select(u => u.Id).FirstAsync());
+        await app.WithDbAsync(async db =>
+        {
+            db.DashboardCategories.AddRange(
+                new DashboardCategory { UnitId = unitId, Section = CategorySection.Hold, Code = "Cat1", Label = "Under maintenance" },
+                new DashboardCategory { UnitId = unitId, Section = CategorySection.NotApplicable, Code = "Cat1", Label = "Removed from site" },
+                new DashboardCategory { UnitId = unitId, Section = CategorySection.Hold, Label = "Old row without code" },
+                new DashboardCategory { UnitId = unitId, Section = CategorySection.Hold, Label = "Another old row" });
+            return await db.SaveChangesAsync();
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => app.WithDbAsync(async db =>
+        {
+            db.DashboardCategories.Add(new DashboardCategory { UnitId = unitId, Section = CategorySection.Hold, Code = "Cat1", Label = "Duplicate" });
+            return await db.SaveChangesAsync();
+        }));
+    }
+
+    [Fact]
+    public async Task Asset_category_and_ready_flag_are_saved_and_audited()
+    {
+        var assetId = await CreateAssetAsync("ST-EMP-039-903");
+        var categoryId = await app.WithDbAsync(async db =>
+        {
+            var unit = await db.Units.FirstAsync(u => u.Name == "Unit 39");
+            var c = new DashboardCategory { UnitId = unit.Id, Section = CategorySection.Hold, Code = "Cat9", Label = "Test hold" };
+            db.DashboardCategories.Add(c);
+            await db.SaveChangesAsync();
+            return c.Id;
+        });
+
+        await app.WithDbAsync(async db =>
+        {
+            var p = await db.Preservations.FirstAsync(x => x.AssetId == assetId);
+            p.DashboardCategoryId = categoryId;
+            p.ReadyForPreservation = "No";
+            return await db.SaveChangesAsync();
+        });
+
+        var saved = await app.WithDbAsync(db => db.Preservations.Include(x => x.DashboardCategory).FirstAsync(x => x.AssetId == assetId));
+        Assert.Equal("Cat9", saved.DashboardCategory!.Code);
+        Assert.Equal("No", saved.ReadyForPreservation);
+        var fields = await app.WithDbAsync(db => db.ChangeLogs.Where(l => l.AssetId == assetId).Select(l => l.Field).ToListAsync());
+        Assert.Contains("DashboardCategoryId", fields);
+        Assert.Contains("ReadyForPreservation", fields);
+        Assert.Contains("Yes", await app.WithDbAsync(db => db.OptionValues
+            .Where(v => v.OptionSet.Key == OptionSetKeys.ReadyForPreservation).Select(v => v.Value).ToListAsync()));
     }
 
     private Task<Guid> CreateAssetAsync(string code) => app.WithDbAsync(async db =>

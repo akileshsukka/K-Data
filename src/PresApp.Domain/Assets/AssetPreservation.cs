@@ -1,4 +1,5 @@
 using PresApp.Domain.Common;
+using PresApp.Domain.Reporting;
 
 namespace PresApp.Domain.Assets;
 
@@ -30,6 +31,14 @@ public class AssetPreservation : AuditableEntity, IFieldAudited
     public string? Response { get; set; }
     public string? CurrentStatusAdnoc { get; set; }
     public string? OemName { get; set; }
+
+    // Dashboard (template v4)
+    /// <summary>Hold or N/A category chosen by the engineer; its section decides the dashboard table. Null = none.</summary>
+    public int? DashboardCategoryId { get; set; }
+    public DashboardCategory? DashboardCategory { get; set; }
+
+    /// <summary>"Yes" lists the asset under "Assets available for preservation"; "No" or empty does not.</summary>
+    public string? ReadyForPreservation { get; set; }
 
     // Field status
     public string? CurrentActivity { get; set; }

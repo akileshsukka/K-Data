@@ -195,6 +195,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<int?>("DashboardCategoryId")
+                        .HasColumnType("int");
+
                     b.Property<string>("EmComments")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -342,6 +345,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<string>("ReadyForPreservation")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
                     b.Property<string>("RemarksAdnoc")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -371,6 +378,8 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.HasKey("AssetId");
 
                     b.HasIndex("CurrentGate");
+
+                    b.HasIndex("DashboardCategoryId");
 
                     b.HasIndex("G1Status");
 
@@ -1389,6 +1398,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("Code")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
                     b.Property<string>("EmailAction")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -1408,6 +1421,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
+                    b.Property<string>("Recommendation")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("Section")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1423,6 +1440,10 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.HasIndex("UnitId", "Label")
                         .IsUnique();
+
+                    b.HasIndex("UnitId", "Section", "Code")
+                        .IsUnique()
+                        .HasFilter("[Code] IS NOT NULL");
 
                     b.ToTable("DashboardCategory", (string)null);
                 });
@@ -1798,7 +1819,14 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PresApp.Domain.Reporting.DashboardCategory", "DashboardCategory")
+                        .WithMany()
+                        .HasForeignKey("DashboardCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Asset");
+
+                    b.Navigation("DashboardCategory");
                 });
 
             modelBuilder.Entity("PresApp.Domain.Assets.FieldDefinition", b =>

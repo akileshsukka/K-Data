@@ -102,6 +102,7 @@ public static class PreservationFields
             new(nameof(AssetPreservation.PreservedByEu), "Preserved by EU", SectionStatus, FieldKind.Choice, p, OptionSetKeys.PreservedByEu, Short, Permissions.AssetsEdit),
             new(nameof(AssetPreservation.ActionBy), "Action By", SectionStatus, FieldKind.Choice, p, OptionSetKeys.ActionBy, Short, Permissions.AssetsEdit),
             new(nameof(AssetPreservation.OemName), "OEM Name", SectionStatus, FieldKind.Text, p, null, Short, Permissions.AssetsEdit),
+            new(nameof(AssetPreservation.ReadyForPreservation), "Ready For Preservation", SectionStatus, FieldKind.Choice, p, OptionSetKeys.ReadyForPreservation, 10, Permissions.AssetsEdit),
 
             // Client tracking (free text columns of the client Excel)
             new(nameof(AssetPreservation.PreservationRemarks), "Preservation Remarks", SectionClient, FieldKind.LongText, p, null, Long, Permissions.AssetsEdit),
@@ -149,6 +150,8 @@ public static class PreservationFields
         nameof(Asset.DisciplineId) => "Discipline",
         nameof(Asset.UnitId) => "Unit",
         nameof(AssetPreservation.PreservedBy) => "Preserved by",
+        nameof(AssetPreservation.DashboardCategoryId) => "Dashboard category",
+        "DashboardCategory" => "Dashboard category",
         _ => field
     };
 }

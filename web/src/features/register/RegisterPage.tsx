@@ -29,12 +29,16 @@ interface Filters {
   gate: string;
   gateStatus: string;
   actionBy: string;
+  emWalkdown: string;
   docsPending: boolean;
   inactive: boolean;
   group: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gate: "", gateStatus: "", actionBy: "", docsPending: false, inactive: false, group: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gate: "", gateStatus: "", actionBy: "", emWalkdown: "", docsPending: false, inactive: false, group: "" };
+
+/** EM Walkdown Status values (Completed / Ongoing / N/A); "(not set)" finds the ones still blank. */
+const walkdownStatuses = ["Completed", "Ongoing", "N/A"];
 
 /** All assets of one type in the selected unit, with filters that apply as you type. */
 export function RegisterPage({ type }: { type: AssetType }) {
@@ -69,6 +73,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
           (!f.currentGate || r.currentGate === f.currentGate) &&
           gateMatch(r, f.gate, f.gateStatus, gateCount) &&
           (!f.actionBy || r.actionBy === f.actionBy) &&
+          (!f.emWalkdown || (f.emWalkdown === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === f.emWalkdown.toLowerCase())) &&
           (!f.docsPending || r.documentsPending > 0) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
@@ -159,6 +164,15 @@ export function RegisterPage({ type }: { type: AssetType }) {
               <option value="">Any workpack</option>
               {groupCodes.map((c) => <option key={c}>{c}</option>)}
               <option value="(none)">Not in a group</option>
+            </SelectInput>
+          </div>
+        )}
+        {!lines && (
+          <div className="w-52">
+            <SelectInput value={f.emWalkdown} onChange={(e) => set("emWalkdown", e.target.value)} aria-label="EM Walkdown" className="mt-0">
+              <option value="">Any EM Walkdown</option>
+              {[...walkdownStatuses, ...distinct((r) => r.emWalkdown).filter((v) => !walkdownStatuses.some((s) => s.toLowerCase() === v.toLowerCase()))].map((s) => <option key={s} value={s}>EM Walkdown: {s}</option>)}
+              <option value="(not set)">EM Walkdown: not set</option>
             </SelectInput>
           </div>
         )}

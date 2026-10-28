@@ -132,6 +132,9 @@ public static class ExcelEndpoints
 
         app.MapPut("/api/units/{unitId:int}/categories", (int unitId, List<SaveCategory> request, UnitDashboard d, CancellationToken ct) =>
             d.SaveCategoriesAsync(unitId, request, ct)).RequirePermission(Permissions.CategoriesManage);
+
+        app.MapGet("/api/units/{unitId:int}/category-options", (int unitId, UnitDashboard d, CancellationToken ct) => d.OptionsAsync(unitId, ct))
+            .RequirePermission(Permissions.AssetsView);
     }
 }
 

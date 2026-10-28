@@ -64,6 +64,10 @@ internal sealed class AssetPreservationConfiguration : IEntityTypeConfiguration<
             b.Property(name).HasMaxLength(AssetPreservation.LongText);
         }
 
+        b.Property(x => x.ReadyForPreservation).HasMaxLength(10);
+        // A category in use cannot be deleted (they are deactivated instead).
+        b.HasOne(x => x.DashboardCategory).WithMany().HasForeignKey(x => x.DashboardCategoryId).OnDelete(DeleteBehavior.Restrict);
+
         b.Property(x => x.PreservedBy).HasMaxLength(256);
         b.HasIndex(x => x.CurrentGate);
         for (var g = 1; g <= 8; g++) b.HasIndex($"G{g}Status");

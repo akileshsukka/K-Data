@@ -276,6 +276,7 @@ export interface AssetProfile {
   preservedBy: string | null;
   updatedBy: string;
   updatedAtUtc: string;
+  dashboardCategory: { id: number; code: string | null; label: string; section: CategorySection } | null;
 }
 
 export interface Proposals {
@@ -468,17 +469,31 @@ export interface DisciplineRow {
   progressPct: number;
 }
 
+export type CategorySection = "Hold" | "NotApplicable";
+
 export interface CategoryRow {
   id: number;
+  /** "Cat1", "Cat2"… assigned by the app; null only for old rows not saved since. */
+  code: string | null;
   label: string;
-  section: "Hold" | "NotApplicable";
+  section: CategorySection;
   priority: number;
   keywords: string[];
   actionBy: string | null;
   emailAction: string | null;
+  recommendation: string | null;
   note: string | null;
+  isActive: boolean;
   count: number;
   assets: { id: string; code: string; tag: string | null }[];
+}
+
+/** Active category of a unit, for the asset's category dropdown. */
+export interface CategoryOption {
+  id: number;
+  code: string;
+  label: string;
+  section: CategorySection;
 }
 
 export interface Dashboard {
@@ -503,6 +518,8 @@ export interface Dashboard {
   lineLengthM: number;
   linesBlanketed: number;
   inactiveCount: number;
+  /** "Assigned": categories chosen per equipment (template v4). "Keywords": found in the Preservation Remarks (v3). */
+  categorySource: "Assigned" | "Keywords";
 }
 
 // ---------------------------------------------------------------- Simpro

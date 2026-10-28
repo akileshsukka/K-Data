@@ -14,6 +14,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Support\*.xlsx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PresApp.Api\PresApp.Api.csproj" />
   </ItemGroup>
 </Project>

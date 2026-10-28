@@ -7,6 +7,7 @@ using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
 using PresApp.Domain.Imports;
+using PresApp.Domain.Reporting;
 using PresApp.Domain.Rules;
 using PresApp.Infrastructure.Auditing;
 using PresApp.Infrastructure.Data;
@@ -143,6 +144,8 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
         var keyColumn = columns.First(c => c.Role == ColumnRole.Key).Index + 1;
         var tagColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.Tag)?.Index + 1;
         var editable = columns.Where(c => c.Editable).ToList();
+        var holdColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.HoldCategory);
+        var naColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.NaCategory);
 
         // ---- the Key column must be exactly as exported
         var rows = new List<(int Number, BaseRow Base, IXLTableRow Row)>();
@@ -174,7 +177,7 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
 
         // ---- current data
         var ids = rows.Select(r => r.Base.Key).ToList();
-        var query = db.Assets.Include(a => a.Preservation).Include(a => a.GateDocuments).Where(a => ids.Contains(a.Id));
+        var query = db.Assets.Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.GateDocuments).Where(a => ids.Contains(a.Id));
         var assets = await (tracking ? query : query.AsNoTracking()).ToDictionaryAsync(a => a.Id, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var evidence = (await db.Readings.AsNoTracking()
@@ -185,6 +188,8 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
         var evidenceLabels = await db.MeasurementTypes.AsNoTracking().Where(m => m.EvidenceForGate != null)
             .ToDictionaryAsync(m => m.EvidenceForGate!.Value, m => m.Label, ct);
         var today = SiteClock.Today(clock);
+        var unitCategories = holdColumn is null && naColumn is null ? []
+            : await db.DashboardCategories.Where(c => c.UnitId == unitId && c.IsActive && c.Code != null).ToListAsync(ct);
 
         foreach (var (number, baseRow, row) in rows)
         {
@@ -233,6 +238,44 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
                 FieldValues.Write(field, asset, value);
                 applied.Add((field, newText));
                 changes.Add(Change(field.Key, ImportOutcome.Applied, null, baseValue, excelClean, current, newText));
+            }
+
+            // ---- template v4: Hold / N/A category chosen by code (one of the two columns at most)
+            if ((holdColumn is not null || naColumn is not null) && baseRow.Values.TryGetValue(TemplateV4.CategoryField, out var baseCategory))
+            {
+                var hold = holdColumn is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(holdColumn.Index + 1)));
+                var na = naColumn is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(naColumn.Index + 1)));
+                var excelText = hold is not null && na is not null ? $"Hold:{hold} / N/A:{na}" : hold is not null ? $"Hold:{hold}" : na is not null ? $"N/A:{na}" : null;
+                var section = hold is not null ? CategorySection.Hold : CategorySection.NotApplicable;
+                var code = Reporting.UnitDashboard.NormalizeCode(hold ?? na);
+                var wanted = code is null ? null : unitCategories.FirstOrDefault(c => c.Section == section && c.Code == code);
+                var wantedToken = excelText is null ? null : wanted is null ? excelText : TemplateV4.Token(wanted);
+
+                if (wantedToken != baseCategory)
+                {
+                    var current = TemplateV4.Token(asset?.Preservation?.DashboardCategory);
+                    if (asset is null) changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Rejected, "The equipment no longer exists.", baseCategory, excelText));
+                    else if (!asset.IsActive) changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Rejected, "Inactive equipment: it cannot be edited.", baseCategory, excelText, current));
+                    else if (hold is not null && na is not null)
+                        changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Invalid, "Both Hold Category and N/A Category are filled. Keep only one.", baseCategory, excelText, current));
+                    else if (excelText is not null && wanted is null)
+                        changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Invalid,
+                            $"\"{hold ?? na}\" is not an active {TemplateV4.SectionText(section)} category of this unit. Categories are created in K Data (Dashboard categories).",
+                            baseCategory, excelText, current));
+                    else if (current == wantedToken)
+                        changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.NoChange, "The app already has this value.", baseCategory, excelText, current, wantedToken));
+                    else if (current != baseCategory)
+                        changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Conflict,
+                            $"Changed in the app after the export (now \"{current ?? "none"}\"). Not applied: check which category is right and set it in the app.",
+                            baseCategory, excelText, current));
+                    else
+                    {
+                        asset.Preservation ??= new AssetPreservation { AssetId = asset.Id };
+                        asset.Preservation.DashboardCategoryId = wanted?.Id;
+                        asset.Preservation.DashboardCategory = wanted;
+                        changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Applied, null, baseCategory, excelText, current, wantedToken));
+                    }
+                }
             }
 
             if (applied.Count == 0 || asset is null) continue;

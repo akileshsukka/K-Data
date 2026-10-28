@@ -117,8 +117,8 @@ export function UnitHomePage() {
           </section>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <CategoryPanel title="Hold categories" rows={d.hold} total={d.totalHold} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} />
-            <CategoryPanel title="Not applicable categories" rows={d.notApplicable} total={d.totalNotApplicable} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} />
+            <CategoryPanel title="Hold categories" rows={d.hold} total={d.totalHold} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
+            <CategoryPanel title="Not applicable categories" rows={d.notApplicable} total={d.totalNotApplicable} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
           </div>
 
           <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -188,7 +188,7 @@ function ActivityBar({ row }: { row: ActivityRow }) {
   );
 }
 
-function CategoryPanel({ title, rows, total, unitId, canEdit }: { title: string; rows: CategoryRow[]; total: number; unitId: number; canEdit: boolean }) {
+function CategoryPanel({ title, rows, total, unitId, canEdit, byKeyword }: { title: string; rows: CategoryRow[]; total: number; unitId: number; canEdit: boolean; byKeyword: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
   return (
     <section className="rounded-lg border border-line bg-panel">
@@ -209,9 +209,13 @@ function CategoryPanel({ title, rows, total, unitId, canEdit }: { title: string;
                 aria-expanded={open === c.id}
               >
                 <span>
-                  <span className="block font-semibold text-ink">{c.label}</span>
+                  <span className="block font-semibold text-ink">
+                    {c.code && <span className="mr-2 text-hold">{c.code}</span>}
+                    {c.label}
+                  </span>
                   <span className="block text-sm text-muted">
-                    {[c.actionBy && `Action by ${c.actionBy}`, c.emailAction, c.note].filter(Boolean).join(" · ") || `Keywords: ${c.keywords.join(", ")}`}
+                    {[c.actionBy && `Action by ${c.actionBy}`, c.emailAction, c.recommendation, c.note].filter(Boolean).join(" · ") ||
+                      (byKeyword && c.keywords.length > 0 ? `Keywords: ${c.keywords.join(", ")}` : "")}
                   </span>
                 </span>
                 <span className="font-display text-2xl font-bold text-ink tabular-nums">{c.count}</span>
@@ -219,7 +223,10 @@ function CategoryPanel({ title, rows, total, unitId, canEdit }: { title: string;
               {open === c.id && (
                 <div className="px-5 pb-4">
                   {c.assets.length === 0 ? (
-                    <p className="text-sm text-muted">No equipment in this category. Keywords searched in Preservation Remarks: {c.keywords.join(", ")}.</p>
+                    <p className="text-sm text-muted">
+                      No equipment in this category.
+                      {byKeyword ? ` Keywords searched in Preservation Remarks: ${c.keywords.join(", ") || "none"}.` : " Assign it from the equipment page."}
+                    </p>
                   ) : (
                     <ul className="flex flex-wrap gap-1.5">
                       {c.assets.map((a) => (

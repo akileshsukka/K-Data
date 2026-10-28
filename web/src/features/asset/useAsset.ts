@@ -82,3 +82,13 @@ export function useAddReadings(id: string) {
 export function useSetActive(id: string) {
   return useAssetMutation(id, (active: boolean) => api<AssetProfile>(`/api/assets/${id}/active?active=${active}`, { method: "POST" }), (r) => r);
 }
+
+/** Hold / N/A dashboard category of the asset. Expected = the category id the user saw (conflict check). */
+export function useSetCategory(id: string) {
+  return useAssetMutation(
+    id,
+    (body: { categoryId: number | null; expected: number | null }) =>
+      api<AssetProfile>(`/api/assets/${id}/dashboard-category`, { method: "PUT", body }),
+    (r) => r,
+  );
+}

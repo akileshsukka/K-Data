@@ -57,7 +57,7 @@ public sealed class AssetQueries(PresAppDbContext db)
     internal async Task<Asset> LoadAsync(Guid id, bool tracking, CancellationToken ct)
     {
         var query = db.Assets
-            .Include(a => a.Preservation)
+            .Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory)
             .Include(a => a.Pipeline)
             .Include(a => a.Discipline)
             .Include(a => a.Unit).ThenInclude(u => u.Plant)
@@ -94,7 +94,10 @@ public sealed class AssetQueries(PresAppDbContext db)
             a.GateDocuments.OrderBy(d => d.Gate)
                 .Select(d => new GateDocDto(d.Gate, d.Status.ToString(), d.ReceivedOn, d.Reference, d.Note, d.UpdatedBy, d.UpdatedAtUtc)).ToList(),
             a.GroupMemberships.Select(m => new GroupRefDto(m.Group.Id, m.Group.Code, m.Group.Name, m.Group.GroupType.Name)).ToList(),
-            p.PreservedAtUtc, p.PreservedBy, updated.Item1, updated.Item2);
+            p.PreservedAtUtc, p.PreservedBy, updated.Item1, updated.Item2,
+            p.DashboardCategory is { } c
+                ? new AssetCategoryDto(c.Id, c.Code, c.Label, Reporting.UnitDashboard.SectionKey(c.Section))
+                : null);
     }
 
     public async Task<List<SearchHit>> SearchAsync(string q, int? unitId, AssetType? type, int take, CancellationToken ct)
@@ -142,9 +145,19 @@ public sealed class AssetQueries(PresAppDbContext db)
         var customIds = rows.Where(r => r.Field.StartsWith("cf:", StringComparison.Ordinal))
             .Select(r => int.TryParse(r.Field[3..], out var n) ? n : 0).Distinct().ToList();
         var customLabels = customIds.Count == 0 ? [] : await db.FieldDefinitions.AsNoTracking().Where(f => customIds.Contains(f.Id)).ToDictionaryAsync(f => $"cf:{f.Id}", f => f.Label, ct);
+
+        // Category changes are stored as ids; show "Hold Cat1 – Under inspection" instead.
+        const string categoryField = nameof(AssetPreservation.DashboardCategoryId);
+        var categoryIds = rows.Where(r => r.Field == categoryField).SelectMany(r => new[] { r.OldValue, r.NewValue })
+            .Select(v => int.TryParse(v, out var n) ? n : 0).Where(n => n > 0).Distinct().ToList();
+        var categoryNames = categoryIds.Count == 0 ? [] : (await db.DashboardCategories.AsNoTracking().Where(c => categoryIds.Contains(c.Id)).ToListAsync(ct))
+            .ToDictionary(c => c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                c => $"{(c.Section == Domain.Reporting.CategorySection.Hold ? "Hold" : "N/A")} {c.Code} – {c.Label}");
+        string? Value(string field, string? v) => field == categoryField && v is not null ? categoryNames.GetValueOrDefault(v, v) : v;
+
         return rows.Select(r => new HistoryEntry(
             r.ChangedAtUtc, r.AssetId, r.Asset?.Code, r.Asset?.Tag, r.Field, customLabels.GetValueOrDefault(r.Field) ?? LabelOf(r.EntityType, r.EntityKey, r.Field),
-            r.OldValue, r.NewValue, r.ChangedBy, r.Source.ToString())).ToList();
+            Value(r.Field, r.OldValue), Value(r.Field, r.NewValue), r.ChangedBy, r.Source.ToString())).ToList();
     }
 
     private static string LabelOf(string entityType, string entityKey, string field) => entityType switch
