@@ -2,6 +2,7 @@ using PresApp.Api.Piping;
 using Microsoft.EntityFrameworkCore;
 using PresApp.Api.Hosting;
 using PresApp.Domain.Assets;
+using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
 using PresApp.Infrastructure.Data;
 
@@ -26,7 +27,9 @@ public sealed class AssetQueries(PresAppDbContext db)
             .ToListAsync(ct);
 
         // Custom fields marked "show in register" for this asset type.
-        var columns = await db.FieldDefinitions.AsNoTracking().Where(f => f.AssetType == type && f.IsActive && f.ShowInRegister).ToListAsync(ct);
+        // Lines always carry Inspection Done, Cleaning Required and Cleaned (indicators and columns of the Pipeline Register).
+        string[] piping = type == AssetType.Pipeline ? [PipingFieldKeys.InspectionDone, PipingFieldKeys.CleaningRequired, PipingFieldKeys.Cleaned] : [];
+        var columns = await db.FieldDefinitions.AsNoTracking().Where(f => f.AssetType == type && f.IsActive && (f.ShowInRegister || piping.Contains(f.Key))).ToListAsync(ct);
         var columnIds = columns.Select(c => c.Id).ToList();
         var custom = columns.Count == 0 ? [] : (await db.FieldValues.AsNoTracking()
                 .Where(v => columnIds.Contains(v.FieldDefinitionId) && v.Asset.UnitId == unitId && v.Asset.Type == type).ToListAsync(ct))
@@ -44,7 +47,8 @@ public sealed class AssetQueries(PresAppDbContext db)
                 r.P?.PreservedByEu, r.P?.ActionBy, r.P?.N2BlanketStatus, r.P?.CurrentActivity, r.P?.PreservationRemarks,
                 r.P?.LastFieldActionDate, r.P?.PreservedAtUtc, r.DocsPending, r.IsActive,
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
-                r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id)))
+                r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
+                r.P?.G1BulkLiquidDrained))
             .ToList();
     }
 

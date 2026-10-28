@@ -16,6 +16,8 @@ public static partial class LineNumber
     public static LineNumberParts? Parse(string? lineNumber)
     {
         if (string.IsNullOrWhiteSpace(lineNumber)) return null;
+        // One line written with two numbers in the same cell (a size change, e.g. 16" and 12"): the first one gives size and spec.
+        if (lineNumber.Contains('\n')) lineNumber = First(lineNumber);
         var m = Pattern().Match(lineNumber.Trim().Replace('”', '"').Replace('″', '"'));
         if (!m.Success || !TryParseSize(m.Groups["size"].Value, out var size)) return null;
         return new LineNumberParts(
@@ -33,6 +35,10 @@ public static partial class LineNumber
     /// </summary>
     public static string IdentityKey(LineNumberParts p) =>
         string.Join('|', p.Unit, p.Sequence.TrimStart('0'), p.Service, p.SizeIn.ToString("0.###", CultureInfo.InvariantCulture), p.Spec);
+
+    /// <summary>First non-empty number of a cell that holds several ("39-0061-RSX-16"-13030-H⏎39-0061-RSX-12"-13030-H").</summary>
+    public static string First(string lineNumber) =>
+        lineNumber.Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
 
     /// <summary>"3/4" → 0.75, "1-1/2" or "1 1/2" → 1.5, "16" → 16, "2.5" → 2.5.</summary>
     public static bool TryParseSize(string text, out decimal inches)

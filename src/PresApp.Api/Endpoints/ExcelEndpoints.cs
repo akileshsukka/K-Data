@@ -40,6 +40,23 @@ public static class ExcelEndpoints
             return Results.File(result.Content, XlsxType, result.FileName);
         }).RequirePermission(Permissions.ExcelExport);
 
+        // Piping line list (Line List + Summary), imported back through the same import as the unit file.
+        app.MapGet("/api/units/{unitId:int}/excel/piping/export", async (int unitId, ClaimsPrincipal user, PipingWorkbookExporter exporter, CancellationToken ct) =>
+        {
+            var result = await exporter.ExportAsync(unitId, user.Identity?.Name ?? "unknown", ct);
+            return Results.File(result.Content, XlsxType, result.FileName);
+        }).RequirePermission(Permissions.ExcelExport);
+
+        // Figures of the piping Summary for the app (Unit overview and Pipeline Register).
+        app.MapGet("/api/units/{unitId:int}/piping-summary", (int unitId, Piping.PipingSummaryService s, CancellationToken ct) => s.GetAsync(unitId, ct))
+            .RequirePermission(Permissions.AssetsView);
+
+        // Notes under the Summary of the piping line list.
+        app.MapGet("/api/units/{unitId:int}/piping-notes", (int unitId, Piping.PipingNoteService s, CancellationToken ct) => s.ListAsync(unitId, ct))
+            .RequirePermission(Permissions.AssetsView);
+        app.MapPut("/api/units/{unitId:int}/piping-notes", (int unitId, Piping.SavePipingNoteRequest r, Piping.PipingNoteService s, CancellationToken ct) =>
+            s.SaveAsync(unitId, r, ct)).RequirePermission(Permissions.AssetsEdit);
+
         app.MapPost("/api/units/{unitId:int}/excel/import", async (int unitId, IFormFile file, ClaimsPrincipal user, ExcelImportService service, CancellationToken ct) =>
         {
             await using var stream = file.OpenReadStream();
@@ -97,6 +114,20 @@ public static class ExcelEndpoints
         var templates = app.MapGroup("/api/excel-templates").RequirePermission(Permissions.CatalogManage);
 
         templates.MapGet("", (ExcelTemplateService s, CancellationToken ct) => s.ListAsync(ct));
+
+        // Piping line list template: one for the whole project.
+        templates.MapGet("/piping", (ExcelTemplateService s, CancellationToken ct) => s.PipingAsync(ct));
+        templates.MapPut("/piping", async (IFormFile file, ClaimsPrincipal user, ExcelTemplateService s, CancellationToken ct) =>
+        {
+            await using var stream = file.OpenReadStream();
+            return await s.UploadPipingAsync(stream, file.FileName, user.Identity?.Name ?? "unknown", ct);
+        }).DisableAntiforgery();
+        templates.MapGet("/piping/file", async (ExcelTemplateService s, CancellationToken ct) =>
+        {
+            var (name, content) = await s.DownloadPipingAsync(ct);
+            return Results.File(content, XlsxType, name);
+        });
+        templates.MapDelete("/piping", (ExcelTemplateService s, CancellationToken ct) => s.ResetPipingAsync(ct));
 
         templates.MapPut("/{unitId:int}", async (int unitId, IFormFile file, ClaimsPrincipal user, ExcelTemplateService s, CancellationToken ct) =>
         {

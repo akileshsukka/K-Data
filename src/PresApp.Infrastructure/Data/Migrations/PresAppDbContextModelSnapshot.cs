@@ -1308,6 +1308,34 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.ToTable("ImportRun", (string)null);
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Imports.WorkbookTemplate", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("WorkbookTemplate", (string)null);
+                });
+
             modelBuilder.Entity("PresApp.Domain.Monitoring.Reading", b =>
                 {
                     b.Property<long>("Id")
@@ -1446,6 +1474,57 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasFilter("[Code] IS NOT NULL");
 
                     b.ToTable("DashboardCategory", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Reporting.PipingNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("NoteDate")
+                        .HasColumnType("date");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UnitId", "NoteDate");
+
+                    b.ToTable("PipingNote", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Reporting.UnitReportConfig", b =>
@@ -2005,6 +2084,17 @@ namespace PresApp.Infrastructure.Data.Migrations
                 });
 
             modelBuilder.Entity("PresApp.Domain.Reporting.DashboardCategory", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Unit");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Reporting.PipingNote", b =>
                 {
                     b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
                         .WithMany()

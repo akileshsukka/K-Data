@@ -61,6 +61,11 @@ export function ExcelPage() {
               {o?.templateFileName && <p className="mt-3 text-sm text-muted">Template: {o.templateFileName}, uploaded {formatDateTime(o.templateUploadedAtUtc)}</p>}
             </>
           )}
+          <div className="mt-5 border-t border-line pt-4">
+            <h3 className="font-semibold">Piping line list</h3>
+            <p className="mt-1 text-muted">Line List and Summary of the active lines, in the engineers' layout. It is uploaded back here, like the unit Excel.</p>
+            <div className="mt-3"><DownloadExcelButton unitId={unitId} variant="secondary" piping label={`Download ${unit?.name ?? ""} line list`} /></div>
+          </div>
         </section>
 
         <section className="rounded-lg border border-line bg-panel p-5">

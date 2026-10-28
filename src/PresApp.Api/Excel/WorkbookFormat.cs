@@ -15,7 +15,8 @@ public sealed record StructureSignature(string Table, int HeaderRow, int FirstCo
 /// <summary>Values of one asset at export: what the engineer saw.</summary>
 public sealed record BaseRow(Guid Key, string? Tag, string Code, Dictionary<string, string?> Values);
 
-public sealed record BaseSnapshot(List<BaseRow> Rows)
+/// <summary>Values at export. <c>Notes</c>: piping Summary notes by key ("" general, yyyy-MM-dd); null in older files.</summary>
+public sealed record BaseSnapshot(List<BaseRow> Rows, Dictionary<string, string>? Notes = null)
 {
     public string ToJson() => JsonSerializer.Serialize(this, WorkbookFormat.Json);
     public static BaseSnapshot FromJson(string json) =>

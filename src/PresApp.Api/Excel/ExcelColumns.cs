@@ -74,7 +74,7 @@ public static partial class ExcelColumns
                 case "operatingunit" or "unit": role = ColumnRole.OperatingUnit; break;
                 case "discipline": role = ColumnRole.Discipline; break;
                 case "equipno" or "equipmentno" or "tag" or "equipmenttag": role = ColumnRole.Tag; break;
-                case "lineno" or "linenumber" when onboarding: role = ColumnRole.Tag; break;
+                case "lineno" or "linenumber" or "tagno" when onboarding: role = ColumnRole.Tag; break;
                 case "equipdescription" or "description" or "equipmentdescription": role = ColumnRole.Description; break;
                 case "holdcategory" when !onboarding: role = ColumnRole.HoldCategory; break;
                 case "nacategory" when !onboarding: role = ColumnRole.NaCategory; break;

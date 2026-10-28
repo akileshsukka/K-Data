@@ -33,6 +33,8 @@ public static class MonitoringEndpoints
             s.AddMembersAsync(id, r.AssetIds, user, ct));
         manage.MapPost("/{id:int}/active", (int id, bool active, GroupService s, CancellationToken ct) => s.SetActiveAsync(id, active, ct));
         manage.MapDelete("/{id:int}", async (int id, GroupService s, CancellationToken ct) => { await s.DeleteAsync(id, ct); return Results.NoContent(); });
+        manage.MapPost("/{id:int}/members/paste", (int id, PasteMembersRequest r, ClaimsPrincipal user, GroupService s, CancellationToken ct) =>
+            s.PasteMembersAsync(id, r, user, ct));
         manage.MapPost("/{id:int}/members/remove", (int id, MembersRequest r, GroupService s, CancellationToken ct) =>
             s.RemoveMembersAsync(id, r.AssetIds, ct));
     }

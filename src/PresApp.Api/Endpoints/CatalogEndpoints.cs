@@ -17,7 +17,7 @@ public static class CatalogEndpoints
     public sealed record OptionSetDto(string Key, string Label, IReadOnlyList<string> Values);
     public sealed record DisciplineDto(int Id, string Name, string AssetType, string? Prefix);
     public sealed record FieldDto(string Key, string Label, string Section, string Kind, string? OptionSet, int MaxLength,
-        string Permission, int? Gate, bool BulkEditable, string? OnlyFor);
+        string Permission, int? Gate, bool BulkEditable, string? OnlyFor, string? PipelineOptionSet = null, bool PipelineMultiple = false);
     public sealed record LineCodeDto(int Id, string Kind, string Code, string Description, bool IsActive);
     public sealed record SaveLineCodeRequest(string Kind, string Code, string Description, bool IsActive = true);
     public sealed record MeasurementDto(int Id, string Key, string Label, string? UnitOfMeasure, int? Gate, int? EvidenceForGate,
@@ -44,7 +44,7 @@ public static class CatalogEndpoints
             .Select(d => new DisciplineDto(d.Id, d.Name, d.AssetType.ToString(), d.Prefix)));
 
         group.MapGet("/fields", () => PreservationFields.All.Select(f =>
-            new FieldDto(f.Key, f.Label, f.Section, f.Kind.ToString(), f.OptionSet, f.MaxLength, f.Permission, f.Gate, f.BulkEditable && f.IsEditable, f.OnlyFor?.ToString())));
+            new FieldDto(f.Key, f.Label, f.Section, f.Kind.ToString(), f.OptionSet, f.MaxLength, f.Permission, f.Gate, f.BulkEditable && f.IsEditable, f.OnlyFor?.ToString(), f.PipelineOptionSet, f.PipelineMultiple)));
 
         group.MapGet("/line-codes", async (PresAppDbContext db, CancellationToken ct) =>
             (await db.LineCodes.AsNoTracking().OrderBy(c => c.Kind).ThenBy(c => c.Code).ToListAsync(ct))

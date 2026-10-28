@@ -23,3 +23,17 @@ public class ImportFile
     public ImportRun ImportRun { get; set; } = null!;
     public byte[] Content { get; set; } = [];
 }
+
+/// <summary>
+/// A template shared by every unit (key "Piping" = the piping line list). Without one, the app uses its built-in default.
+/// </summary>
+public class WorkbookTemplate
+{
+    public const string PipingKey = "Piping";
+
+    public string Key { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public byte[] Content { get; set; } = [];
+    public DateTime UploadedAtUtc { get; set; }
+    public string UploadedBy { get; set; } = "";
+}

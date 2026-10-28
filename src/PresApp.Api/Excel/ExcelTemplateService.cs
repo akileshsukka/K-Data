@@ -13,6 +13,8 @@ namespace PresApp.Api.Excel;
 /// the categories are taken from the template (Categories table + the Action By / Email Action / note
 /// columns of the dashboard), so the app becomes their single place from then on.
 /// </summary>
+public sealed record PipingTemplateDto(bool IsDefault, string FileName, DateTime? UploadedAtUtc, string? UploadedBy, List<string> Notes);
+
 public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvider clock)
 {
     public async Task<List<TemplateDto>> ListAsync(CancellationToken ct)
@@ -63,6 +65,49 @@ public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvid
         }
         await db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).First(t => t.UnitId == unit.Id);
+    }
+
+    // ------------------------------------------------------------------ piping line list template (one for the whole project)
+
+    public async Task<PipingTemplateDto> PipingAsync(CancellationToken ct, List<string>? notes = null)
+    {
+        var t = await db.WorkbookTemplates.AsNoTracking().Where(x => x.Key == WorkbookTemplate.PipingKey)
+            .Select(x => new { x.FileName, x.UploadedAtUtc, x.UploadedBy }).FirstOrDefaultAsync(ct);
+        return new PipingTemplateDto(t is null, t?.FileName ?? PipingTemplate.DefaultFileName, t?.UploadedAtUtc, t?.UploadedBy, notes ?? []);
+    }
+
+    /// <summary>Checks the template before it replaces the current one; the notes say what K Data will and will not fill.</summary>
+    public async Task<PipingTemplateDto> UploadPipingAsync(Stream file, string fileName, string user, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer, ct);
+        if (buffer.Length == 0 || buffer.Length > ExcelImportService.MaxFileBytes) throw ApiProblem.Invalid("Upload an .xlsx file of at most 20 MB.");
+        var bytes = buffer.ToArray();
+        List<string> notes;
+        using (var wb = PipingWorkbookExporter.Open(bytes)) notes = PipingTemplate.Describe(wb);
+
+        var template = await db.WorkbookTemplates.FirstOrDefaultAsync(t => t.Key == WorkbookTemplate.PipingKey, ct);
+        if (template is null) db.WorkbookTemplates.Add(template = new WorkbookTemplate { Key = WorkbookTemplate.PipingKey });
+        template.FileName = Path.GetFileName(fileName);
+        template.Content = bytes;
+        template.UploadedAtUtc = clock.GetUtcNow().UtcDateTime;
+        template.UploadedBy = user;
+        await db.SaveChangesAsync(ct);
+        return await PipingAsync(ct, notes);
+    }
+
+    /// <summary>The template in use: the uploaded one, or the built-in default to start a new one from.</summary>
+    public async Task<(string FileName, byte[] Content)> DownloadPipingAsync(CancellationToken ct)
+    {
+        var info = await PipingAsync(ct);
+        return (info.FileName, await PipingWorkbookExporter.TemplateAsync(db, ct));
+    }
+
+    /// <summary>Back to the built-in default.</summary>
+    public async Task<PipingTemplateDto> ResetPipingAsync(CancellationToken ct)
+    {
+        await db.WorkbookTemplates.Where(t => t.Key == WorkbookTemplate.PipingKey).ExecuteDeleteAsync(ct);
+        return await PipingAsync(ct);
     }
 
     public async Task<(string FileName, byte[] Content)> DownloadAsync(int unitId, CancellationToken ct)

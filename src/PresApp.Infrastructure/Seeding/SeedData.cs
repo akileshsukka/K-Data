@@ -52,6 +52,19 @@ internal static class SeedData
         // Exact spellings of the remaining values come with the SharePoint migration.
         (OptionSetKeys.ActionBy, "Action By", ["ADNOC", "Enermech", "Petrofac"], []),
         (OptionSetKeys.ReadyForPreservation, "Ready For Preservation", ["Yes", "No"], []),
+        // Pipeline Register (U39 piping line list, 27-Oct-2026). Several activities per line are allowed.
+        (OptionSetKeys.PipingCurrentActivity, "Current Activity (piping)",
+            ["Line cut", "Debris inside; jetting required", "Preservation ongoing", "Pump suction spool removed", "Line dropped", "Spool dropped"], []),
+        // The client line list writes "Yes": it is stored as Completed and written back as "Yes".
+        (OptionSetKeys.PipingBulkLiquidDrained, "G1 - Bulk liquid drained (piping)", ["Completed"], []),
+    ];
+
+    /// <summary>Custom fields of the Pipeline Register with a fixed key: (key, label, kind, list values, sort).</summary>
+    public static readonly (string Key, string Label, FieldDataType Kind, string[] Options, int Sort)[] PipingFields =
+    [
+        (PipingFieldKeys.InspectionDone, "Inspection Done", FieldDataType.YesNo, [], 10),
+        (PipingFieldKeys.CleaningRequired, "Cleaning Required", FieldDataType.List, ["Hydromilling", "TBC"], 20),
+        (PipingFieldKeys.Cleaned, "Cleaned", FieldDataType.List, ["Yes"], 30),
     ];
 
     /// <summary>(name, asset type, prefix, sync to Simpro, sort).</summary>

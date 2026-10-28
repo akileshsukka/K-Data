@@ -36,4 +36,22 @@ public static class OptionSetKeys
     public const string EmWalkdown = "EMWalkdown";
     public const string ActionBy = "ActionBy";
     public const string ReadyForPreservation = "ReadyForPreservation";
+
+    // Lists of the Pipeline Register (lines never show the equipment values and vice versa).
+    public const string PipingCurrentActivity = "PipingCurrentActivity";
+    public const string PipingBulkLiquidDrained = "PipingBulkLiquidDrained";
+}
+
+/// <summary>
+/// Fixed keys of the custom fields of the Pipeline Register that the app relies on (register indicators,
+/// piping Excel and its Summary). Created at startup; the label and list values can be edited in Admin → Custom fields.
+/// </summary>
+public static class PipingFieldKeys
+{
+    /// <summary>Yes / No.</summary>
+    public const string InspectionDone = "InspectionDone";
+    /// <summary>List (Hydromilling, TBC…): one Summary column per value.</summary>
+    public const string CleaningRequired = "CleaningRequired";
+    /// <summary>List (Yes; Not Applicable can be added later). Empty = not cleaned or not required.</summary>
+    public const string Cleaned = "Cleaned";
 }

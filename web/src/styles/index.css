@@ -30,6 +30,7 @@
   --color-ongoing: #b45309;
   --color-hold: #b91c1c;
   --color-na: #64748b;
+  --color-info: #1d4ed8;
 }
 
 @layer base {

@@ -26,7 +26,7 @@ namespace PresApp.Api.Excel;
 /// Field Action Date when a gate is closed; G2/G3/G4 completed without a reading are applied with a warning.
 /// The service takes a stream and a file name so a server watch folder can feed it later.
 /// </summary>
-public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, TimeProvider clock)
+public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext audit, TimeProvider clock, CustomFields.CustomFieldService customFields)
 {
     public const long MaxFileBytes = 20L * 1024 * 1024;
     public const int DefaultMaxAgeHours = 48;
@@ -134,6 +134,7 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
     private async Task<Plan> AnalyseAsync(XLWorkbook wb, int unitId, bool tracking, CancellationToken ct, bool allowProcessing = false)
     {
         var session = await CheckSessionAsync(wb, unitId, tracking, allowProcessing, ct);
+        if (session.AssetType == AssetType.Pipeline) return await AnalysePipingAsync(wb, session, tracking, ct);
         var signature = StructureSignature.FromJson(session.StructureSignature)
                         ?? throw new ImportRejected("The export of this file has no recorded structure. Download a new file.");
         var table = CheckStructure(wb, signature);
@@ -221,7 +222,7 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
                 var current = FieldValues.Read(field, asset);
                 if (!asset.IsActive) { changes.Add(Change(field.Key, ImportOutcome.Rejected, "Inactive equipment: it cannot be edited.", baseValue, excelClean, current)); continue; }
 
-                var error = FieldValues.Prepare(field, excel, AssetEditor.OptionsFor(field, options), out var value);
+                var error = FieldValues.Prepare(field, asset.Type, excel, options, out var value);
                 if (error is not null) { changes.Add(Change(field.Key, ImportOutcome.Invalid, error, baseValue, excelClean, current)); continue; }
                 var newText = FieldValues.Format(value);
 
@@ -334,8 +335,8 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
         var meta = WorkbookFormat.ReadMeta(wb);
         if (!meta.TryGetValue("SessionId", out var sessionText))
         {
-            throw new ImportRejected(WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable) is null
-                ? "This is not a unit master list (no MasterList table)."
+            throw new ImportRejected(WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable) is null && WorkbookFormat.FindTable(wb, PipingLayout.TableName) is null
+                ? "This is not a unit master list or piping line list downloaded from K Data."
                 : "This file was not downloaded from K Data, so its changes cannot be traced. Download the unit file from the Excel page; client lists are loaded with Onboarding.");
         }
         var version = int.TryParse(meta.GetValueOrDefault("FormatVersion"), out var v) ? v : 0;
@@ -364,7 +365,7 @@ public sealed class ExcelImportService(PresAppDbContext db, AuditContext audit, 
     private static IXLTable CheckStructure(XLWorkbook wb, StructureSignature expected)
     {
         var table = WorkbookFormat.FindTable(wb, expected.Table)
-                    ?? throw new ImportRejected("The MasterList table was deleted or renamed. Nothing was imported: download a new file.");
+                    ?? throw new ImportRejected($"The {expected.Table} table was deleted or renamed. Nothing was imported: download a new file.");
         var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c).Trim()).ToList();
         var want = expected.Headers.Select(h => h.Trim()).ToList();
         var firstColumn = table.HeadersRow().FirstCell().Address.ColumnNumber;

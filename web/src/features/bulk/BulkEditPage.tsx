@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
-import type { BulkResult, RegisterRow, SearchHit } from "../../api/types";
+import { Perm, type BulkResult, type CategoryOption, type RegisterRow, type SearchHit } from "../../api/types";
 import { useFields, useOptions, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { AssetSearch } from "../../components/AssetSearch";
@@ -19,6 +19,7 @@ interface Picked {
 }
 
 const PRESERVED = "PreservedAt";
+const CATEGORY = "DashboardCategory";
 
 /** Change one field on many assets: pick them, choose field and value, preview, confirm. Every change is audited. */
 export function BulkEditPage() {
@@ -58,6 +59,14 @@ export function BulkEditPage() {
   const bulkFields = (fields.data ?? []).filter((f) => f.bulkEditable && session.can(f.permission));
   const field = bulkFields.find((f) => f.key === fieldKey);
   const canPreserve = session.can("assets.markPreserved");
+  const canCategory = session.can(Perm.assetsEdit);
+  const categories = useQuery({
+    queryKey: ["category-options", unitId],
+    queryFn: ({ signal }) => api<CategoryOption[]>(`/api/units/${unitId}/category-options`, { signal }),
+    enabled: canCategory,
+  });
+  const holdOptions = (categories.data ?? []).filter((o) => o.section === "Hold");
+  const naOptions = (categories.data ?? []).filter((o) => o.section === "NotApplicable");
   const ids = new Set(list.map((p) => p.id));
 
   function add(items: Picked[]) {
@@ -89,6 +98,8 @@ export function BulkEditPage() {
         client.invalidateQueries({ queryKey: ["register"] });
         client.invalidateQueries({ queryKey: ["asset"] });
         client.invalidateQueries({ queryKey: ["unit-summary"] });
+        client.invalidateQueries({ queryKey: ["dashboard"] });
+        client.invalidateQueries({ queryKey: ["categories"] });
         setPreview(null);
         setPicked([]);
         setValue("");
@@ -175,6 +186,7 @@ export function BulkEditPage() {
               <SelectInput value={fieldKey} onChange={(e) => { setFieldKey(e.target.value); setValue(""); setPreview(null); }}>
                 <option value="" disabled>Choose a field</option>
                 {canPreserve && <option value={PRESERVED}>Mark as preserved (date)</option>}
+                {canCategory && <option value={CATEGORY}>Dashboard category (Hold / N/A)</option>}
                 {["Gates", "Status", "Client tracking", "Identification"].map((sec) => (
                   <optgroup key={sec} label={sec}>
                     {bulkFields.filter((f) => f.section === sec).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -185,6 +197,24 @@ export function BulkEditPage() {
             {fieldKey === PRESERVED && (
               <Field label="Preserved from" hint="Empty removes the mark.">
                 <TextInput type="date" value={value} onChange={(e) => { setValue(e.target.value); setPreview(null); }} />
+              </Field>
+            )}
+            {fieldKey === CATEGORY && (
+              <Field label="Category" hint="None removes the category. Lines are skipped.">
+                <SelectInput value={value} disabled={categories.isPending} onChange={(e) => { setValue(e.target.value); setPreview(null); }}>
+                  <option value="">None</option>
+                  {holdOptions.length > 0 && (
+                    <optgroup label="Hold">
+                      {holdOptions.map((o) => <option key={o.id} value={o.id}>{o.code} – {o.label}</option>)}
+                    </optgroup>
+                  )}
+                  {naOptions.length > 0 && (
+                    <optgroup label="Not Applicable">
+                      {naOptions.map((o) => <option key={o.id} value={o.id}>{o.code} – {o.label}</option>)}
+                    </optgroup>
+                  )}
+                </SelectInput>
+                {categories.data?.length === 0 && <span className="mt-1 block text-sm text-muted">This unit has no categories yet.</span>}
               </Field>
             )}
             {field && (

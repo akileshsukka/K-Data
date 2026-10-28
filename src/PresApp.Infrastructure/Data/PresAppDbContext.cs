@@ -43,6 +43,7 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<DashboardCategory> DashboardCategories => Set<DashboardCategory>();
     public DbSet<CategoryKeyword> CategoryKeywords => Set<CategoryKeyword>();
     public DbSet<UnitReportConfig> UnitReportConfigs => Set<UnitReportConfig>();
+    public DbSet<PipingNote> PipingNotes => Set<PipingNote>();
 
     // Audit, imports, Simpro
     public DbSet<ChangeLog> ChangeLogs => Set<ChangeLog>();
@@ -51,6 +52,7 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<ImportChange> ImportChanges => Set<ImportChange>();
     public DbSet<ImportFile> ImportFiles => Set<ImportFile>();
     public DbSet<ExcelTemplate> ExcelTemplates => Set<ExcelTemplate>();
+    public DbSet<WorkbookTemplate> WorkbookTemplates => Set<WorkbookTemplate>();
     public DbSet<SimproSyncRun> SimproSyncRuns => Set<SimproSyncRun>();
     public DbSet<SimproSyncItem> SimproSyncItems => Set<SimproSyncItem>();
     public DbSet<SimproBeforeImage> SimproBeforeImages => Set<SimproBeforeImage>();

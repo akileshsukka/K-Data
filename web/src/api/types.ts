@@ -92,6 +92,12 @@ export interface FieldDef {
   gate: number | null;
   bulkEditable: boolean;
   onlyFor: AssetType | null;
+  /** List used for lines instead of optionSet (e.g. piping Current Activity). */
+  pipelineOptionSet?: string | null;
+  /** Lines can hold several values of the list, one per line. */
+  pipelineMultiple?: boolean;
+  /** Set by the asset page for the asset shown: several values allowed. */
+  multiple?: boolean;
 }
 
 export interface OptionSet {
@@ -145,6 +151,7 @@ export interface RegisterRow {
   groups: string[] | null;
   circuit: string | null;
   custom: Record<string, string | null> | null;
+  bulkLiquidDrained?: string | null;
 }
 
 export type CustomFieldType = "Text" | "Number" | "Date" | "List" | "YesNo";
@@ -675,3 +682,51 @@ export interface MembersResult {
   detail: GroupDetail;
 }
 
+
+export interface PasteMembersRow {
+  row: number;
+  text: string;
+  assetId: string | null;
+  code: string | null;
+  tag: string | null;
+  outcome: "Add" | "Added" | "Already in" | "Not found" | "Several";
+  note: string | null;
+}
+
+export interface PasteMembersResult {
+  toAdd: number;
+  alreadyIn: number;
+  notFound: number;
+  rows: PasteMembersRow[];
+  detail: GroupDetail | null;
+}
+
+/** Fixed keys of the Pipeline custom fields the app relies on. */
+export const PipingFieldKeys = { inspectionDone: "InspectionDone", cleaningRequired: "CleaningRequired", cleaned: "Cleaned" } as const;
+export const pipingFixedKeys: string[] = Object.values(PipingFieldKeys);
+
+export interface PipingCount {
+  done: number;
+  total: number;
+}
+
+export interface PipingSummary {
+  lines: number;
+  lengthM: number;
+  walkdown: PipingCount;
+  drained: PipingCount;
+  inspected: PipingCount;
+  /** Lines cleaned out of the cleaning scope. */
+  cleaned: PipingCount;
+  noCleaningSet: number;
+  cleaning: { value: string; lines: number; inScope: boolean }[];
+  byService: { code: string; description: string | null; lines: number; walkdown: number; drained: number; inspected: number; scope: number; cleaned: number }[];
+}
+
+export interface PipingTemplateInfo {
+  isDefault: boolean;
+  fileName: string;
+  uploadedAtUtc: string | null;
+  uploadedBy: string | null;
+  notes: string[];
+}

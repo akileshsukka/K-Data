@@ -24,6 +24,9 @@ public sealed record GroupDetail(GroupDto Group, List<GroupMemberDto> Members);
 public sealed record SaveGroupRequest(int TypeId, string? Code, string Name, string? Description, int? UnitId, bool IsActive = true);
 public sealed record MembersRequest(IReadOnlyList<Guid> AssetIds);
 public sealed record MembersResult(int Added, int AlreadyIn, int Removed, GroupDetail Detail);
+public sealed record PasteMembersRequest(string? Text, bool Apply);
+public sealed record PasteMembersRow(int Row, string Text, Guid? AssetId, string? Code, string? Tag, string Outcome, string? Note);
+public sealed record PasteMembersResult(int ToAdd, int AlreadyIn, int NotFound, List<PasteMembersRow> Rows, GroupDetail? Detail);
 
 /// <summary>
 /// Internal groups of assets of any type (Workpack, Circuit, System…). They never go to the client Excel nor to Simpro.
@@ -146,6 +149,85 @@ public sealed class GroupService(PresAppDbContext db, TimeProvider clock)
         g.UpdatedAtUtc = now;
         await db.SaveChangesAsync(ct);
         return new MembersResult(assets.Count - existing.Count, existing.Count, 0, await DetailAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Adds the assets of a pasted list (line numbers, tags or Equipment IDs, one per line, e.g. a column copied from Excel)
+    /// without picking them one by one. Lines are also found when the number is written differently (insulation code,
+    /// 1-1/2" or 1.5") or when they hold two numbers. A circuit holds each line once: lines in another circuit are moved.
+    /// Preview first (<c>Apply = false</c>), then apply.
+    /// </summary>
+    public async Task<PasteMembersResult> PasteMembersAsync(int id, PasteMembersRequest request, ClaimsPrincipal user, CancellationToken ct)
+    {
+        var g = await db.Groups.Include(x => x.GroupType).FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw ApiProblem.NotFound("Group");
+        if (!g.IsActive) throw ApiProblem.Invalid("The group is inactive. Activate it first.");
+        var tokens = (request.Text ?? "").Replace("\r", "").Replace("\"\"", "\"").Split(['\n', '\t', ';'])
+            .Select(t => ValueNormalizer.CleanText(t.Trim().Trim('"')))
+            .OfType<string>().Where(t => !ValueNormalizer.ListKey(t).StartsWith("lineno", StringComparison.Ordinal) && ValueNormalizer.ListKey(t) is not ("tagno" or "equipno"))
+            .ToList();
+        if (tokens.Count == 0) throw ApiProblem.Invalid("Paste at least one line number, tag or Equipment ID.");
+        if (tokens.Count > 2000) throw ApiProblem.Invalid("Paste at most 2,000 at a time.");
+
+        var assets = await db.Assets.AsNoTracking().Where(a => a.IsActive && (g.UnitId == null || a.UnitId == g.UnitId))
+            .Select(a => new { a.Id, a.Code, a.Tag, a.Type }).ToListAsync(ct);
+        // Every number of a tag (a line cell can hold two), by exact text and by line identity.
+        var byText = new Dictionary<string, HashSet<Guid>>();
+        var byIdentity = new Dictionary<string, HashSet<Guid>>();
+        void Index(Dictionary<string, HashSet<Guid>> d, string key, Guid assetId) { if (!d.TryGetValue(key, out var set)) d[key] = set = []; set.Add(assetId); }
+        foreach (var a in assets)
+        {
+            Index(byText, ValueNormalizer.ListKey(a.Code), a.Id);
+            if (a.Tag is null) continue;
+            Index(byText, ValueNormalizer.ListKey(a.Tag), a.Id);
+            foreach (var part in a.Tag.Split('\n').Select(p => p.Trim()).Where(p => p.Length > 0))
+            {
+                Index(byText, ValueNormalizer.ListKey(part), a.Id);
+                if (LineNumber.Parse(part) is { } parts) Index(byIdentity, LineNumber.IdentityKey(parts), a.Id);
+            }
+        }
+        var info = assets.ToDictionary(a => a.Id);
+        var members = (await db.GroupMembers.Where(m => m.GroupId == id).Select(m => m.AssetId).ToListAsync(ct)).ToHashSet();
+        var isCircuit = string.Equals(g.GroupType.Name, "Circuit", StringComparison.OrdinalIgnoreCase);
+        var otherCircuits = isCircuit
+            ? await db.GroupMembers.Where(m => m.GroupId != id && m.Group.GroupTypeId == g.GroupTypeId).Select(m => new { m.AssetId, m.GroupId, m.Group.Code }).ToListAsync(ct)
+            : [];
+
+        var rows = new List<PasteMembersRow>();
+        var toAdd = new List<Guid>();
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var t = tokens[i];
+            var found = byText.GetValueOrDefault(ValueNormalizer.ListKey(t))
+                        ?? (LineNumber.Parse(t) is { } p ? byIdentity.GetValueOrDefault(LineNumber.IdentityKey(p)) : null);
+            if (found is null || found.Count == 0) { rows.Add(new(i + 1, t, null, null, null, "Not found", g.UnitId is null ? null : "Not an active asset of this unit.")); continue; }
+            if (found.Count > 1)
+            {
+                rows.Add(new(i + 1, t, null, null, null, "Several", $"Matches {string.Join(", ", found.Select(f => info[f].Tag ?? info[f].Code))}. Paste the exact line number."));
+                continue;
+            }
+            var a = info[found.First()];
+            if (members.Contains(a.Id) || toAdd.Contains(a.Id)) { rows.Add(new(i + 1, t, a.Id, a.Code, a.Tag, "Already in", null)); continue; }
+            var moving = otherCircuits.Where(o => o.AssetId == a.Id).Select(o => o.Code).ToList();
+            rows.Add(new(i + 1, t, a.Id, a.Code, a.Tag, request.Apply ? "Added" : "Add", moving.Count > 0 ? $"Moved from {string.Join(", ", moving)}." : null));
+            toAdd.Add(a.Id);
+        }
+
+        GroupDetail? detail = null;
+        if (request.Apply && toAdd.Count > 0)
+        {
+            if (isCircuit)
+            {
+                var old = await db.GroupMembers.Where(m => m.GroupId != id && m.Group.GroupTypeId == g.GroupTypeId && toAdd.Contains(m.AssetId)).ToListAsync(ct);
+                db.GroupMembers.RemoveRange(old);
+            }
+            var now = clock.GetUtcNow().UtcDateTime;
+            foreach (var assetId in toAdd)
+                db.GroupMembers.Add(new AssetGroupMember { GroupId = id, AssetId = assetId, AddedAtUtc = now, AddedBy = user.Identity?.Name ?? "" });
+            g.UpdatedAtUtc = now;
+            await db.SaveChangesAsync(ct);
+        }
+        if (request.Apply) detail = await DetailAsync(id, ct);
+        return new PasteMembersResult(toAdd.Count, rows.Count(r => r.Outcome == "Already in"), rows.Count(r => r.Outcome is "Not found" or "Several"), rows, detail);
     }
 
     public async Task<MembersResult> RemoveMembersAsync(int id, IReadOnlyList<Guid> assetIds, CancellationToken ct)

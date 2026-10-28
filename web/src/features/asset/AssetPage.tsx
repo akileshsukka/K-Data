@@ -37,7 +37,10 @@ export function AssetPage() {
   if (asset.isPending || fields.isPending || options.isPending) return <p className="text-muted">Loading…</p>;
   if (asset.error) return <p className="text-hold">{asset.error.message}</p>;
   const a = asset.data;
-  const defs = fields.data ?? [];
+  // Lines use their own lists (e.g. piping Current Activity, several values allowed).
+  const defs = (fields.data ?? []).map((f) =>
+    a.type === "Pipeline" && f.pipelineOptionSet ? { ...f, optionSet: f.pipelineOptionSet, multiple: !!f.pipelineMultiple } : f,
+  );
   const opts = options.data ?? {};
   const section = (name: string) => defs.filter((f) => f.section === name && (!f.onlyFor || f.onlyFor === a.type));
   const registerPath = a.type === "ElectricalInstrument" ? "ei" : a.type === "Pipeline" ? "lines" : "equipment";
@@ -84,7 +87,8 @@ export function AssetPage() {
               {a.type === "Pipeline" && (
                 <div>
                   <FieldSection title="Line" fields={section("Line")} asset={a} options={opts} onProposals={setProposals} />
-                  <LineMeaning service={a.values.Service} spec={a.values.PipeSpec} />
+                  <SpecDetails spec={a.values.PipeSpec} />
+                  <LineMeaning service={a.values.Service} />
                 </div>
               )}
               <FieldSection title="Status" fields={section("Status")} asset={a} options={opts} onProposals={setProposals} />
@@ -237,17 +241,37 @@ function AssetHistory({ id }: { id: string }) {
   return <HistoryList entries={history.data ?? []} />;
 }
 
-/** Meaning of the service code and the rating / face / gasket of the spec (both from their lists). */
-function LineMeaning({ service, spec }: { service: string | null | undefined; spec: string | null | undefined }) {
-  const codes = useLineCodes();
+/** Rating, face and gasket of the line, from the pipe spec list (Admin → Pipe specs). */
+function SpecDetails({ spec }: { spec: string | null | undefined }) {
   const specs = usePipeSpecs();
+  if (!spec) return null;
   const s = specs.find(spec);
-  if (!service && !spec) return null;
+  const rows: [string, string | null | undefined][] = [["Rating", s?.pressureClass], ["Face", s?.flangeType], ["Gasket", s?.gasket]];
+  return (
+    <section className="mt-3 rounded-lg border border-line bg-panel">
+      <header className="border-b border-line px-4 py-2.5">
+        <h2 className="text-lg font-semibold">Pipe spec {spec}</h2>
+        {!s && <p className="text-sm text-ongoing">Not in the pipe spec list: add it in Admin → Pipe specs to get its rating, face and gasket.</p>}
+      </header>
+      <dl className="grid gap-x-6 sm:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="border-b border-line/70 px-4 py-2.5 last:border-b-0 sm:border-b-0">
+            <dt className="text-sm text-muted">{label}</dt>
+            <dd className={`mt-0.5 ${value ? "text-text" : "text-muted/60"}`}>{value || "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/** Meaning of the service code (Admin → Line codes). */
+function LineMeaning({ service }: { service: string | null | undefined }) {
+  const codes = useLineCodes();
+  if (!service) return null;
   return (
     <p className="mt-2 px-1 text-sm text-muted">
-      {spec && <>Spec <strong className="text-ink">{spec}</strong>: {s ? [s.pressureClass, s.flangeType, s.gasket && `${s.gasket} gasket`].filter(Boolean).join(" · ") || "no rating or face given" : <span className="text-ongoing">not in the pipe spec list</span>}</>}
-      {service && spec && " · "}
-      {service && <><strong className="text-ink">{service}</strong>: {codes.describe("Service", service) ?? "not in the line codes"}</>}
+      <strong className="text-ink">{service}</strong>: {codes.describe("Service", service) ?? "not in the line codes"}
     </p>
   );
 }

@@ -38,7 +38,9 @@ public sealed record FieldDef(
     string Permission,
     int? Gate = null,
     bool BulkEditable = true,
-    decimal? Min = null)
+    decimal? Min = null,
+    string? PipelineOptionSet = null,
+    bool PipelineMultiple = false)
 {
     private PropertyInfo? property;
 
@@ -50,6 +52,15 @@ public sealed record FieldDef(
 
     /// <summary>Asset type the field belongs to (null = every type).</summary>
     public AssetType? OnlyFor => Owner == FieldOwner.Pipeline ? AssetType.Pipeline : null;
+
+    /// <summary>
+    /// List used for an asset of this type. Lines can have their own list (e.g. Current Activity of piping),
+    /// so the equipment dropdowns never show the piping values and the other way round.
+    /// </summary>
+    public string? OptionSetFor(AssetType type) => type == AssetType.Pipeline && PipelineOptionSet is not null ? PipelineOptionSet : OptionSet;
+
+    /// <summary>Several values of the list at once, one per line (piping Current Activity: "Line cut" + "Debris inside…").</summary>
+    public bool MultipleFor(AssetType type) => type == AssetType.Pipeline && PipelineMultiple;
 }
 
 public static class PreservationFields
@@ -94,7 +105,8 @@ public static class PreservationFields
 
             // Status
             new(nameof(AssetPreservation.AssetAvailability), "Asset Availability", SectionStatus, FieldKind.Choice, p, OptionSetKeys.AssetAvailability, 50, Permissions.AssetsEdit),
-            new(nameof(AssetPreservation.CurrentActivity), "Current Activity", SectionStatus, FieldKind.Choice, p, OptionSetKeys.CurrentActivity, Short, Permissions.AssetsEdit),
+            new(nameof(AssetPreservation.CurrentActivity), "Current Activity", SectionStatus, FieldKind.Choice, p, OptionSetKeys.CurrentActivity, Short, Permissions.AssetsEdit,
+                PipelineOptionSet: OptionSetKeys.PipingCurrentActivity, PipelineMultiple: true),
             new(nameof(AssetPreservation.PreservationStatusAdnoc), "Preservation Status (ADNOC)", SectionStatus, FieldKind.Choice, p, OptionSetKeys.PreservationStatus, Short, Permissions.AssetsEdit),
             new(nameof(AssetPreservation.N2BlanketStatus), "N2 Blanket Status", SectionStatus, FieldKind.Choice, p, OptionSetKeys.N2BlanketStatus, Short, Permissions.AssetsEdit),
             new(nameof(AssetPreservation.ThirdPartyInspectionStatus), "Third Party Inspection Status", SectionStatus, FieldKind.Choice, p, OptionSetKeys.ThirdPartyInspection, Short, Permissions.AssetsEdit),
@@ -112,7 +124,8 @@ public static class PreservationFields
             new(nameof(AssetPreservation.Response), "Response", SectionClient, FieldKind.LongText, p, null, Long, Permissions.AssetsEdit),
 
             // Gate details
-            new(nameof(AssetPreservation.G1BulkLiquidDrained), "G1 - Bulk liquid drained", SectionGates, FieldKind.Choice, p, OptionSetKeys.G1BulkLiquidDrained, Short, Permissions.GatesEdit, Gate: 1),
+            new(nameof(AssetPreservation.G1BulkLiquidDrained), "G1 - Bulk liquid drained", SectionGates, FieldKind.Choice, p, OptionSetKeys.G1BulkLiquidDrained, Short, Permissions.GatesEdit, Gate: 1,
+                PipelineOptionSet: OptionSetKeys.PipingBulkLiquidDrained),
             new(nameof(AssetPreservation.G5PositiveMechIsolation), "G5 - Positive Mech Isolation", SectionGates, FieldKind.Text, p, null, Short, Permissions.GatesEdit, Gate: 5),
             new(nameof(AssetPreservation.G6CleaningMethod), "G6 - Cleaning Method", SectionGates, FieldKind.Text, p, null, Short, Permissions.GatesEdit, Gate: 6),
         };

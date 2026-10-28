@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, download, upload } from "../../api/client";
-import type { ExcelTemplateInfo } from "../../api/types";
+import type { ExcelTemplateInfo, PipingTemplateInfo } from "../../api/types";
 import { Button } from "../../components/Button";
 import { Field, TextInput } from "../../components/Field";
 import { PageHeader } from "../../components/PageHeader";
@@ -47,6 +47,8 @@ export function ExcelTemplatesPage() {
           </table>
         </div>
       )}
+
+      <PipingTemplateSection />
 
       <section className="mt-6 max-w-xl rounded-lg border border-line bg-panel p-5">
         <h2 className="text-xl font-semibold">Age limit of uploaded files</h2>
@@ -97,5 +99,60 @@ function TemplateRow({ t }: { t: ExcelTemplateInfo }) {
         <input ref={input} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) send.mutate(f); e.target.value = ""; }} />
       </td>
     </tr>
+  );
+}
+
+/**
+ * The piping line list template, one for the whole project. Without an upload the built-in default is used;
+ * download it, change formats or Summary formulas, and upload it back.
+ */
+function PipingTemplateSection() {
+  const input = useRef<HTMLInputElement>(null);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const info = useQuery({ queryKey: ["piping-template"], queryFn: ({ signal }) => api<PipingTemplateInfo>("/api/excel-templates/piping", { signal }) });
+  const [notes, setNotes] = useState<string[]>([]);
+  const send = useMutation({
+    mutationFn: (file: File) => upload<PipingTemplateInfo>("/api/excel-templates/piping", file, "PUT"),
+    onSuccess: (d) => { queryClient.setQueryData(["piping-template"], d); setNotes(d.notes); toast("Piping template saved"); },
+    onError: (e) => toast(e.message, "error"),
+  });
+  const reset = useMutation({
+    mutationFn: () => api<PipingTemplateInfo>("/api/excel-templates/piping", { method: "DELETE" }),
+    onSuccess: (d) => { queryClient.setQueryData(["piping-template"], d); setNotes([]); toast("Back to the default template"); },
+    onError: (e) => toast(e.message, "error"),
+  });
+  const t = info.data;
+
+  return (
+    <section className="mt-6 rounded-lg border border-line bg-panel p-5">
+      <h2 className="text-xl font-semibold">Piping line list (all units)</h2>
+      <p className="mt-1 max-w-3xl text-muted">
+        One template for every unit. Columns are recognised by their header (Tag No, P&ID Number, Current Activity, EM Walkdown Status, Bulk liquid drained,
+        Inspection Done ?, Cleaning Required ?, Cleaned?…) and the table keeps one empty row. In the Summary, the row with <code>{"{CODE}"}</code> in column B is
+        copied for each service code with its formulas; <code>{"{NOTES}"}</code> is where the notes go; <code>{"{UNIT}"}</code> and <code>{"{DATE}"}</code> are
+        replaced. Files already downloaded keep importing with their own layout.
+      </p>
+      {t && (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <button type="button" className="font-semibold text-violet hover:underline" onClick={() => download("/api/excel-templates/piping/file").catch((e) => toast(e.message, "error"))}>
+              {t.fileName}
+            </button>
+            <span className="block text-sm text-muted">{t.isDefault ? "Built-in default (the engineers' U39 layout)" : `${formatDateTime(t.uploadedAtUtc)} by ${t.uploadedBy}`}</span>
+          </div>
+          <Button variant="secondary" busy={send.isPending} onClick={() => input.current?.click()}>{t.isDefault ? "Upload" : "Replace"}</Button>
+          {!t.isDefault && (
+            <Button variant="secondary" busy={reset.isPending} onClick={() => window.confirm("Go back to the built-in default template?") && reset.mutate()}>Use default</Button>
+          )}
+          <input ref={input} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) send.mutate(f); e.target.value = ""; }} />
+        </div>
+      )}
+      {notes.length > 0 && (
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ongoing">
+          {notes.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      )}
+    </section>
   );
 }

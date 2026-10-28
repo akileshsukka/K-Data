@@ -15,6 +15,30 @@ export function FieldInput({
   options: Record<string, string[]>;
   id?: string;
 }) {
+  if (field.kind === "Choice" && field.multiple) {
+    // Several values of the list, stored one per line (piping Current Activity).
+    const list = options[field.optionSet ?? ""] ?? [];
+    const chosen = value.split("\n").map((v) => v.trim()).filter(Boolean);
+    const has = (o: string) => chosen.some((c) => c.toLowerCase() === o.toLowerCase());
+    const legacy = chosen.filter((c) => !list.some((o) => o.toLowerCase() === c.toLowerCase()));
+    const toggle = (o: string) => onChange((has(o) ? chosen.filter((c) => c.toLowerCase() !== o.toLowerCase()) : [...chosen, o]).join("\n"));
+    return (
+      <div id={id} role="group" className="grid gap-1 rounded-md border border-line bg-panel px-3 py-2">
+        {list.map((o) => (
+          <label key={o} className="inline-flex items-center gap-2 text-[15px]">
+            <input type="checkbox" className="size-4 accent-violet" checked={has(o)} onChange={() => toggle(o)} />
+            {o}
+          </label>
+        ))}
+        {legacy.map((o) => (
+          <label key={o} className="inline-flex items-center gap-2 text-[15px] text-muted">
+            <input type="checkbox" className="size-4 accent-violet" checked onChange={() => onChange(chosen.filter((c) => c !== o).join("\n"))} />
+            {o} (not in list)
+          </label>
+        ))}
+      </div>
+    );
+  }
   if (field.kind === "Choice") {
     const list = options[field.optionSet ?? ""] ?? [];
     const legacy = value && !list.some((o) => o.toLowerCase() === value.toLowerCase());

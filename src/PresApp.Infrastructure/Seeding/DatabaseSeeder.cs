@@ -25,6 +25,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         await SeedGroupTypesAsync(ct);
         await SeedSettingsAsync(ct);
         await db.SaveChangesAsync(ct);
+        await SeedPipingFieldsAsync(ct);
         await SeedBootstrapAdminAsync(bootstrapAdminEmail, ct);
     }
 
@@ -195,6 +196,40 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
             await db.Groups.Where(g => g.GroupTypeId == old.Id).ExecuteUpdateAsync(u => u.SetProperty(g => g.GroupTypeId, target.Id), ct);
             db.GroupTypes.Remove(old);
         }
+    }
+
+    /// <summary>
+    /// Custom fields of the Pipeline Register with a fixed key (Inspection Done, Cleaning Required, Cleaned).
+    /// A field an admin already created with the same name is adopted (its key is fixed); existing ones are never changed.
+    /// </summary>
+    private async Task SeedPipingFieldsAsync(CancellationToken ct)
+    {
+        var defs = await db.FieldDefinitions.Include(f => f.OptionSet).ThenInclude(o => o!.Values)
+            .Where(f => f.AssetType == AssetType.Pipeline).ToListAsync(ct);
+        static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        foreach (var (key, label, kind, options, sort) in SeedData.PipingFields)
+        {
+            var def = defs.FirstOrDefault(d => d.Key == key)
+                      ?? defs.FirstOrDefault(d => Norm(d.Label) == Norm(label) && d.DataType == kind);
+            if (def is not null)
+            {
+                if (def.Key != key && !defs.Any(d => d.Key == key)) def.Key = key;
+                continue;
+            }
+            def = new FieldDefinition
+            {
+                AssetType = AssetType.Pipeline, Key = key, Label = label, DataType = kind, Section = "Inspection and cleaning",
+                SortOrder = sort, ShowInRegister = false, IsActive = true
+            };
+            if (kind == FieldDataType.List)
+            {
+                def.OptionSet = new OptionSet { Key = $"CF.{AssetType.Pipeline}.{key}", Label = label };
+                for (var i = 0; i < options.Length; i++) def.OptionSet.Values.Add(new OptionValue { Value = options[i], SortOrder = i, IsActive = true });
+            }
+            db.FieldDefinitions.Add(def);
+            defs.Add(def);
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task SeedSettingsAsync(CancellationToken ct)

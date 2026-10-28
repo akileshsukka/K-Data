@@ -57,6 +57,8 @@ public sealed partial class CustomFieldService(PresAppDbContext db)
         if (id is not null)
         {
             if (def.AssetType != type) throw ApiProblem.Invalid("A field cannot move to another register.");
+            if (IsFixed(def) && (def.DataType != kind || !r.IsActive))
+                throw ApiProblem.Invalid($"{def.Label} is used by the Pipeline Register and the piping Excel: it cannot be deactivated or change kind. Its name and list values can be edited.");
             if (def.DataType != kind && await db.FieldValues.AnyAsync(v => v.FieldDefinitionId == def.Id, ct))
                 throw ApiProblem.Invalid("This field already has values: its kind cannot change. Create a new field instead.");
         }
@@ -90,6 +92,10 @@ public sealed partial class CustomFieldService(PresAppDbContext db)
         await db.SaveChangesAsync(ct);
         return ToDto(def, await db.FieldValues.CountAsync(v => v.FieldDefinitionId == def.Id, ct));
     }
+
+    /// <summary>Pipeline fields the app relies on by key (register indicators, piping Excel and Summary).</summary>
+    public static bool IsFixed(FieldDefinition def) =>
+        def.AssetType == AssetType.Pipeline && def.Key is PipingFieldKeys.InspectionDone or PipingFieldKeys.CleaningRequired or PipingFieldKeys.Cleaned;
 
     private async Task<string> NewKeyAsync(AssetType type, string label, CancellationToken ct)
     {

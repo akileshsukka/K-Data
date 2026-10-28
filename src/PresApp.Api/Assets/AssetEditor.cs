@@ -22,6 +22,8 @@ namespace PresApp.Api.Assets;
 public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, AuditContext audit, TimeProvider clock)
 {
     public const string PreservedAtField = "PreservedAt";
+    /// <summary>Bulk edit pseudo-field: the dashboard category (value = category id, empty clears it).</summary>
+    public const string CategoryField = "DashboardCategory";
 
     public async Task<PatchResponse> PatchAsync(Guid id, PatchRequest request, ClaimsPrincipal user, CancellationToken ct)
     {
@@ -47,7 +49,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 conflicts.Add(new FieldConflict(field.Key, field.Label, change.From, current));
                 continue;
             }
-            var error = FieldValues.Prepare(field, change.To, OptionsFor(field, options), out var value);
+            var error = FieldValues.Prepare(field, asset.Type, change.To, options, out var value);
             if (error is not null) { errors[field.Key] = [error]; continue; }
             if (FieldValues.Same(field, current, FieldValues.Format(value))) continue;
 
@@ -353,6 +355,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
     {
         if (request.AssetIds is not { Count: > 0 }) throw ApiProblem.Invalid("Select at least one asset.");
         if (request.AssetIds.Count > 2000) throw ApiProblem.Invalid("Select at most 2,000 assets at a time.");
+        if (request.Field.Equals(CategoryField, StringComparison.OrdinalIgnoreCase)) return await BulkCategoryAsync(request, apply, user, ct);
 
         var isPreserved = request.Field.Equals(PreservedAtField, StringComparison.OrdinalIgnoreCase);
         var field = isPreserved ? null : PreservationFields.Find(request.Field);
@@ -371,15 +374,24 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 preservedOn = d;
             }
         }
-        else
-        {
-            var error = FieldValues.Prepare(field!, request.Value, OptionsFor(field!, await ActiveOptionsAsync(ct)), out newValue);
-            if (error is not null) throw ApiProblem.Invalid(error);
-        }
 
         var ids = request.AssetIds.Distinct().ToList();
         var assets = await db.Assets.Include(a => a.Preservation).Include(a => a.GateDocuments).Include(a => a.Pipeline)
             .Where(a => ids.Contains(a.Id)).ToListAsync(ct);
+
+        // Lines and equipment can use different lists: the value is checked against the list of each type.
+        var prepared = new Dictionary<AssetType, (string? Error, object? Value)>();
+        if (!isPreserved)
+        {
+            var options = await ActiveOptionsAsync(ct);
+            foreach (var type in assets.Select(a => a.Type).Distinct().DefaultIfEmpty(AssetType.Equipment))
+            {
+                var error = FieldValues.Prepare(field!, type, request.Value, options, out var v);
+                prepared[type] = (error, v);
+            }
+            if (prepared.Values.All(p => p.Error is not null)) throw ApiProblem.Invalid(prepared.Values.First().Error!);
+            newValue = prepared.Values.First(p => p.Error is null).Value;
+        }
         var newText = isPreserved ? preservedOn?.ToString("yyyy-MM-dd") : FieldValues.Format(newValue);
         var rows = new List<BulkRow>();
         var today = SiteClock.Today(clock);
@@ -402,13 +414,23 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, null, newText, "Skipped", "Only for pipelines"));
                 continue;
             }
-            var same = isPreserved ? current == newText : FieldValues.Same(field!, current, newText);
+            if (!isPreserved && prepared.TryGetValue(asset.Type, out var forType))
+            {
+                if (forType.Error is not null)
+                {
+                    rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Skipped", forType.Error));
+                    continue;
+                }
+                newValue = forType.Value;
+            }
+            var assetText = isPreserved ? newText : FieldValues.Format(newValue);
+            var same = isPreserved ? current == newText : FieldValues.Same(field!, current, assetText);
             if (same)
             {
-                rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "No change", null));
+                rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, assetText, "No change", null));
                 continue;
             }
-            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Change", null));
+            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, assetText, "Change", null));
             if (!apply) continue;
 
             if (isPreserved) await ApplyPreservedAsync(asset, preservedOn, user.Identity?.Name ?? "", ct);
@@ -430,6 +452,61 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         return new BulkResult(rows.Count(r => r.Outcome == "Change"), rows.Count(r => r.Outcome == "No change"),
             rows.Count(r => r.Outcome == "Skipped"), rows);
     }
+
+    /// <summary>
+    /// Bulk assignment of the dashboard category (Hold / N/A). The value is the category id, or empty to clear it.
+    /// Same rules as the asset page: the category must be active, have a code and belong to the asset's unit;
+    /// pipelines are not counted in the dashboard tables, so they are skipped.
+    /// </summary>
+    private async Task<BulkResult> BulkCategoryAsync(BulkRequest request, bool apply, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!user.HasPermission(Permissions.AssetsEdit)) throw ApiProblem.Forbidden("Your role cannot change the dashboard category.");
+
+        Domain.Reporting.DashboardCategory? category = null;
+        if (!string.IsNullOrWhiteSpace(request.Value))
+        {
+            if (!int.TryParse(request.Value, out var categoryId)) throw ApiProblem.Invalid("Choose a category from the list.");
+            category = await db.DashboardCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == categoryId, ct);
+            if (category is null || !category.IsActive || category.Code is null)
+                throw ApiProblem.Invalid("That category is not active. Refresh the page and choose it again.");
+        }
+
+        var ids = request.AssetIds.Distinct().ToList();
+        var assets = await db.Assets.Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory)
+            .Where(a => ids.Contains(a.Id)).ToListAsync(ct);
+        var newText = CategoryText(category);
+        var rows = new List<BulkRow>();
+        audit.Source = ChangeSource.Bulk;
+
+        foreach (var asset in assets.OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance))
+        {
+            asset.Preservation ??= new AssetPreservation { AssetId = asset.Id };
+            var p = asset.Preservation;
+            var current = CategoryText(p.DashboardCategory);
+            string? skip = !asset.IsActive ? "Inactive asset"
+                : asset.Type == AssetType.Pipeline ? "Pipelines have no dashboard category"
+                : category is not null && category.UnitId != asset.UnitId ? "The category belongs to another unit"
+                : null;
+            if (skip is not null) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Skipped", skip)); continue; }
+            if (p.DashboardCategoryId == category?.Id) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "No change", null)); continue; }
+
+            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Change", null));
+            if (!apply) continue;
+            p.DashboardCategoryId = category?.Id;
+            p.DashboardCategory = null;
+        }
+        foreach (var missing in ids.Except(assets.Select(a => a.Id)))
+        {
+            rows.Add(new BulkRow(missing, "?", null, null, newText, "Skipped", "Asset not found"));
+        }
+
+        if (apply) await db.SaveChangesAsync(ct);
+        return new BulkResult(rows.Count(r => r.Outcome == "Change"), rows.Count(r => r.Outcome == "No change"),
+            rows.Count(r => r.Outcome == "Skipped"), rows);
+    }
+
+    private static string? CategoryText(Domain.Reporting.DashboardCategory? c) =>
+        c is null ? null : $"{(c.Section == Domain.Reporting.CategorySection.Hold ? "Hold" : "N/A")} {c.Code} – {c.Label}";
 
     // ------------------------------------------------------------------ readings
 
@@ -519,8 +596,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             .ToListAsync(ct))
         .ToDictionary(s => s.Key, s => s.Values, StringComparer.OrdinalIgnoreCase);
 
-    internal static IReadOnlyList<string> OptionsFor(FieldDef field, Dictionary<string, List<string>> options) =>
-        field.OptionSet is null ? [] : options.GetValueOrDefault(field.OptionSet) ?? [];
+    internal static IReadOnlyList<string> OptionsFor(FieldDef field, Dictionary<string, List<string>> options, AssetType type = AssetType.Equipment) =>
+        field.OptionSetFor(type) is { } key ? options.GetValueOrDefault(key) ?? [] : [];
 }
 
 public static class PrincipalExtensions

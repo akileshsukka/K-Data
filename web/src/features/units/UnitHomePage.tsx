@@ -7,6 +7,7 @@ import { lastUnit, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
+import { PipingSummaryCards } from "../lines/PipingSummaryCards";
 
 /**
  * Unit overview = the client dashboard, computed by the API exactly like the Dashboard sheet of the unit Excel
@@ -83,6 +84,8 @@ export function UnitHomePage() {
             </ul>
           </section>
 
+          {d.lineCount > 0 && <PipingSummaryCards unitId={unit.id} title="Pipelines" />}
+
           <section className="mt-6 rounded-lg border border-line bg-panel">
             <h2 className="px-5 pt-5 text-xl font-semibold">Discipline-wise status</h2>
             <div className="mt-3 overflow-x-auto">
@@ -132,6 +135,8 @@ export function UnitHomePage() {
           </section>
         </>
       )}
+
+      {d && d.totalTags === 0 && d.lineCount > 0 && <PipingSummaryCards unitId={unit.id} title="Pipelines" />}
     </div>
   );
 }

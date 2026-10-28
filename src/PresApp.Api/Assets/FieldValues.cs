@@ -1,5 +1,6 @@
 using System.Globalization;
 using PresApp.Domain.Assets;
+using PresApp.Domain.Catalog;
 using PresApp.Domain.Rules;
 
 namespace PresApp.Api.Assets;
@@ -50,6 +51,48 @@ public static class FieldValues
         if (x is null || y is null) return x is null && y is null;
         if (field.Kind == FieldKind.Number && ValueNormalizer.TryParseDecimal(x, out var dx) && ValueNormalizer.TryParseDecimal(y, out var dy)) return dx == dy;
         return field.Kind == FieldKind.Choice ? ValueNormalizer.ListKey(x) == ValueNormalizer.ListKey(y) : x == y;
+    }
+
+    /// <summary>
+    /// Other spellings accepted for a list (per list key). The piping line list writes "Yes" in "Bulk liquid drained":
+    /// it is stored as Completed (and written back as "Yes" in the piping Excel).
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, string>> ListAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [OptionSetKeys.PipingBulkLiquidDrained] = new(StringComparer.OrdinalIgnoreCase) { ["yes"] = AssetPreservation.Completed, ["y"] = AssetPreservation.Completed },
+    };
+
+    /// <summary>
+    /// Validates and converts a value for an asset of the given type: the list of that type is used
+    /// (lines have their own Current Activity and Bulk liquid drained lists), and fields that allow several
+    /// values take one per line. Returns an error message or null.
+    /// </summary>
+    public static string? Prepare(FieldDef field, AssetType type, string? raw, IReadOnlyDictionary<string, List<string>> allOptions, out object? value)
+    {
+        var setKey = field.OptionSetFor(type);
+        IReadOnlyList<string> options = setKey is null ? [] : allOptions.GetValueOrDefault(setKey) ?? [];
+        if (field.Kind != FieldKind.Choice || setKey is null) return Prepare(field, raw, options, out value);
+
+        value = null;
+        var text = ValueNormalizer.CleanText(raw);
+        if (text is null) return null;
+        var parts = field.MultipleFor(type) ? text.Split('\n') : [text];
+        var result = new List<string>();
+        foreach (var part in parts.Select(ValueNormalizer.CleanText).OfType<string>())
+        {
+            var item = ListAliases.GetValueOrDefault(setKey)?.GetValueOrDefault(part.Trim()) ?? part;
+            var (canonical, matched) = ValueNormalizer.Canonical(item, options, PreservationFields.IsGateStatus(field));
+            // "debris inside; jetting required." = "Debris inside; jetting required": a final full stop does not count.
+            if (!matched) (canonical, matched) = ValueNormalizer.Canonical(item.TrimEnd('.', ' '), options, PreservationFields.IsGateStatus(field));
+            if (!matched)
+                return $"\"{part}\" is not an option of {field.Label}{(type == AssetType.Pipeline && field.PipelineOptionSet is not null ? " for lines" : "")}.";
+            if (!result.Contains(canonical!, StringComparer.OrdinalIgnoreCase)) result.Add(canonical!);
+        }
+        if (result.Count == 0) return null;
+        var joined = string.Join("\n", result);
+        if (joined.Length > field.MaxLength) return $"{field.Label} allows at most {field.MaxLength} characters.";
+        value = joined;
+        return null;
     }
 
     /// <summary>Validates and converts a new value. Returns an error message or null.</summary>

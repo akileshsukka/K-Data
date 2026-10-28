@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, type AssetType, type RegisterRow } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type RegisterRow } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -12,6 +12,9 @@ import { PageHeader } from "../../components/PageHeader";
 import { useDebounced } from "../../components/useDebounced";
 import { formatDate } from "../../components/dates";
 import { formatSize } from "../lines/lineNumber";
+import { StatusTick, drainedTick, walkdownTick, yesTick } from "../lines/StatusTick";
+import { PipingNotes } from "../lines/PipingNotes";
+import { PipingSummaryCards } from "../lines/PipingSummaryCards";
 import { CodeMeaning } from "../lines/CodeMeaning";
 import { AddToGroupDialog } from "../groups/AddToGroupDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
@@ -30,12 +33,16 @@ interface Filters {
   gateStatus: string;
   actionBy: string;
   emWalkdown: string;
+  drained: string;
+  inspection: string;
+  cleaning: string;
+  activity: string;
   docsPending: boolean;
   inactive: boolean;
   group: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gate: "", gateStatus: "", actionBy: "", emWalkdown: "", docsPending: false, inactive: false, group: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gate: "", gateStatus: "", actionBy: "", emWalkdown: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "" };
 
 /** EM Walkdown Status values (Completed / Ongoing / N/A); "(not set)" finds the ones still blank. */
 const walkdownStatuses = ["Completed", "Ongoing", "N/A"];
@@ -46,7 +53,8 @@ export function RegisterPage({ type }: { type: AssetType }) {
   const { unit } = useUnit(unitId);
   const session = useSession();
   const codes = useLineCodes();
-  const customColumns = (useCustomFields(type).data ?? []).filter((c) => c.showInRegister);
+  // Inspection Done / Cleaning Required / Cleaned of lines have their own place in the table.
+  const customColumns = (useCustomFields(type).data ?? []).filter((c) => c.showInRegister && !(type === "Pipeline" && pipingFixedKeys.includes(c.key)));
   const navigate = useNavigate();
   const [f, setF] = useState<Filters>(empty);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -74,6 +82,10 @@ export function RegisterPage({ type }: { type: AssetType }) {
           gateMatch(r, f.gate, f.gateStatus, gateCount) &&
           (!f.actionBy || r.actionBy === f.actionBy) &&
           (!f.emWalkdown || (f.emWalkdown === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === f.emWalkdown.toLowerCase())) &&
+          (!f.drained || (f.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
+          (!f.inspection || (f.inspection === "Yes") === (yesTick(r.custom?.[PipingFieldKeys.inspectionDone]) === "done")) &&
+          (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
+          (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.docsPending || r.documentsPending > 0) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
@@ -118,6 +130,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
               </Button>
             )}
             {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
+            {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping label="Download line list" />}
             {session.can(Perm.assetsManage) && lines && (
               <Link to={`/u/${unitId}/lines/paste`} className="inline-flex min-h-10 items-center rounded-md border border-line bg-panel px-4 font-semibold text-ink hover:border-violet hover:text-violet">
                 Add lines in bulk
@@ -131,6 +144,9 @@ export function RegisterPage({ type }: { type: AssetType }) {
           </>
         }
       />
+
+      {lines && <PipingSummaryCards unitId={unitId} />}
+      {lines && <PipingNotes unitId={unitId} />}
 
       <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(17rem,1.5fr)_minmax(8rem,1fr)]">
         <TextInput type="search" placeholder={lines ? "Search line number, ID, spec, P&ID, service or remarks" : "Search tag, ID, description or remarks"} value={f.text} onChange={(e) => set("text", e.target.value)} aria-label="Search" className="mt-0" />
@@ -159,7 +175,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-[15px]">
         {groupCodes.length > 0 && (
-          <div className="w-52">
+          <div className="w-full sm:w-52">
             <SelectInput value={f.group} onChange={(e) => set("group", e.target.value)} aria-label="Workpack or group" className="mt-0">
               <option value="">Any workpack</option>
               {groupCodes.map((c) => <option key={c}>{c}</option>)}
@@ -167,14 +183,44 @@ export function RegisterPage({ type }: { type: AssetType }) {
             </SelectInput>
           </div>
         )}
-        {!lines && (
-          <div className="w-52">
+        <div className="w-full sm:w-52">
             <SelectInput value={f.emWalkdown} onChange={(e) => set("emWalkdown", e.target.value)} aria-label="EM Walkdown" className="mt-0">
               <option value="">Any EM Walkdown</option>
               {[...walkdownStatuses, ...distinct((r) => r.emWalkdown).filter((v) => !walkdownStatuses.some((s) => s.toLowerCase() === v.toLowerCase()))].map((s) => <option key={s} value={s}>EM Walkdown: {s}</option>)}
               <option value="(not set)">EM Walkdown: not set</option>
             </SelectInput>
           </div>
+        {lines && (
+          <>
+            <div className="w-full sm:w-48">
+              <SelectInput value={f.drained} onChange={(e) => set("drained", e.target.value)} aria-label="Bulk liquid drained" className="mt-0">
+                <option value="">Any drained</option>
+                <option value="done">Drained</option>
+                <option value="not">Not drained</option>
+              </SelectInput>
+            </div>
+            <div className="w-full sm:w-48">
+              <SelectInput value={f.inspection} onChange={(e) => set("inspection", e.target.value)} aria-label="Inspection Done" className="mt-0">
+                <option value="">Any inspection</option>
+                <option value="Yes">Inspection done</option>
+                <option value="No">Inspection not done</option>
+              </SelectInput>
+            </div>
+            <div className="w-full sm:w-52">
+              <SelectInput value={f.cleaning} onChange={(e) => set("cleaning", e.target.value)} aria-label="Cleaning Required" className="mt-0">
+                <option value="">Any cleaning</option>
+                {distinct((r) => r.custom?.[PipingFieldKeys.cleaningRequired] ?? null).map((v) => <option key={v} value={v}>Cleaning: {v}</option>)}
+                <option value="(not set)">Cleaning: not set</option>
+              </SelectInput>
+            </div>
+            <div className="w-full sm:w-60">
+              <SelectInput value={f.activity} onChange={(e) => set("activity", e.target.value)} aria-label="Current Activity" className="mt-0">
+                <option value="">Any activity</option>
+                {[...new Set(all.flatMap((r) => (r.currentActivity ?? "").split("\n").filter(Boolean)))].sort().map((v) => <option key={v} value={v}>{v}</option>)}
+                <option value="(none)">No activity</option>
+              </SelectInput>
+            </div>
+          </>
         )}
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" className="size-4 accent-violet" checked={f.docsPending} onChange={(e) => set("docsPending", e.target.checked)} />
@@ -207,15 +253,14 @@ export function RegisterPage({ type }: { type: AssetType }) {
                   <th className="border-b border-line px-3 py-2.5 font-semibold">{lines ? "Line number" : "Tag"}</th>
                   {lines ? (
                     <>
-                      <th className="border-b border-line px-3 py-2.5 text-right font-semibold">Size</th>
-                      <th className="border-b border-line px-3 py-2.5 font-semibold">Spec</th>
-                      <th className="border-b border-line px-3 py-2.5 font-semibold">Rating</th>
-                      <th className="border-b border-line px-3 py-2.5 font-semibold">Face</th>
-                      <th className="border-b border-line px-3 py-2.5 font-semibold">Gasket</th>
                       <th className="border-b border-line px-3 py-2.5 font-semibold">Service</th>
                       <th className="border-b border-line px-3 py-2.5 font-semibold">P&ID</th>
                       <th className="border-b border-line px-3 py-2.5 font-semibold">Circuit</th>
-                      <th className="border-b border-line px-3 py-2.5 text-right font-semibold">Length (m)</th>
+                      <th className="border-b border-line px-2 py-2.5 text-center font-semibold" title="EM Walkdown · Bulk liquid drained · Inspection Done">
+                        <span className="inline-flex gap-1.5"><abbr title="EM Walkdown" className="w-5 no-underline">W</abbr><abbr title="Bulk liquid drained" className="w-5 no-underline">D</abbr><abbr title="Inspection Done" className="w-5 no-underline">I</abbr></span>
+                      </th>
+                      <th className="border-b border-line px-3 py-2.5 font-semibold">Current Activity</th>
+                      <th className="border-b border-line px-3 py-2.5 font-semibold">Cleaning Required</th>
                     </>
                   ) : (
                     <>
@@ -240,20 +285,23 @@ export function RegisterPage({ type }: { type: AssetType }) {
                       </td>
                     )}
                     <td className="border-b border-line px-3 py-2">
-                      <Link to={`/assets/${r.id}`} className="font-semibold whitespace-nowrap text-ink group-hover:text-violet">{r.tag ?? r.code}</Link>
+                      <Link to={`/assets/${r.id}`} className="font-semibold whitespace-pre text-ink group-hover:text-violet">{r.tag ?? r.code}</Link>
                       <span className="block text-sm whitespace-nowrap text-muted">{r.code}{!r.isActive && " · inactive"}</span>
                     </td>
                     {lines ? (
                       <>
-                        <td className="border-b border-line px-3 py-2 text-right tabular-nums whitespace-nowrap">{formatSize(r.line?.sizeIn)}</td>
-                        <td className="border-b border-line px-3 py-2 whitespace-nowrap">{r.line?.pipeSpec}</td>
-                        <td className="border-b border-line px-3 py-2 whitespace-nowrap">{r.line?.pressureClass ?? <SpecMissing spec={r.line?.pipeSpec} />}</td>
-                        <td className="border-b border-line px-3 py-2 whitespace-nowrap">{r.line?.flangeType}</td>
-                        <td className="border-b border-line px-3 py-2 text-sm">{r.line?.gasket}</td>
                         <td className="max-w-[14rem] border-b border-line px-3 py-2"><CodeMeaning code={r.line?.service} meaning={codes.describe("Service", r.line?.service)} /></td>
-                        <td className="border-b border-line px-3 py-2 text-sm whitespace-nowrap">{r.line?.pidNumber}</td>
+                        <td className="border-b border-line px-3 py-2 text-sm whitespace-pre">{r.line?.pidNumber}</td>
                         <td className="border-b border-line px-3 py-2 text-sm whitespace-nowrap">{r.circuit}</td>
-                        <td className="border-b border-line px-3 py-2 text-right tabular-nums">{r.line?.lengthM ?? ""}</td>
+                        <td className="border-b border-line px-2 py-2 text-center">
+                          <span className="inline-flex gap-1.5">
+                            <StatusTick tick={walkdownTick(r.emWalkdown)} label="EM Walkdown" value={r.emWalkdown} />
+                            <StatusTick tick={drainedTick(r.bulkLiquidDrained)} label="Bulk liquid drained" value={r.bulkLiquidDrained} />
+                            <StatusTick tick={yesTick(r.custom?.[PipingFieldKeys.inspectionDone])} label="Inspection Done" value={r.custom?.[PipingFieldKeys.inspectionDone] ?? "No"} />
+                          </span>
+                        </td>
+                        <td className="max-w-[16rem] border-b border-line px-3 py-2 text-sm whitespace-pre-line">{r.currentActivity}</td>
+                        <td className="border-b border-line px-3 py-2 text-sm whitespace-nowrap">{r.custom?.[PipingFieldKeys.cleaningRequired] ?? ""}</td>
                       </>
                     ) : (
                       <>
@@ -284,8 +332,16 @@ export function RegisterPage({ type }: { type: AssetType }) {
                 <Link to={`/assets/${r.id}`} className={`block rounded-lg border border-line bg-panel p-3 ${r.isActive ? "" : "opacity-70"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-ink">{r.tag ?? r.code}</p>
-                      <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), r.line?.pipeSpec, [r.line?.pressureClass, r.line?.flangeType].filter(Boolean).join(" "), codes.describe("Service", r.line?.service) ?? r.line?.service, r.line?.lengthM != null ? `${r.line.lengthM} m` : null].filter(Boolean).join(" · ") : r.description}</p>
+                      <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>
+                      <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>
+                      {lines && (
+                        <span className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted">
+                          <StatusTick tick={walkdownTick(r.emWalkdown)} label="EM Walkdown" value={r.emWalkdown} />
+                          <StatusTick tick={drainedTick(r.bulkLiquidDrained)} label="Bulk liquid drained" value={r.bulkLiquidDrained} />
+                          <StatusTick tick={yesTick(r.custom?.[PipingFieldKeys.inspectionDone])} label="Inspection Done" value={r.custom?.[PipingFieldKeys.inspectionDone] ?? "No"} />
+                          {r.currentActivity && <span className="ml-1 truncate">{r.currentActivity.split("\n").join(", ")}</span>}
+                        </span>
+                      )}
                     </div>
                     <CurrentGateChip value={r.currentGate} />
                   </div>
@@ -310,10 +366,4 @@ function gateMatch(r: RegisterRow, gate: string, status: string, gateCount: numb
   const values = gate ? [r.gates[Number(gate) - 1]] : r.gates.slice(0, gateCount);
   if (!status) return values.some(Boolean);
   return status === "(empty)" ? values.some((v) => !v) : values.some((v) => v === status);
-}
-
-/** A line whose spec is not in the pipe spec list has no rating, face or gasket yet. */
-function SpecMissing({ spec }: { spec: string | null | undefined }) {
-  if (!spec) return null;
-  return <span className="text-sm text-ongoing" title={`Add ${spec} to Admin → Pipe specs to get its rating, face and gasket`}>Spec not listed</span>;
 }

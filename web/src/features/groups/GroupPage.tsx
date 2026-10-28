@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, type Group, type GroupDetail, type MembersResult } from "../../api/types";
+import { Perm, type Group, type GroupDetail, type MembersResult, type PasteMembersResult } from "../../api/types";
 import { Dialog } from "../../components/Dialog";
 import { SelectInput } from "../../components/Field";
 import { lastUnit } from "../../app/useCatalog";
@@ -117,7 +117,8 @@ export function GroupPage() {
           <span className="text-sm font-semibold text-ink">Add an item</span>
           <AssetSearch unitId={g.unitId ?? undefined} placeholder="Find equipment, a line or an E&I item" excludeIds={new Set(list.map((m) => m.id))}
             onPick={(h) => members.mutate({ ids: [h.id], remove: false })} />
-          <p className="mt-1 text-sm text-muted">To add many at once, select them in a register and use "Add to group".</p>
+          <p className="mt-1 text-sm text-muted">To add many at once, paste their line numbers below, or select them in a register and use "Add to group".</p>
+          <PasteMembers groupId={g.id} circuit={g.type.toLowerCase() === "circuit"} onDone={(d) => client.setQueryData(["group", id], d)} />
           <div className="mt-4 flex flex-wrap items-end gap-2">
             <label className="min-w-[16rem] flex-1">
               <span className="text-sm font-semibold text-ink">Add all the items of another group</span>
@@ -186,6 +187,60 @@ export function GroupPage() {
       </Dialog>
 
       {editing && <GroupDialog open={editing} onClose={() => setEditing(false)} unitId={g.unitId} group={g} onSaved={() => undefined} />}
+    </div>
+  );
+}
+
+/** Paste a list of line numbers (or tags, or Equipment IDs) copied from Excel: check, then add them all to the group. */
+function PasteMembers({ groupId, circuit, onDone }: { groupId: number; circuit: boolean; onDone: (d: GroupDetail) => void }) {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<PasteMembersResult | null>(null);
+  const toast = useToast();
+  const client = useQueryClient();
+  const run = useMutation({
+    mutationFn: (apply: boolean) => api<PasteMembersResult>(`/api/groups/${groupId}/members/paste`, { method: "POST", body: { text, apply } }),
+    onSuccess: (r, apply) => {
+      if (!apply) { setResult(r); return; }
+      if (r.detail) onDone(r.detail);
+      client.invalidateQueries({ queryKey: ["groups"] });
+      client.invalidateQueries({ queryKey: ["register"] });
+      toast(`${r.toAdd} added${r.alreadyIn ? ` (${r.alreadyIn} already in it)` : ""}${r.notFound ? ` · ${r.notFound} not found` : ""}`);
+      setResult(r.notFound ? { ...r, rows: r.rows.filter((x) => x.outcome === "Not found" || x.outcome === "Several") } : null);
+      setText("");
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
+  const problems = result?.rows.filter((x) => x.outcome === "Not found" || x.outcome === "Several") ?? [];
+  const moved = result?.rows.filter((x) => x.note?.startsWith("Moved")) ?? [];
+  return (
+    <div className="mt-4">
+      <label className="block">
+        <span className="text-sm font-semibold text-ink">Add by line numbers</span>
+        <textarea
+          value={text}
+          onChange={(e) => { setText(e.target.value); setResult(null); }}
+          rows={4}
+          placeholder={'One per line, e.g. a "Tag No" column copied from the line list'}
+          className="mt-1 block w-full rounded-md border border-line bg-panel px-3 py-2 font-mono text-sm focus:border-violet focus:outline-none"
+        />
+      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" disabled={!text.trim()} busy={run.isPending && !result} onClick={() => run.mutate(false)}>Check</Button>
+        {result && result.toAdd > 0 && <Button busy={run.isPending} onClick={() => run.mutate(true)}>Add {result.toAdd}</Button>}
+        {result && (
+          <span className="text-sm text-muted">
+            {result.toAdd} to add · {result.alreadyIn} already in it · {result.notFound} not found
+            {circuit && moved.length > 0 && ` · ${moved.length} move from another circuit`}
+          </span>
+        )}
+      </div>
+      {problems.length > 0 && (
+        <ul className="mt-2 space-y-1 text-sm">
+          {problems.map((x) => (
+            <li key={x.row} className="text-hold"><span className="font-mono">{x.text}</span> — {x.outcome === "Several" ? x.note : "not found"}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

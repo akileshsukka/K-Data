@@ -410,7 +410,7 @@ public sealed class SimproSyncService(PresAppDbContext db, SimproStore store, IO
         {
             var def = PreservationFields.Find(field.AppField) ?? throw ApiProblem.Invalid("This field cannot be copied.");
             var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
-            var error = FieldValues.Prepare(def, item.SimproValue, AssetEditor.OptionsFor(def, options), out var value);
+            var error = FieldValues.Prepare(def, asset.Type, item.SimproValue, options, out var value);
             if (error is not null) throw ApiProblem.Invalid($"The Simpro value cannot be used: {error}");
             FieldValues.Write(def, asset, value);
             if (PreservationFields.IsGateStatus(def)) AssetEditor.EnsureDocumentRows(asset);

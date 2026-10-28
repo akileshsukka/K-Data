@@ -7,6 +7,7 @@ using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
 using PresApp.Domain.Groups;
 using PresApp.Domain.Imports;
+using PresApp.Domain.Reporting;
 using PresApp.Domain.Rules;
 using PresApp.Infrastructure.Auditing;
 using PresApp.Infrastructure.Data;
@@ -33,7 +34,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
     private sealed class Rejected(string message) : Exception(message);
 
     private sealed record SourceRow(int Number, string Tag, string? Discipline, string? Description, Dictionary<FieldDef, string> Values,
-        Dictionary<string, string> Groups, Dictionary<string, string> Custom);
+        Dictionary<string, string> Groups, Dictionary<string, string> Custom, string? ProcessCode = null);
 
     /// <summary>List columns that put the row in a group of that kind (one group of each kind per asset).</summary>
     private static string? GroupKindOf(string header) => ExcelColumns.Norm(header) switch
@@ -60,6 +61,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         {
             var (rows, ignored, lines) = Read(bytes, await CustomHeadersAsync(ct));
             var changes = await AnalyseAsync(rows, unitId, lines, apply: false, ct);
+            if (lines) changes.AddRange(await NotesAsync(bytes, unitId, apply: false, ct));
             Fill(run, rows.Count, changes, ignored);
             db.ImportFiles.Add(new ImportFile { ImportRun = run, Content = bytes });
         }
@@ -89,6 +91,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var (rows, ignored, lines) = Read(file.Content, await CustomHeadersAsync(ct));
         var changes = await AnalyseAsync(rows, run.UnitId ?? 0, lines, apply: true, ct, decisions);
+        if (lines) changes.AddRange(await NotesAsync(file.Content, run.UnitId ?? 0, apply: true, ct));
         db.ImportChanges.RemoveRange(run.Changes);
         run.Changes = [];
         Fill(run, rows.Count, changes, ignored);
@@ -101,8 +104,15 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
 
     // ------------------------------------------------------------------ reading the client list
 
-    private static bool IsTagHeader(string h) => ExcelColumns.Norm(h) is "equipno" or "equipmentno" or "lineno" or "linenumber";
+    private static bool IsTagHeader(string h) => ExcelColumns.Norm(h) is "equipno" or "equipmentno" or "lineno" or "linenumber" or "tagno";
     private static bool IsLineHeader(string h) => ExcelColumns.Norm(h) is "lineno" or "linenumber";
+
+    /// <summary>"Tag No" (the piping line list of the engineers) is a line list when its values are line numbers.</summary>
+    private static bool LooksLikeLines(IEnumerable<string?> tags)
+    {
+        var sample = tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(50).ToList();
+        return sample.Count > 0 && sample.Count(t => LineNumber.Parse(t) is not null) * 2 > sample.Count;
+    }
 
     /// <summary>Normalized labels of the active custom fields (any register): those columns are loaded too.</summary>
     private async Task<HashSet<string>> CustomHeadersAsync(CancellationToken ct) =>
@@ -115,19 +125,23 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         catch (Exception) { throw new Rejected("The file could not be opened as an Excel workbook (.xlsx)."); }
         using (wb)
         {
-            var (headers, rows) = FindList(wb) ?? throw new Rejected("No list with an \"EQUIP NO\" or \"Line No.\" column was found on the visible sheets.");
+            var (headers, rows) = FindList(wb) ?? throw new Rejected("No list with an \"EQUIP NO\", \"Line No.\" or \"Tag No\" column was found on the visible sheets.");
             var columns = ExcelColumns.Map(headers, headers.Select(_ => false).ToList(), onboarding: true);
             var tagColumn = columns.First(c => c.Role == ColumnRole.Tag && IsTagHeader(c.Header));
             var tag = tagColumn.Index;
-            var lines = IsLineHeader(tagColumn.Header);
+            var lines = IsLineHeader(tagColumn.Header)
+                        || (ExcelColumns.Norm(tagColumn.Header) == "tagno" && LooksLikeLines(rows.Select(r => tag < r.Count ? r[tag] : null)));
             var discipline = columns.FirstOrDefault(c => c.Role == ColumnRole.Discipline)?.Index;
             var description = columns.FirstOrDefault(c => c.Role == ColumnRole.Description)?.Index;
             var fields = columns.Where(c => c.Role == ColumnRole.Field && c.Editable).ToList();
             var groupColumns = columns.Where(c => GroupKindOf(c.Header) is not null).GroupBy(c => GroupKindOf(c.Header)!).ToDictionary(g => g.Key, g => g.First().Index);
             var customColumns = columns.Where(c => c.Role == ColumnRole.NotStored && customHeaders.Contains(ExcelColumns.Norm(c.Header)))
                 .GroupBy(c => ExcelColumns.Norm(c.Header)).ToDictionary(g => g.Key, g => g.First().Index);
+            // Piping line list: the service comes from the line number; "Process Code" is only compared with it.
+            var processCode = columns.FirstOrDefault(c => ExcelColumns.Norm(c.Header) == "processcode")?.Index;
+            var derived = new[] { "processcode", "processdescription" };
             var ignored = columns.Where(c => c.Role == ColumnRole.NotStored && c.Header.Trim().Length > 0 && GroupKindOf(c.Header) is null
-                && !customColumns.ContainsKey(ExcelColumns.Norm(c.Header))).Select(c => c.Header.Trim()).ToList();
+                && !customColumns.ContainsKey(ExcelColumns.Norm(c.Header)) && !derived.Contains(ExcelColumns.Norm(c.Header))).Select(c => c.Header.Trim()).ToList();
 
             var result = new List<SourceRow>();
             for (var i = 0; i < rows.Count; i++)
@@ -148,7 +162,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                 var custom = new Dictionary<string, string>();
                 foreach (var (norm, index) in customColumns)
                     if (Get(index) is { } v) custom[norm] = v;
-                result.Add(new SourceRow(i + 1, t, Get(discipline), Get(description), values, groups, custom));
+                result.Add(new SourceRow(i + 1, t, Get(discipline), Get(description), values, groups, custom, Get(processCode)?.ToUpperInvariant()));
             }
             return (result, ignored, lines);
         }
@@ -203,6 +217,9 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         var byLineKey = assets.Where(a => a.Type == AssetType.Pipeline && LineNumber.Parse(a.Tag) is not null)
             .GroupBy(a => LineNumber.IdentityKey(LineNumber.Parse(a.Tag)!)).ToDictionary(g => g.Key, g => g.First());
         var disciplines = await db.Disciplines.AsNoTracking().Where(d => d.IsActive).ToListAsync(ct);
+        var lineCodes = lines
+            ? await db.LineCodes.AsNoTracking().Where(c => c.IsActive).ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct)
+            : new Dictionary<string, string>();
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var today = SiteClock.Today(clock);
         var groupTypes = await db.GroupTypes.AsNoTracking().Where(t => t.IsActive).ToDictionaryAsync(t => t.Name, t => t.Id, StringComparer.OrdinalIgnoreCase, ct);
@@ -261,7 +278,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                 if (similar is not null && decision != "create")
                 {
                     var circuit = groups.FirstOrDefault(g => g.GroupType.Name == "Circuit" && (membersOf.GetValueOrDefault(similar.Id)?.Contains(g.Id) ?? false))?.Code;
-                    var about = $"{similar.Tag} ({similar.Code}) has the same unit, sequence, service, size and spec; only the way the number is written differs. "
+                    var about = $"{similar.Tag} ({(string.IsNullOrEmpty(similar.Code) ? "also in this list" : similar.Code)}) has the same unit, sequence, service, size and spec; only the way the number is written differs. "
                         + $"P&ID: {similar.Pipeline?.PidNumber ?? "not given"} · circuit: {circuit ?? "none"} · length: {similar.Pipeline?.LengthM?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "not given"} m.";
                     if (decision is not ("update" or "rename"))
                     {
@@ -327,6 +344,13 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     row.Discipline, null, apply ? asset.Code : null));
             }
 
+            if (lines && row.ProcessCode is { } listCode && LineNumber.Parse(row.Tag) is { } numberParts && !string.Equals(listCode, numberParts.Service, StringComparison.OrdinalIgnoreCase))
+            {
+                changes.Add(Change(asset, "Process Code", ImportOutcome.Warning,
+                    $"The list says {listCode}, but the line number says {numberParts.Service}{(lineCodes.GetValueOrDefault(numberParts.Service) is { } meaning ? $" ({meaning})" : "")}. K Data keeps {numberParts.Service}, the code of the line number.",
+                    listCode, listCode, numberParts.Service));
+            }
+
             asset.Preservation ??= new AssetPreservation { AssetId = asset.Id };
             var gateChanged = false;
             var gateClosed = false;
@@ -337,7 +361,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     changes.Add(Change(asset, field.Key, ImportOutcome.Invalid, $"{field.Label} is only for lines.", raw));
                     continue;
                 }
-                var error = FieldValues.Prepare(field, raw, AssetEditor.OptionsFor(field, options), out var value);
+                var error = FieldValues.Prepare(field, asset.Type, raw, options, out var value);
                 var current = FieldValues.Read(field, asset);
                 if (error is not null) { changes.Add(Change(asset, field.Key, ImportOutcome.Invalid, error, raw, current)); continue; }
                 var newText = FieldValues.Format(value);
@@ -420,6 +444,39 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             }
             if (outcome.ProposedLastFieldActionDate is { } lfad) p.LastFieldActionDate = lfad;
             AssetEditor.EnsureDocumentRows(asset);
+        }
+        return changes;
+    }
+
+    /// <summary>
+    /// Notes under the Summary sheet of the engineers' line list: a note K Data does not have is created, a different text
+    /// replaces the one in K Data (the list is the latest data), notes missing from the file are left as they are.
+    /// </summary>
+    private async Task<List<ImportChange>> NotesAsync(byte[] bytes, int unitId, bool apply, CancellationToken ct)
+    {
+        using var wb = new XLWorkbook(new MemoryStream(bytes));
+        var notes = Piping.PipingNoteService.ReadSummary(wb, SiteClock.Today(clock));
+        if (notes is null) return [];
+        var current = (await db.PipingNotes.Where(n => n.UnitId == unitId && n.IsActive).ToListAsync(ct)).ToDictionary(n => Piping.PipingNoteService.Key(n.NoteDate));
+        var changes = new List<ImportChange>();
+        foreach (var (key, text) in notes)
+        {
+            current.TryGetValue(key, out var note);
+            if (Piping.PipingNoteService.Same(note?.Text, text)) continue;
+            var label = Piping.PipingNoteService.Label(Piping.PipingNoteService.FromKey(key));
+            if (text.Length > PipingNote.TextLength)
+            {
+                changes.Add(new ImportChange { Field = label, Outcome = ImportOutcome.Invalid, Reason = $"A note allows at most {PipingNote.TextLength} characters.", ExcelValue = text[..4000] });
+                continue;
+            }
+            changes.Add(new ImportChange
+            {
+                Field = label, Outcome = ImportOutcome.Applied, Reason = note is null ? "New note." : "Overwritten with the note of the list.",
+                ExcelValue = text, CurrentValue = note?.Text, NewValue = text
+            });
+            if (!apply) continue;
+            if (note is null) db.PipingNotes.Add(new PipingNote { UnitId = unitId, NoteDate = Piping.PipingNoteService.FromKey(key), Text = text });
+            else note.Text = text;
         }
         return changes;
     }

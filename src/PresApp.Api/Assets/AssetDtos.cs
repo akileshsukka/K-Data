@@ -10,7 +10,7 @@ public sealed record RegisterRow(
     string? ThirdPartyInspection, string? EmWalkdown, string? PreservedByEu, string? ActionBy, string? N2BlanketStatus,
     string? CurrentActivity, string? PreservationRemarks, DateOnly? LastFieldActionDate, DateTime? PreservedAtUtc,
     int DocumentsPending, bool IsActive, DateTime UpdatedAtUtc, LineInfo? Line, IReadOnlyList<string>? Groups = null, string? Circuit = null,
-    IReadOnlyDictionary<string, string?>? Custom = null);
+    IReadOnlyDictionary<string, string?>? Custom = null, string? BulkLiquidDrained = null);
 
 /// <summary>Pipeline columns of the register.</summary>
 public sealed record LineInfo(decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Gasket, string? Service, string? PidNumber, decimal? LengthM);

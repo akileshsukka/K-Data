@@ -91,6 +91,29 @@ internal sealed class CategoryKeywordConfiguration : IEntityTypeConfiguration<Ca
     }
 }
 
+internal sealed class WorkbookTemplateConfiguration : IEntityTypeConfiguration<WorkbookTemplate>
+{
+    public void Configure(EntityTypeBuilder<WorkbookTemplate> b)
+    {
+        b.ToTable("WorkbookTemplate");
+        b.HasKey(x => x.Key);
+        b.Property(x => x.Key).HasMaxLength(50);
+        b.Property(x => x.FileName).HasMaxLength(260);
+        b.Property(x => x.UploadedBy).HasMaxLength(256);
+    }
+}
+
+internal sealed class PipingNoteConfiguration : IEntityTypeConfiguration<PipingNote>
+{
+    public void Configure(EntityTypeBuilder<PipingNote> b)
+    {
+        b.ToTable("PipingNote");
+        b.Property(x => x.Text).HasMaxLength(PipingNote.TextLength).IsRequired();
+        b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId);
+        b.HasIndex(x => new { x.UnitId, x.NoteDate });
+    }
+}
+
 internal sealed class UnitReportConfigConfiguration : IEntityTypeConfiguration<UnitReportConfig>
 {
     public void Configure(EntityTypeBuilder<UnitReportConfig> b)
