@@ -33,6 +33,7 @@ builder.Services.Configure<CloudflareOptions>(builder.Configuration.GetSection(C
 builder.Services.AddHttpClient<CloudflareAccessAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped<PresApp.Api.Assets.AssetQueries>();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetEditor>();
+builder.Services.AddScoped<PresApp.Api.Assets.RemovedFromSiteAlignment>();
 builder.Services.AddScoped<PresApp.Api.Excel.UnitWorkbookExporter>();
 builder.Services.AddScoped<PresApp.Api.Excel.PipingWorkbookExporter>();
 builder.Services.AddScoped<PresApp.Api.Piping.PipingNoteService>();
@@ -49,7 +50,7 @@ builder.Services.Configure<PresApp.Api.Simpro.SimproOptions>(builder.Configurati
 builder.Services.AddSingleton<PresApp.Api.Simpro.ISimproConnectionFactory, PresApp.Api.Simpro.SqlServerSimproConnectionFactory>();
 builder.Services.AddScoped<PresApp.Api.Simpro.SimproStore>();
 builder.Services.AddScoped<PresApp.Api.Simpro.SimproSyncService>();
-if (!args.Contains("import-sharepoint") && !args.Contains("set-emergency-password"))
+if (!args.Contains("import-sharepoint") && !args.Contains("set-emergency-password") && !args.Contains(PresApp.Api.Assets.RemovedFromSiteAlignment.ToolName))
     builder.Services.AddHostedService<PresApp.Api.Simpro.SimproScheduler>();
 builder.Services.AddExceptionHandler<PresAppExceptionHandler>();
 builder.Services.AddProblemDetails();
@@ -68,6 +69,12 @@ if (args.Length >= 2 && args[0] == "import-sharepoint")
 {
     await PrepareDatabaseAsync(app);
     return await RunSharePointImportAsync(app, args[1], args.Contains("--apply"));
+}
+
+if (args.Length >= 2 && args[0] == PresApp.Api.Assets.RemovedFromSiteAlignment.ToolName)
+{
+    await PrepareDatabaseAsync(app);
+    return await RunRemovedFromSiteAlignmentAsync(app, args[1], args.Contains("--apply"));
 }
 
 await PrepareDatabaseAsync(app);
@@ -113,6 +120,20 @@ static async Task PrepareDatabaseAsync(WebApplication app)
     else await db.Database.EnsureCreatedAsync();
     var bootstrap = app.Configuration[$"{PresAppAuthOptions.Section}:{nameof(PresAppAuthOptions.BootstrapAdminEmail)}"];
     await scope.ServiceProvider.GetRequiredService<DatabaseSeeder>().SeedAsync(bootstrap);
+}
+
+static async Task<int> RunRemovedFromSiteAlignmentAsync(WebApplication app, string folder, bool apply)
+{
+    Directory.CreateDirectory(folder);
+    await using var scope = app.Services.CreateAsyncScope();
+    var tool = scope.ServiceProvider.GetRequiredService<PresApp.Api.Assets.RemovedFromSiteAlignment>();
+    var rows = await tool.RunAsync(apply);
+    var file = Path.Combine(folder, $"removed-from-site-{(apply ? "applied" : "preview")}-{DateTime.Now:yyyyMMdd-HHmm}.csv");
+    await File.WriteAllTextAsync(file, PresApp.Api.Assets.RemovedFromSiteAlignment.ToCsv(rows), new System.Text.UTF8Encoding(true));
+    Console.WriteLine(apply ? "Alignment APPLIED (cases A and B of active assets)." : "Preview only: nothing was saved. Add --apply to change cases A and B.");
+    Console.WriteLine(PresApp.Api.Assets.RemovedFromSiteAlignment.Summary(rows));
+    Console.WriteLine($"Report: {file}");
+    return 0;
 }
 
 static async Task<int> RunSharePointImportAsync(WebApplication app, string folder, bool apply)

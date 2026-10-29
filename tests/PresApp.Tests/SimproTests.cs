@@ -89,6 +89,27 @@ public sealed class SimproTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Removed_from_site_is_sent_even_when_gates_are_completed()
+    {
+        var (id, code) = await InBothAsync("42-SY-RS");
+        await Patch(id, "G1Status", "Ongoing", "Completed");
+        await Patch(id, "AssetAvailability", null, "Removed from Site");   // K Data moves the gate itself
+
+        var items = Items(await RunAsync("preview")).Where(i => i.Code == code).ToList();
+        Assert.Contains(items, i => i is { Field: "GATE", Outcome: "To write", New: "Removed from Site" });
+
+        // An asset not aligned yet in K Data (data from before the rule) is still sent as Removed from Site.
+        await app.WithDbAsync(async db =>
+        {
+            var p = await db.Set<PresApp.Domain.Assets.AssetPreservation>().SingleAsync(x => x.AssetId == id);
+            p.CurrentGate = PresApp.Domain.Assets.CurrentGate.G1;
+            return await db.SaveChangesAsync();
+        });
+        items = Items(await RunAsync("preview")).Where(i => i.Code == code).ToList();
+        Assert.Contains(items, i => i is { Field: "GATE", Outcome: "To write", New: "Removed from Site" });
+    }
+
+    [Fact]
     public async Task An_edit_made_in_Simpro_holds_the_equipment_until_KData_wins()
     {
         var (id, code) = await InBothAsync("42-SY-2");

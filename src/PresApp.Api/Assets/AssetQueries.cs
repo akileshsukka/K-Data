@@ -157,7 +157,10 @@ public sealed class AssetQueries(PresAppDbContext db)
         var categoryNames = categoryIds.Count == 0 ? [] : (await db.DashboardCategories.AsNoTracking().Where(c => categoryIds.Contains(c.Id)).ToListAsync(ct))
             .ToDictionary(c => c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 c => $"{(c.Section == Domain.Reporting.CategorySection.Hold ? "Hold" : "N/A")} {c.Code} – {c.Label}");
-        string? Value(string field, string? v) => field == categoryField && v is not null ? categoryNames.GetValueOrDefault(v, v) : v;
+        string? Value(string field, string? v) => v is null ? null
+            : field == categoryField ? categoryNames.GetValueOrDefault(v, v)
+            : field == nameof(AssetPreservation.CurrentGate) && FieldValues.TryParseCurrentGate(v, out var gate) ? FieldValues.CurrentGateText(gate)
+            : v;
 
         return rows.Select(r => new HistoryEntry(
             r.ChangedAtUtc, r.AssetId, r.Asset?.Code, r.Asset?.Tag, r.Field, customLabels.GetValueOrDefault(r.Field) ?? LabelOf(r.EntityType, r.EntityKey, r.Field),

@@ -210,6 +210,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
             }
 
             var applied = new List<(FieldDef Field, string? NewText)>();
+            var availabilityBefore = asset?.Preservation?.AssetAvailability;
             foreach (var col in editable)
             {
                 var field = col.Field!;
@@ -286,7 +287,13 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
             var gateChanged = applied.Any(a => PreservationFields.IsGateStatus(a.Field));
             var gateClosed = applied.Any(a => PreservationFields.IsGateStatus(a.Field) && AssetPreservation.IsCompleted(a.NewText));
             var before = (p.PreservationDate, p.N2BlanketedDate, p.LastFieldActionDate);
-            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today);
+            var availabilityChanged = applied.Any(a => a.Field.Key == nameof(AssetPreservation.AssetAvailability));
+            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore);
+            if (outcome.AvailabilityMove is { } move)
+            {
+                changes.Add(Change(CurrentGateField, ImportOutcome.Derived, move.Reason,
+                    current: FieldValues.CurrentGateText(move.From), newValue: FieldValues.CurrentGateText(move.To)));
+            }
 
             if (outcome.ProposedCurrentGate is { } proposed)
             {

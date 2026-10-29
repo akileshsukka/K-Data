@@ -354,6 +354,8 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             asset.Preservation ??= new AssetPreservation { AssetId = asset.Id };
             var gateChanged = false;
             var gateClosed = false;
+            var availabilityChanged = false;
+            var availabilityBefore = asset.Preservation.AssetAvailability;
             foreach (var (field, raw) in row.Values)
             {
                 if (field.OnlyFor is { } only && only != asset.Type)
@@ -373,6 +375,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     gateChanged = true;
                     gateClosed |= AssetPreservation.IsCompleted(newText);
                 }
+                availabilityChanged |= field.Key == nameof(AssetPreservation.AssetAvailability);
             }
 
             // Custom field columns (matched by the field name, for the register of the asset).
@@ -435,7 +438,12 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             }
 
             var p = asset.Preservation;
-            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today);
+            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore);
+            if (outcome.AvailabilityMove is { } move)
+            {
+                changes.Add(Change(asset, nameof(AssetPreservation.CurrentGate), ImportOutcome.Derived, move.Reason,
+                    current: FieldValues.CurrentGateText(move.From), newValue: FieldValues.CurrentGateText(move.To)));
+            }
             if (outcome.ProposedCurrentGate is { } proposed && (isNew || (int)proposed > (int)p.CurrentGate))
             {
                 changes.Add(Change(asset, nameof(AssetPreservation.CurrentGate), ImportOutcome.Derived, "Highest completed gate.",

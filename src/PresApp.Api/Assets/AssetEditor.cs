@@ -34,6 +34,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         var conflicts = new List<FieldConflict>();
         var errors = new Dictionary<string, string[]>();
         var changed = new List<FieldDef>();
+        var availabilityBefore = asset.Preservation?.AssetAvailability;
 
         foreach (var change in request.Changes)
         {
@@ -77,7 +78,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         var outcome = PreservationRules.Apply(asset.Preservation!,
             gateStatusChanged: changed.Any(PreservationFields.IsGateStatus),
             fieldActionHappened: changed.Any(f => PreservationRules.IsFieldAction(f.Key)),
-            SiteClock.Today(clock));
+            SiteClock.Today(clock),
+            availabilityChanged: changed.Any(IsAvailability), availabilityBefore);
         EnsureDocumentRows(asset);
 
         await db.SaveChangesAsync(ct);
@@ -112,6 +114,14 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         {
             throw ApiProblem.Conflict($"Current Gate was changed to {FieldValues.CurrentGateText(p.CurrentGate)} by someone else. Check it and try again.");
         }
+        // Current Gate follows the gates and Asset Availability: only the value the rules suggest can be approved.
+        var suggested = PreservationRules.SuggestedCurrentGate(p);
+        if (gate != suggested)
+        {
+            throw ApiProblem.Invalid(
+                $"Current Gate follows the gate statuses and Asset Availability; it can only be set to {FieldValues.CurrentGateText(suggested)} now.");
+        }
+        if (p.CurrentGate == gate) return await queries.ProfileAsync(id, ct);
         p.CurrentGate = gate;
         await db.SaveChangesAsync(ct);
         return await queries.ProfileAsync(id, ct);
@@ -430,15 +440,22 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, assetText, "No change", null));
                 continue;
             }
-            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, assetText, "Change", null));
+            // Asset Availability moves Current Gate (Removed from Site and back): shown in the preview.
+            var gateMove = field is not null && IsAvailability(field)
+                ? PreservationRules.AvailabilityMove(asset.Preservation, asset.Preservation.AssetAvailability, assetText) : null;
+            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, assetText, "Change",
+                gateMove is null ? null : $"Current Gate {FieldValues.CurrentGateText(gateMove.From)} → {FieldValues.CurrentGateText(gateMove.To)}"));
             if (!apply) continue;
 
             if (isPreserved) await ApplyPreservedAsync(asset, preservedOn, user.Identity?.Name ?? "", ct);
             else
             {
+                var availabilityBefore = asset.Preservation.AssetAvailability;
                 FieldValues.Write(field!, asset, newValue);
-                // Bulk edit sets automatic milestones but never rewrites Current Gate (as in the Power App).
-                PreservationRules.Apply(asset.Preservation, PreservationFields.IsGateStatus(field!), PreservationRules.IsFieldAction(field!.Key), today);
+                // Bulk edit sets automatic milestones and the Asset Availability rule, but never proposes
+                // the highest completed gate (as in the Power App).
+                PreservationRules.Apply(asset.Preservation, PreservationFields.IsGateStatus(field!), PreservationRules.IsFieldAction(field!.Key), today,
+                    availabilityChanged: IsAvailability(field!), availabilityBefore);
                 EnsureDocumentRows(asset);
             }
         }
@@ -583,6 +600,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             asset.GateDocuments.Add(new GateDocumentation { AssetId = asset.Id, Gate = g, Status = DocumentationStatus.Pending });
         }
     }
+
+    private static bool IsAvailability(FieldDef f) => f.Key == nameof(AssetPreservation.AssetAvailability);
 
     private static Proposals ToProposals(DerivedOutcome o) => new(
         o.ProposedCurrentGate is { } g ? FieldValues.CurrentGateText(g) : null, o.ProposedLastFieldActionDate);

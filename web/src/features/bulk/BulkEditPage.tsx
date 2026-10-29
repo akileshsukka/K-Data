@@ -161,7 +161,10 @@ export function BulkEditPage() {
                         {r.outcome !== "Change" && <span className="block text-sm">{r.reason ?? r.outcome}</span>}
                       </td>
                       <td className="border-b border-line px-4 py-2 whitespace-pre-line">{r.current ?? "—"}</td>
-                      <td className="border-b border-line px-4 py-2 whitespace-pre-line">{r.outcome === "Change" ? (r.new ?? "empty") : "no change"}</td>
+                      <td className="border-b border-line px-4 py-2 whitespace-pre-line">
+                        {r.outcome === "Change" ? (r.new ?? "empty") : "no change"}
+                        {r.outcome === "Change" && r.reason && <span className="block text-sm text-muted">{r.reason}</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

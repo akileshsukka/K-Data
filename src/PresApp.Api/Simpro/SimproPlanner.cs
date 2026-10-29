@@ -226,23 +226,27 @@ public sealed class SimproPlanner(SimproOptions options, Dictionary<string, List
             }
         }
 
-        // Rule: Current Gate moves forward only, to the highest completed gate; never touches Removed from Site
+        // Rule: Asset Availability = Removed from Site → Current Gate = Removed from Site, even with completed gates
+        // (K Data applies it when the availability changes; this covers assets not aligned yet).
+        // Otherwise Current Gate moves forward only, to the highest completed gate; never touches Removed from Site.
         var gate = F("GATE");
         var highest = Enumerable.Range(1, 8).Where(g => AssetPreservation.IsCompleted(F($"G{g}S").AppNorm)).DefaultIfEmpty(0).Max();
         var current = SimproFields.GateCodes[p.CurrentGate];
-        if (highest > 0 && current.Rank is { } rank && highest > rank)
+        if (PreservationRules.IsRemoved(F("AVAIL").AppNorm))
+        {
+            if (p.CurrentGate != CurrentGate.RemovedFromSite)
+            {
+                gate.Derived = $"Current Gate {FieldValues.CurrentGateText(p.CurrentGate)} → Removed from Site (Asset Availability = Removed from Site)";
+                gate.AppNorm = gate.AppOut = SimproFields.GateCodes[CurrentGate.RemovedFromSite].Code.ToString(CultureInfo.InvariantCulture);
+                gate.AppShow = "Removed from Site";
+            }
+        }
+        else if (highest > 0 && current.Rank is { } rank && highest > rank)
         {
             var target = (CurrentGate)highest;
             gate.Derived = $"Current Gate {FieldValues.CurrentGateText(p.CurrentGate)} → {FieldValues.CurrentGateText(target)} (highest completed gate)";
             gate.AppNorm = gate.AppOut = SimproFields.GateCodes[target].Code.ToString(CultureInfo.InvariantCulture);
             gate.AppShow = FieldValues.CurrentGateText(target);
-        }
-        // Rule: Asset Availability = Removed from Site → Current Gate = Removed from Site, only with no completed gate
-        if (highest == 0 && string.Equals(F("AVAIL").AppNorm, "Removed from Site", StringComparison.OrdinalIgnoreCase) && p.CurrentGate != CurrentGate.RemovedFromSite)
-        {
-            gate.Derived = $"Current Gate {FieldValues.CurrentGateText(p.CurrentGate)} → Removed from Site (Asset Availability = Removed from Site)";
-            gate.AppNorm = gate.AppOut = "2";
-            gate.AppShow = "Removed from Site";
         }
 
         foreach (var f in plan.Fields.Where(f => f.Bad is null && f.AppOut is not null && f.AppOut.Length > f.Field.MaxLength))
