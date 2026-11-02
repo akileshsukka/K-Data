@@ -171,6 +171,7 @@ public sealed class AssetQueries(PresAppDbContext db)
     {
         nameof(GateDocumentation) => $"Gate documentation {field}",
         nameof(AssetFieldValue) => $"Custom field {field}",
+        Documents.DocumentService.HistoryEntity => field,
         _ => PreservationFields.LabelOf(field)
     };
 

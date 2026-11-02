@@ -15,12 +15,14 @@ import { GatesTab } from "./GatesTab";
 import { HistoryList } from "./HistoryList";
 import { ReadingsTab } from "./ReadingsTab";
 import { CategoryCard } from "./CategoryCard";
+import { DocumentsTab } from "../documents/DocumentsTab";
 import { useAsset, useAssetHistory, useMarkPreserved, usePatchAsset, useSetActive, useSetCurrentGate } from "./useAsset";
 
 const tabs = [
   { key: "overview", label: "Overview" },
   { key: "gates", label: "Gates" },
   { key: "readings", label: "Readings" },
+  { key: "documents", label: "Documents", permission: Perm.documentsView },
   { key: "history", label: "History", permission: Perm.historyView },
 ] as const;
 
@@ -124,6 +126,7 @@ export function AssetPage() {
         )}
         {tab === "gates" && <GatesTab asset={a} fields={defs} options={opts} onProposals={setProposals} />}
         {tab === "readings" && <ReadingsTab asset={a} onProposals={setProposals} />}
+        {tab === "documents" && <DocumentsTab asset={a} />}
         {tab === "history" && <AssetHistory id={a.id} />}
       </div>
     </div>

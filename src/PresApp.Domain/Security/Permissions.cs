@@ -9,6 +9,9 @@ public static class Permissions
     public const string AssetsView = "assets.view";
     public const string HistoryView = "history.view";
     public const string GroupsView = "groups.view";
+    public const string DocumentsView = "documents.view";
+    public const string DocumentsUpload = "documents.upload";
+    public const string DocumentsDelete = "documents.delete";
     public const string ExcelExport = "excel.export";
     public const string ReadingsWrite = "readings.write";
     public const string GatesEdit = "gates.edit";
@@ -30,6 +33,9 @@ public static class Permissions
         new(AssetsView, "View registers, dashboards (piping cards included) and export the Unit overview PDF"),
         new(HistoryView, "See the change history (History tab of each asset and the unit History page)"),
         new(GroupsView, "See workpacks"),
+        new(DocumentsView, "See and download signed documents"),
+        new(DocumentsUpload, "Upload signed documents and link them to gates and assets"),
+        new(DocumentsDelete, "Delete signed documents"),
         new(ExcelExport, "Download a unit Excel"),
         new(ReadingsWrite, "Record monitoring readings"),
         new(GatesEdit, "Edit gate statuses and comments"),

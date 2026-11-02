@@ -34,6 +34,12 @@ export async function upload<T>(path: string, file: File, method = "POST"): Prom
   return read<T>(response);
 }
 
+/** Sends a prepared multipart form (files plus other fields). */
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(path, { method: "POST", headers: csrf, body: form, credentials: "include" });
+  return read<T>(response);
+}
+
 /** Downloads a file from the API and hands it to the browser with the server's file name. */
 export async function download(path: string): Promise<string> {
   const response = await fetch(path, { headers: csrf, credentials: "include" });

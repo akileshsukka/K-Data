@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
-import type { AssetProfile, FieldDef, GateDoc, Proposals } from "../../api/types";
+import { Perm, type AssetProfile, type FieldDef, type GateDoc, type Proposals, type StoredDocument } from "../../api/types";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
 import { GateStatus } from "../../components/GateStatus";
 import { useToast } from "../../components/Toast";
 import { formatDate, todayDubai } from "../../components/dates";
+import { DocumentList } from "../documents/DocumentList";
+import { UploadDocumentDialog } from "../documents/UploadDocumentDialog";
+import { useAssetDocuments } from "../documents/useDocuments";
 import { FieldInput } from "./FieldInput";
 import { usePatchAsset, useSetGateDoc } from "./useAsset";
 
@@ -22,6 +25,8 @@ export function GatesTab({ asset, fields, options, onProposals }: {
   options: Record<string, string[]>;
   onProposals: (p: Proposals) => void;
 }) {
+  const session = useSession();
+  const documents = useAssetDocuments(asset.id, session.can(Perm.documentsView));
   return (
     <ol className="space-y-3">
       {Array.from({ length: 8 }, (_, i) => i + 1).map((gate) => (
@@ -32,18 +37,20 @@ export function GatesTab({ asset, fields, options, onProposals }: {
           fields={fields.filter((f) => f.gate === gate)}
           options={options}
           onProposals={onProposals}
+          documents={documents.data ?? []}
         />
       ))}
     </ol>
   );
 }
 
-function GateRow({ gate, asset, fields, options, onProposals }: {
+function GateRow({ gate, asset, fields, options, onProposals, documents }: {
   gate: number;
   asset: AssetProfile;
   fields: FieldDef[];
   options: Record<string, string[]>;
   onProposals: (p: Proposals) => void;
+  documents: StoredDocument[];
 }) {
   const session = useSession();
   const toast = useToast();
@@ -55,6 +62,9 @@ function GateRow({ gate, asset, fields, options, onProposals }: {
   const doc = asset.gateDocuments.find((d) => d.gate === gate);
   const canEdit = session.can(statusField.permission) && (asset.isActive || session.can("assets.manage"));
   const [editing, setEditing] = useState<Record<string, string> | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const canUpload = session.can(Perm.documentsUpload) && (asset.isActive || session.can("assets.manage"));
+  const gateDocs = documents.filter((d) => d.links.some((l) => l.assetId === asset.id && l.gate === gate));
 
   async function saveStatus(value: string) {
     try {
@@ -98,6 +108,9 @@ function GateRow({ gate, asset, fields, options, onProposals }: {
           )}
         </div>
         <DocumentCell asset={asset} gate={gate} doc={doc} completed={status === "Completed"} />
+        {canUpload && (
+          <Button variant="quiet" onClick={() => setUploading(true)}>Upload document</Button>
+        )}
         {canEdit && !editing && (
           <Button variant="quiet" className="ml-auto" onClick={() => setEditing(Object.fromEntries([commentField, ...details].map((f) => [f.key, asset.values[f.key] ?? ""])))}>
             Edit details
@@ -128,6 +141,14 @@ function GateRow({ gate, asset, fields, options, onProposals }: {
           )}
         </div>
       )}
+
+      {gateDocs.length > 0 && (
+        <div className="border-t border-line px-4 py-2">
+          <span className="text-sm text-muted">Signed documents</span>
+          <DocumentList docs={gateDocs} assetId={asset.id} gate={gate} />
+        </div>
+      )}
+      {canUpload && <UploadDocumentDialog asset={asset} open={uploading} onClose={() => setUploading(false)} initialGates={[gate]} />}
     </li>
   );
 }

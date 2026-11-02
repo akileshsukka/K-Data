@@ -64,6 +64,9 @@ export const Perm = {
   assetsView: "assets.view",
   historyView: "history.view",
   groupsView: "groups.view",
+  documentsView: "documents.view",
+  documentsUpload: "documents.upload",
+  documentsDelete: "documents.delete",
   excelExport: "excel.export",
   excelPage: "excel.page",
   historySource: "history.source",
@@ -266,6 +269,27 @@ export interface GateDoc {
   note: string | null;
   updatedBy: string;
   updatedAtUtc: string;
+}
+
+/** Where a signed document applies: one asset and gate (null = the asset in general). */
+export interface DocumentLink {
+  linkId: number;
+  assetId: string;
+  assetCode: string;
+  assetTag: string | null;
+  gate: number | null;
+}
+
+/** A signed document (PDF or photo). The file is on the server; open it with /api/documents/{id}/file. */
+export interface StoredDocument {
+  id: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  note: string | null;
+  uploadedBy: string;
+  uploadedAtUtc: string;
+  links: DocumentLink[];
 }
 
 export interface AssetProfile {

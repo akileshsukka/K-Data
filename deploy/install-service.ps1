@@ -6,6 +6,8 @@
   - Creates the "PresApp" service (automatic start, restart on failure) running as the
     virtual account NT SERVICE\PresApp, and gives that account its SQL login on the database (sqlcmd).
   - On updates, backs up the database first (requires sqlcmd).
+  - Creates the signed documents folder (default C:\PresApp\documents) and a daily scheduled task that copies
+    it to the backup folders. Files there are never edited or deleted by the app, so the copy only adds.
 .EXAMPLE
   .\deploy\install-service.ps1 -SqlServer "localhost"
 #>
@@ -14,7 +16,9 @@ param(
     [string]$InstallDir = "C:\PresApp\app",
     [string]$BackupDir = "C:\PresApp\backups",
     [string]$SqlServer = "localhost",
-    [string]$Database = "PresApp"
+    [string]$Database = "PresApp",
+    [string]$DocumentsDir = "C:\PresApp\documents",
+    [string[]]$DocumentBackupDirs = @("C:\PresApp_backup\documents", "C:\secondary_backup\documents")
 )
 $ErrorActionPreference = "Stop"
 $serviceName = "PresApp"
@@ -61,6 +65,20 @@ if (-not (Test-Path $prod)) {
 
 New-Item -ItemType Directory -Force (Join-Path $InstallDir "logs") | Out-Null
 icacls (Join-Path $InstallDir "logs") /grant "NT SERVICE\${serviceName}:(OI)(CI)M" | Out-Null
+
+# Signed documents live outside the app folder (the copy above mirrors and would remove them).
+Write-Host "Preparing the documents folder $DocumentsDir..." -ForegroundColor Cyan
+New-Item -ItemType Directory -Force $DocumentsDir | Out-Null
+icacls $DocumentsDir /grant "NT SERVICE\${serviceName}:(OI)(CI)M" | Out-Null
+
+# Daily copy of the documents to the backup folders at 02:30 (after the 02:00 database backup).
+# /E copies new files and never deletes in the backup, so a file removed by mistake is still there.
+$copies = ($DocumentBackupDirs | ForEach-Object { "robocopy `"$DocumentsDir`" `"$_`" /E /XD _incoming /R:2 /W:30 /NP /NFL /NDL" }) -join " & "
+$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $copies & exit 0"
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:30"
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName "PresApp - Documents backup" -Action $action -Trigger $trigger -Principal $principal `
+    -Description "Copies K Data signed documents to the backup folders." -Force | Out-Null
 
 if (-not $service) {
     Write-Host "Creating the service..." -ForegroundColor Cyan

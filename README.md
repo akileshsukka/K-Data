@@ -99,6 +99,15 @@ Admin → Lists: values of the dropdowns. Add, reorder, deactivate; never rename
 - Client lists (onboarding upload) load a custom field when a column header matches the field name.
 - A field with values cannot change its kind; fields and options are deactivated, never deleted.
 
+## Signed documents
+
+Each gate of each asset can hold signed documents (PDF or photos: JPG, PNG, HEIC, WebP; up to 25 MB). Upload them from the Gates tab or the Documents tab of the asset. Uploading to a gate marks its documentation as Received; the status can still be changed by hand. One file can cover several gates and several assets, and the same file is never stored twice.
+
+- The files are on the server disk in `C:\PresApp\documents` (setting `Documents:Root`), named by their id; the database (`Document`, `DocumentLink`) only describes them. Never put this folder inside `C:\PresApp\app`.
+- Removed documents are moved to `_deleted\` in that folder, never erased.
+- `install-service.ps1` creates the folder, gives the service access and registers the scheduled task "PresApp - Documents backup" (daily 02:30, copies new files to `C:\PresApp_backup\documents` and `C:\secondary_backup\documents`). The SQL backups do not include these files.
+- Permissions: `documents.view` (every role, Viewer included), `documents.upload`, `documents.delete` (Admin).
+
 ## Server installation (once)
 
 1. **Database.** In SSMS on EM-L-5236, run `deploy/sql/01-create-database.sql`. It creates the empty `PresApp` database. PresApp creates the tables on its first start; the service login is created by the install script (step 4), because the Windows account `NT SERVICE\PresApp` only exists once the service is installed.

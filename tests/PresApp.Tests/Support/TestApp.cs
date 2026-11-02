@@ -36,6 +36,9 @@ public sealed class TestApp : WebApplicationFactory<Program>
     /// <summary>An in-memory copy of the Simpro tables (empty until a test creates them).</summary>
     public FakeSimpro Simpro { get; } = new();
 
+    /// <summary>Uploaded documents of this test run (deleted at the end).</summary>
+    public string DocumentsRoot { get; } = Path.Combine(Path.GetTempPath(), "presapp-docs-" + Guid.NewGuid().ToString("N"));
+
     public TestApp() => connection.Open();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -45,6 +48,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
         builder.UseSetting("Auth:CloudflareTeamDomain", TeamDomain);
         builder.UseSetting("Auth:CloudflareAudience", Audience);
         builder.UseSetting("Auth:BootstrapAdminEmail", AdminEmail);
+        builder.UseSetting("Documents:Root", DocumentsRoot);
 
         builder.ConfigureTestServices(services =>
         {
@@ -116,7 +120,12 @@ public sealed class TestApp : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing) { connection.Dispose(); Simpro.Dispose(); }
+        if (disposing)
+        {
+            connection.Dispose();
+            Simpro.Dispose();
+            if (Directory.Exists(DocumentsRoot)) Directory.Delete(DocumentsRoot, recursive: true);
+        }
     }
 
     private sealed class FakeCertsHandler(RsaSecurityKey key) : HttpMessageHandler

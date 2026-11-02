@@ -46,6 +46,9 @@ builder.Services.AddScoped<PresApp.Api.Monitoring.MonitoringService>();
 builder.Services.AddScoped<PresApp.Api.Groups.GroupService>();
 builder.Services.AddScoped<PresApp.Api.Piping.PipeSpecService>();
 builder.Services.AddScoped<PresApp.Api.CustomFields.CustomFieldService>();
+builder.Services.Configure<PresApp.Api.Documents.DocumentOptions>(builder.Configuration.GetSection(PresApp.Api.Documents.DocumentOptions.Section));
+builder.Services.AddSingleton<PresApp.Api.Documents.DocumentStorage>();
+builder.Services.AddScoped<PresApp.Api.Documents.DocumentService>();
 builder.Services.Configure<PresApp.Api.Simpro.SimproOptions>(builder.Configuration.GetSection(PresApp.Api.Simpro.SimproOptions.Section));
 builder.Services.AddSingleton<PresApp.Api.Simpro.ISimproConnectionFactory, PresApp.Api.Simpro.SqlServerSimproConnectionFactory>();
 builder.Services.AddScoped<PresApp.Api.Simpro.SimproStore>();
@@ -103,6 +106,7 @@ app.MapSimproEndpoints();
 app.MapMonitoringEndpoints();
 app.MapCustomFieldEndpoints();
 app.MapOptionSetEndpoints();
+app.MapDocumentEndpoints();
 
 // Unknown /api routes are 404; everything else is the React app.
 app.MapFallback("/api/{**path}", () => Results.NotFound());

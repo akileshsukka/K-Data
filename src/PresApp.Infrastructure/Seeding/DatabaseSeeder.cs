@@ -53,7 +53,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                 role.Permissions.Add(new RolePermission { Permission = Permissions.AssetsView });
         }
 
-        await SplitViewPermissionsAsync(ct);
+        await GrantNewPermissionsOnceAsync(ct);
 
         // Admin always holds every permission, including ones added in later versions.
         var admin = await db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Name == RoleNames.Admin, ct);
@@ -67,20 +67,32 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
     }
 
     /// <summary>
-    /// "history.view" and "groups.view" used to be part of "assets.view". The first time they exist, every role except
-    /// Viewer gets them so nothing changes for those roles; Viewer loses the History tab, the History page and Workpacks.
-    /// Runs once: afterwards Admin always holds them, so an admin can untick them freely on any other role.
+    /// Gives permissions added in a later version to the existing roles that should have them. Runs once per permission
+    /// (when no role holds it yet); afterwards Admin always holds it, so an admin can untick it freely on any other role.
+    /// <list type="bullet">
+    /// <item>history.view and groups.view used to be part of assets.view: every role except Viewer keeps them.</item>
+    /// <item>documents.view: every role that can read the registers, Viewer included.</item>
+    /// <item>documents.upload: every role that can edit gates or other fields.</item>
+    /// <item>documents.delete: Admin only (added by the Admin rule).</item>
+    /// </list>
     /// </summary>
-    private async Task SplitViewPermissionsAsync(CancellationToken ct)
+    private async Task GrantNewPermissionsOnceAsync(CancellationToken ct)
     {
-        string[] split = [Permissions.HistoryView, Permissions.GroupsView];
-        var roles = await db.Roles.Include(r => r.Permissions).ToListAsync(ct);
-        foreach (var permission in split)
+        static bool Has(Role r, string p) => r.Permissions.Any(x => x.Permission == p);
+        var grants = new (string Permission, Func<Role, bool> Gets)[]
         {
-            if (roles.Any(r => r.Permissions.Any(x => x.Permission == permission))) continue;
-            foreach (var role in roles.Where(r => r.Name != RoleNames.Viewer && r.Permissions.Any(x => x.Permission == Permissions.AssetsView)))
+            (Permissions.HistoryView, r => r.Name != RoleNames.Viewer && Has(r, Permissions.AssetsView)),
+            (Permissions.GroupsView, r => r.Name != RoleNames.Viewer && Has(r, Permissions.AssetsView)),
+            (Permissions.DocumentsView, r => Has(r, Permissions.AssetsView)),
+            (Permissions.DocumentsUpload, r => Has(r, Permissions.GatesEdit) || Has(r, Permissions.AssetsEdit)),
+        };
+        var roles = await db.Roles.Include(r => r.Permissions).ToListAsync(ct);
+        foreach (var (permission, gets) in grants)
+        {
+            if (roles.Any(r => Has(r, permission))) continue;
+            foreach (var role in roles.Where(gets).ToList())
                 role.Permissions.Add(new RolePermission { Permission = permission });
-            logger.LogInformation("Granted {Permission} to every role except Viewer", permission);
+            logger.LogInformation("Granted the new permission {Permission} to the existing roles", permission);
         }
     }
 

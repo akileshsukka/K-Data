@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
+using PresApp.Domain.Documents;
 using PresApp.Domain.Groups;
 using PresApp.Domain.Imports;
 using PresApp.Domain.Monitoring;
@@ -21,6 +22,10 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<FieldDefinition> FieldDefinitions => Set<FieldDefinition>();
     public DbSet<AssetFieldValue> FieldValues => Set<AssetFieldValue>();
     public DbSet<EquipmentIdSequence> EquipmentIdSequences => Set<EquipmentIdSequence>();
+
+    // Signed documents (files on disk, metadata here)
+    public DbSet<StoredDocument> Documents => Set<StoredDocument>();
+    public DbSet<DocumentLink> DocumentLinks => Set<DocumentLink>();
 
     // Catalogs
     public DbSet<Plant> Plants => Set<Plant>();

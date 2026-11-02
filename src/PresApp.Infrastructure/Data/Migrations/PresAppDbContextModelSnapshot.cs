@@ -957,6 +957,122 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.ToTable("ChangeLog", (string)null);
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Documents.DocumentLink", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("Gate")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("LinkedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LinkedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("RemovedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RemovedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
+
+                    b.HasIndex("AssetId", "Gate");
+
+                    b.ToTable("DocumentLink", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DocumentLink_Gate", "[Gate] IS NULL OR [Gate] BETWEEN 1 AND 8");
+                        });
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Documents.StoredDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Sha256");
+
+                    b.ToTable("Document", (string)null);
+                });
+
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -1962,6 +2078,25 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Navigation("Plant");
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Documents.DocumentLink", b =>
+                {
+                    b.HasOne("PresApp.Domain.Assets.Asset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PresApp.Domain.Documents.StoredDocument", "Document")
+                        .WithMany("Links")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+
+                    b.Navigation("Document");
+                });
+
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>
                 {
                     b.HasOne("PresApp.Domain.Groups.GroupType", "GroupType")
@@ -2172,6 +2307,11 @@ namespace PresApp.Infrastructure.Data.Migrations
             modelBuilder.Entity("PresApp.Domain.Catalog.Plant", b =>
                 {
                     b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Documents.StoredDocument", b =>
+                {
+                    b.Navigation("Links");
                 });
 
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>
