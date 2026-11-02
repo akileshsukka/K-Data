@@ -44,10 +44,18 @@ export const router = createBrowserRouter([
       { path: "u/:unitId/equipment", element: <RegisterPage key="eq" type="Equipment" /> },
       { path: "u/:unitId/lines", element: <RegisterPage key="pl" type="Pipeline" /> },
       { path: "u/:unitId/ei", element: <RegisterPage key="ei" type="ElectricalInstrument" /> },
-      { path: "u/:unitId/history", element: <UnitHistoryPage /> },
       { path: "u/:unitId/monitoring", element: <MonitoringPage /> },
-      { path: "u/:unitId/groups", element: <GroupsPage /> },
-      { path: "groups/:id", element: <GroupPage /> },
+      {
+        element: <RequirePermission permission={Perm.historyView} />,
+        children: [{ path: "u/:unitId/history", element: <UnitHistoryPage /> }],
+      },
+      {
+        element: <RequirePermission permission={Perm.groupsView} />,
+        children: [
+          { path: "u/:unitId/groups", element: <GroupsPage /> },
+          { path: "groups/:id", element: <GroupPage /> },
+        ],
+      },
       {
         element: <RequirePermission permission={Perm.bulkEdit} />,
         children: [{ path: "u/:unitId/bulk", element: <BulkEditPage /> }],

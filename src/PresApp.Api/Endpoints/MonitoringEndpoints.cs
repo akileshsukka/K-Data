@@ -22,9 +22,10 @@ public static class MonitoringEndpoints
             .RequirePermission(Permissions.ReadingsWrite);
 
         // ---------------------------------------------------------------- groups
+        // The list stays on assets.view: Monitoring uses it for its group filter. The workpack pages need groups.view.
         view.MapGet("/group-types", (GroupService s, CancellationToken ct) => s.TypesAsync(ct));
         view.MapGet("/groups", (int? unitId, bool? includeInactive, GroupService s, CancellationToken ct) => s.ListAsync(unitId, includeInactive == true, ct));
-        view.MapGet("/groups/{id:int}", (int id, GroupService s, CancellationToken ct) => s.DetailAsync(id, ct));
+        view.MapGet("/groups/{id:int}", (int id, GroupService s, CancellationToken ct) => s.DetailAsync(id, ct)).RequirePermission(Permissions.GroupsView);
 
         var manage = app.MapGroup("/api/groups").RequirePermission(Permissions.GroupsManage);
         manage.MapPost("", (SaveGroupRequest r, GroupService s, CancellationToken ct) => s.CreateAsync(r, ct));

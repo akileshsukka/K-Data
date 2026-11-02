@@ -18,7 +18,7 @@ public static class AssetEndpoints
         view.MapGet("/units/{unitId:int}/summary", (int unitId, AssetQueries q, CancellationToken ct) => q.SummaryAsync(unitId, ct));
 
         view.MapGet("/units/{unitId:int}/history", async (int unitId, DateTime? before, int? take, ClaimsPrincipal user, AssetQueries q, CancellationToken ct) =>
-            WithSource(await q.HistoryAsync(null, unitId, before, take ?? 200, ct), user));
+            WithSource(await q.HistoryAsync(null, unitId, before, take ?? 200, ct), user)).RequirePermission(Permissions.HistoryView);
 
         view.MapGet("/assets/search", (string q, int? unitId, string? type, int? take, AssetQueries queries, CancellationToken ct) =>
             queries.SearchAsync(q, unitId, ParseType(type), take ?? 20, ct));
@@ -26,7 +26,7 @@ public static class AssetEndpoints
         view.MapGet("/assets/{id:guid}", (Guid id, AssetQueries q, CancellationToken ct) => q.ProfileAsync(id, ct));
 
         view.MapGet("/assets/{id:guid}/history", async (Guid id, DateTime? before, int? take, ClaimsPrincipal user, AssetQueries q, CancellationToken ct) =>
-            WithSource(await q.HistoryAsync(id, null, before, take ?? 300, ct), user));
+            WithSource(await q.HistoryAsync(id, null, before, take ?? 300, ct), user)).RequirePermission(Permissions.HistoryView);
 
         view.MapGet("/assets/{id:guid}/readings", (Guid id, AssetEditor e, CancellationToken ct) => e.ReadingsAsync(id, ct));
 

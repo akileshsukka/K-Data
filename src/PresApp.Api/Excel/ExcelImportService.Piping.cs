@@ -30,6 +30,9 @@ public sealed partial class ExcelImportService
         var keyColumn = headers.IndexOf(ExcelColumns.KeyHeader) + 1;
         var tagColumn = map.Where(m => m.Key.Role == PipingRole.Tag).Select(m => m.Value + 1).FirstOrDefault();
         var editable = map.Where(m => m.Key.Editable).Select(m => (Column: m.Key, Index: m.Value + 1)).ToList();
+        // Other Pipeline custom fields whose name is a column header (e.g. "Line partially replaced").
+        var customColumns = PipingTemplate.MapCustom(headers, await PipingWorkbookExporter.LoadCustomFieldsAsync(db, tracking, ct))
+            .Select(m => (Def: m.Key, Index: m.Value + 1)).ToList();
 
         var rows = new List<(int Number, BaseRow Base, IXLTableRow Row)>();
         var changes = new List<ImportChange>();
@@ -131,6 +134,30 @@ public sealed partial class ExcelImportService
                 }
                 else customFields.Write(def!, asset, null, raw);
                 changes.Add(Change(fieldName, ImportOutcome.Applied, null, baseValue, excel, current, newText));
+            }
+
+            foreach (var (def, index) in customColumns)
+            {
+                if (!baseRow.Values.TryGetValue("cf:" + def.Key, out var baseValue)) continue;   // the column was not in the export
+                var excel = ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(index)));
+                if (PipingLayout.Same(excel, baseValue)) continue;
+                if (asset is null) { changes.Add(Change(def.Label, ImportOutcome.Rejected, "The line no longer exists.", baseValue, excel)); continue; }
+                var current = PipingWorkbookExporter.CustomText(def, asset);
+                if (!asset.IsActive) { changes.Add(Change(def.Label, ImportOutcome.Rejected, "Inactive line: it cannot be edited.", baseValue, excel, current)); continue; }
+                var probe = new Asset { Id = asset.Id, FieldValues = [] };
+                var error = customFields.Write(def, probe, null, excel);
+                if (error is not null) { changes.Add(Change(def.Label, ImportOutcome.Invalid, error, baseValue, excel, current)); continue; }
+                var newText = probe.FieldValues.FirstOrDefault() is { } fv ? CustomFields.CustomFieldService.Format(def, fv) : null;
+                if (PipingLayout.Same(current, newText)) { changes.Add(Change(def.Label, ImportOutcome.NoChange, "The app already has this value.", baseValue, excel, current, newText)); continue; }
+                if (!PipingLayout.Same(current, baseValue))
+                {
+                    changes.Add(Change(def.Label, ImportOutcome.Conflict,
+                        $"Changed in the app after the export (now \"{current ?? "empty"}\"). Not applied: check which value is right and set it in the app.",
+                        baseValue, excel, current));
+                    continue;
+                }
+                customFields.Write(def, asset, null, excel);
+                changes.Add(Change(def.Label, ImportOutcome.Applied, null, baseValue, excel, current, newText));
             }
         }
 

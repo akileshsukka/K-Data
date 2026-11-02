@@ -13,6 +13,8 @@ public enum PipingRole
     ProcessCode,
     /// <summary>Meaning of the service code (Admin → Line codes).</summary>
     ProcessDescription,
+    /// <summary>"Yes" when the line's G4 (N2 blanketing) is Completed; written for the Summary, never imported.</summary>
+    N2Blanket,
     /// <summary>A standard field, read back by the import.</summary>
     Field,
     /// <summary>A Pipeline custom field with a fixed key, read back by the import.</summary>
@@ -50,6 +52,7 @@ public static class PipingLayout
     public const string CleanedHeader = "Cleaned?";
     public const string ProcessCodeHeader = "Process Code";
     public const string ProcessDescriptionHeader = "Process Description";
+    public const string N2BlanketHeader = "Nitrogen Blanket";
 
     public static readonly IReadOnlyList<PipingColumn> Columns =
     [
@@ -64,7 +67,11 @@ public static class PipingLayout
         new(InspectionHeader, PipingRole.Custom, PipingFieldKeys.InspectionDone, 12),
         new(CleaningRequiredHeader, PipingRole.Custom, PipingFieldKeys.CleaningRequired, 15),
         new(CleanedHeader, PipingRole.Custom, PipingFieldKeys.Cleaned, 10),
+        new(N2BlanketHeader, PipingRole.N2Blanket, null, 11),
     ];
+
+    /// <summary>"Yes" when G4 (N2 blanketing) is Completed, otherwise empty.</summary>
+    public static string? N2Blanket(Asset a) => AssetPreservation.IsCompleted(a.Preservation?.G4Status) ? "Yes" : null;
 
     public static readonly string[] FixedKeys = [PipingFieldKeys.InspectionDone, PipingFieldKeys.CleaningRequired, PipingFieldKeys.Cleaned];
 

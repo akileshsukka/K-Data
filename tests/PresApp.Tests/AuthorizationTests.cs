@@ -99,4 +99,34 @@ public sealed class AuthorizationTests : IClassFixture<TestApp>
         Assert.Equal(HttpStatusCode.Forbidden, (await engineer.GetAsync($"/api/units/{unitId}/excel")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync($"/api/units/{unitId}/excel")).StatusCode);
     }
+
+    [Fact]
+    public async Task Viewer_does_not_see_history_or_workpacks_but_the_other_roles_do()
+    {
+        const string viewerEmail = "viewer-history@enermech.com", techEmail = "tech-history@enermech.com";
+        await app.AddUserAsync(viewerEmail, RoleNames.Viewer);
+        await app.AddUserAsync(techEmail, RoleNames.FieldTechnician);
+        var viewer = app.ClientFor(viewerEmail);
+        var tech = app.ClientFor(techEmail);
+        var admin = app.ClientFor(TestApp.AdminEmail);
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 39").Select(u => u.Id).FirstAsync());
+        var disciplineId = await app.WithDbAsync(db => db.Disciplines.Where(d => d.Name == "Static").Select(d => d.Id).FirstAsync());
+        var created = await (await admin.PostAsJsonAsync("/api/assets", new { type = "Equipment", unitId, disciplineId, tag = "39-HIST-1" })).Content.ReadFromJsonAsync<JsonElement>();
+        var id = created.GetProperty("id").GetString();
+
+        var me = await viewer.GetFromJsonAsync<JsonElement>("/api/me");
+        var perms = me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToList();
+        Assert.DoesNotContain(Permissions.HistoryView, perms);
+        Assert.DoesNotContain(Permissions.GroupsView, perms);
+
+        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync($"/api/assets/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"/api/assets/{id}/history")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"/api/units/{unitId}/history")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync("/api/groups/1")).StatusCode);
+        // Monitoring keeps its group filter.
+        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync($"/api/groups?unitId={unitId}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await tech.GetAsync($"/api/assets/{id}/history")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await tech.GetAsync($"/api/units/{unitId}/history")).StatusCode);
+    }
 }

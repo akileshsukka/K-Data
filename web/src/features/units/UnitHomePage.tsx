@@ -100,9 +100,9 @@ export function UnitHomePage() {
             <Tile to={`/u/${unit.id}/lines`} title="Pipeline Register" detail={d.lineCount === 0 ? "No lines yet" : `${d.lineCount} lines · ${Math.round(d.lineLengthM).toLocaleString("en")} m · ${d.linesBlanketed} N2 blanketed`} />
             <Tile to={`/u/${unit.id}/ei`} title="E&I Register" detail={`${d.electricalInstrumentCount} electrical and instrumentation items`} />
             <Tile to={`/u/${unit.id}/monitoring`} title="Monitoring" detail="N2 blanket checks during and after preservation" />
-            <Tile to={`/u/${unit.id}/groups`} title="Workpacks" detail="Groups of equipment, lines and E&I items" />
+            {session.can(Perm.groupsView) && <Tile to={`/u/${unit.id}/groups`} title="Workpacks" detail="Groups of equipment, lines and E&I items" />}
             {session.can(Perm.excelPage) && <Tile to={`/u/${unit.id}/excel`} title="Excel" detail="Download the unit file, upload it back" />}
-            <Tile to={`/u/${unit.id}/history`} title="History" detail={`${d.documentsPending} gate documents pending`} />
+            {session.can(Perm.historyView) && <Tile to={`/u/${unit.id}/history`} title="History" detail={`${d.documentsPending} gate documents pending`} />}
           </section>
         </>
       )}

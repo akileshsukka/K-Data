@@ -7,6 +7,8 @@ namespace PresApp.Domain.Security;
 public static class Permissions
 {
     public const string AssetsView = "assets.view";
+    public const string HistoryView = "history.view";
+    public const string GroupsView = "groups.view";
     public const string ExcelExport = "excel.export";
     public const string ReadingsWrite = "readings.write";
     public const string GatesEdit = "gates.edit";
@@ -25,7 +27,9 @@ public static class Permissions
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
-        new(AssetsView, "View registers, dashboards (piping cards included), history and export the Unit overview PDF"),
+        new(AssetsView, "View registers, dashboards (piping cards included) and export the Unit overview PDF"),
+        new(HistoryView, "See the change history (History tab of each asset and the unit History page)"),
+        new(GroupsView, "See workpacks"),
         new(ExcelExport, "Download a unit Excel"),
         new(ReadingsWrite, "Record monitoring readings"),
         new(GatesEdit, "Edit gate statuses and comments"),

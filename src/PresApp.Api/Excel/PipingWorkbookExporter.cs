@@ -44,6 +44,9 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
         var map = PipingTemplate.Map(headers);
         var byIndex = map.ToDictionary(m => m.Value, m => m.Key);
+        var customDefs = await LoadCustomFieldsAsync(db, tracking: false, ct);
+        var customMap = PipingTemplate.MapCustom(headers, customDefs);
+        var customByIndex = customMap.ToDictionary(m => m.Value, m => m.Key);
         var templateRow = table.DataRange.FirstRow();
         var formulas = templateRow.Cells().Select(c => c.HasFormula ? c.FormulaR1C1 : null).ToList();
 
@@ -58,7 +61,13 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             for (var c = 0; c < headers.Count; c++)
             {
                 var cell = row.Cell(c + 1);
-                if (formulas[c] is { } f && !byIndex.ContainsKey(c)) { cell.FormulaR1C1 = f; continue; }
+                if (formulas[c] is { } f && !byIndex.ContainsKey(c) && !customByIndex.ContainsKey(c)) { cell.FormulaR1C1 = f; continue; }
+                if (customByIndex.TryGetValue(c, out var customDef))
+                {
+                    cell.Style.NumberFormat.Format = "@";
+                    cell.SetValue(CustomText(customDef, a) ?? "");
+                    continue;
+                }
                 if (!byIndex.TryGetValue(c, out var col)) { cell.Value = Blank.Value; continue; }
                 switch (col.Role)
                 {
@@ -66,6 +75,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
                     case PipingRole.Tag: cell.SetValue(a.Tag ?? a.Code); break;
                     case PipingRole.ProcessCode: cell.SetValue(service ?? ""); break;
                     case PipingRole.ProcessDescription: cell.SetValue(service is not null && codes.TryGetValue(service, out var d) ? d.ToUpperInvariant() : ""); break;
+                    case PipingRole.N2Blanket: cell.SetValue(PipingLayout.N2Blanket(a) ?? ""); break;
                     default:
                         cell.Style.NumberFormat.Format = "@";
                         cell.SetValue(PipingLayout.Display(col, a, defs) ?? "");
@@ -119,6 +129,23 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         Dropdown(PipingLayout.CleaningRequiredHeader, "CleaningRequired", CustomOptions(defs, PipingFieldKeys.CleaningRequired), true,
             "Select a value from the list. New values are added in K Data.");
         Dropdown(PipingLayout.CleanedHeader, "Cleaned", CustomOptions(defs, PipingFieldKeys.Cleaned), true, "Select a value from the list, or leave it empty.");
+        // Custom fields with a list (or Yes/No): their values as dropdowns.
+        foreach (var (def, index) in customMap)
+        {
+            var values = def.DataType == FieldDataType.YesNo ? ["Yes", "No"]
+                : def.DataType == FieldDataType.List ? def.OptionSet?.Values.Where(v => v.IsActive).OrderBy(v => v.SortOrder).Select(v => v.Value).ToList() ?? [] : [];
+            if (values.Count == 0 || n == 0) continue;
+            listColumn++;
+            lists.Cell(1, listColumn).SetValue(def.Key);
+            for (var v = 0; v < values.Count; v++) lists.Cell(v + 2, listColumn).SetValue(values[v]);
+            var dv = body.Column(index + 1).CreateDataValidation();
+            dv.List(lists.Range(2, listColumn, values.Count + 1, listColumn), true);
+            dv.IgnoreBlanks = true;
+            dv.ShowErrorMessage = true;
+            dv.ErrorStyle = XLErrorStyle.Stop;
+            dv.ErrorTitle = "Invalid value";
+            dv.ErrorMessage = "Select a value from the list. New values are added in K Data (Custom fields).";
+        }
         lists.Visibility = XLWorksheetVisibility.VeryHidden;
 
         // ---------------------------------------------------------------- Summary, notes and placeholders
@@ -172,7 +199,9 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             StructureSignature = new StructureSignature(table.Name, table.HeadersRow().RowNumber(),
                 table.HeadersRow().FirstCell().Address.ColumnNumber, finalHeaders).ToJson(),
             BaseJson = new BaseSnapshot(lines.Select(a => new BaseRow(a.Id, a.Tag, a.Code,
-                map.Keys.Where(c => c.Editable).ToDictionary(c => c.BaseKey, c => PipingLayout.Display(c, a, defs)))).ToList(), notes).ToJson()
+                map.Keys.Where(c => c.Editable).Select(c => (c.BaseKey, PipingLayout.Display(c, a, defs)))
+                    .Concat(customMap.Keys.Select(d => ("cf:" + d.Key, CustomText(d, a))))
+                    .ToDictionary(x => x.Item1, x => x.Item2))).ToList(), notes).ToJson()
         });
         await db.SaveChangesAsync(ct);
         return new ExportResult(fileName, output.ToArray(), sessionId, n);
@@ -201,6 +230,18 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
     private static List<string> CustomOptions(IReadOnlyDictionary<string, FieldDefinition> defs, string key) => defs.TryGetValue(key, out var d)
         ? d.DataType == FieldDataType.YesNo ? ["Yes", "No"] : d.OptionSet?.Values.Where(v => v.IsActive).OrderBy(v => v.SortOrder).Select(v => v.Value).ToList() ?? []
         : [];
+
+    /// <summary>Active Pipeline custom fields other than the fixed ones (they become columns when the template has their name).</summary>
+    internal static async Task<List<FieldDefinition>> LoadCustomFieldsAsync(PresAppDbContext db, bool tracking, CancellationToken ct)
+    {
+        var query = db.FieldDefinitions.Include(f => f.OptionSet).ThenInclude(o => o!.Values)
+            .Where(f => f.AssetType == AssetType.Pipeline && f.IsActive && !PipingLayout.FixedKeys.Contains(f.Key));
+        return await (tracking ? query : query.AsNoTracking()).ToListAsync(ct);
+    }
+
+    /// <summary>Value of a custom field of a line as written in the cell.</summary>
+    internal static string? CustomText(FieldDefinition def, Asset a) =>
+        a.FieldValues.FirstOrDefault(v => v.FieldDefinitionId == def.Id) is { } row ? CustomFields.CustomFieldService.Format(def, row) : null;
 
     /// <summary>The fixed custom fields of the Pipeline Register, by key.</summary>
     internal static async Task<Dictionary<string, FieldDefinition>> LoadFixedFieldsAsync(PresAppDbContext db, bool tracking, CancellationToken ct)

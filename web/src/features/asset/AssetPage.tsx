@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../../api/client";
-import type { AssetProfile, Proposals } from "../../api/types";
+import { Perm, type AssetProfile, type Proposals } from "../../api/types";
 import { CustomFieldsCards } from "./CustomFieldsCard";
 import { useFields, useOptions, useLineCodes, usePipeSpecs } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
@@ -21,14 +21,17 @@ const tabs = [
   { key: "overview", label: "Overview" },
   { key: "gates", label: "Gates" },
   { key: "readings", label: "Readings" },
-  { key: "history", label: "History" },
+  { key: "history", label: "History", permission: Perm.historyView },
 ] as const;
 
 /** Everything about one asset: overview, gates with documentation, readings and history. */
 export function AssetPage() {
   const id = useParams().id!;
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") ?? "overview";
+  const session = useSession();
+  const visibleTabs = tabs.filter((t) => !("permission" in t) || session.can(t.permission));
+  // A tab the role cannot see (e.g. ?tab=history in a shared link) falls back to the overview.
+  const tab = visibleTabs.some((t) => t.key === params.get("tab")) ? params.get("tab")! : "overview";
   const asset = useAsset(id);
   const fields = useFields();
   const options = useOptions();
@@ -68,7 +71,7 @@ export function AssetPage() {
       <ProposalBanner asset={a} proposals={proposals} onDone={() => setProposals(null)} />
 
       <nav className="mt-5 flex gap-1 overflow-x-auto border-b border-line" aria-label="Asset sections">
-        {tabs.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setParams(t.key === "overview" ? {} : { tab: t.key }, { replace: true })}
@@ -100,7 +103,7 @@ export function AssetPage() {
               <FieldSection title="Latest readings" fields={section("Latest readings")} asset={a} options={opts} onProposals={setProposals} />
               <FieldSection title="Milestones" fields={section("Milestones").filter((f) => f.key !== "PreservedAtUtc")} asset={a} options={opts} onProposals={setProposals} />
               <PreservedCard asset={a} />
-              {a.groups.length > 0 && (
+              {a.groups.length > 0 && session.can(Perm.groupsView) && (
                 <section className="rounded-lg border border-line bg-panel p-4">
                   <h2 className="text-lg font-semibold">Workpacks and groups</h2>
                   <ul className="mt-2 flex flex-wrap gap-2">

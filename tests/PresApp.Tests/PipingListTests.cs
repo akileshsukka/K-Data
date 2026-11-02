@@ -163,10 +163,10 @@ public sealed class PipingListTests : IClassFixture<TestApp>
         using (var wb = new XLWorkbook(new MemoryStream(bytes)))
         {
             var table = wb.Worksheet("Line List").Table("Table1");
-            Assert.Equal(Headers.Append("Key"), table.HeadersRow().Cells().Select(c => c.GetString()));
+            Assert.Equal(Headers.Append("Nitrogen Blanket").Append("Key"), table.HeadersRow().Cells().Select(c => c.GetString()));
             Assert.Equal(2, table.HeadersRow().RowNumber());
             Assert.Equal(2, table.HeadersRow().FirstCell().Address.ColumnNumber);
-            Assert.True(wb.Worksheet("Line List").Column(13).IsHidden);
+            Assert.True(wb.Worksheet("Line List").Column(14).IsHidden);
             var rows = table.DataRange.Rows().ToList();
             Assert.Equal(3, rows.Count);
             Assert.Equal("LEAN SOLVENT (LEAN AMINE)", rows[1].Field("Process Description").GetString());
@@ -366,5 +366,52 @@ public sealed class PipingListTests : IClassFixture<TestApp>
         Assert.Equal("Previewed", preview.GetProperty("run").GetProperty("status").GetString());
 
         Assert.True((await (await admin.DeleteAsync("/api/excel-templates/piping")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("isDefault").GetBoolean());
+    }
+    [Fact]
+    public async Task Line_custom_fields_go_in_the_template_by_their_name_and_nitrogen_blanket_comes_from_G4()
+    {
+        var unitId = await UnitIdAsync("Unit 32");
+        (await admin.PostAsJsonAsync("/api/custom-fields", new { assetType = "Pipeline", label = "Line not replaced", dataType = "Text", sortOrder = 50, showInRegister = false })).EnsureSuccessStatusCode();
+        await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/onboarding", EngineerList(
+            [1, "32-0101-HC-2\"-61055-N", null, "HC", "", null, "Completed", "Yes", "Yes", "Hydromilling", null],
+            [2, "32-0102-HC-2\"-61055-N", null, "HC", "", null, "Completed", "Yes", "No", "TBC", null])));
+        var first = await app.WithDbAsync(db => db.Assets.Where(a => a.Tag == "32-0101-HC-2\"-61055-N").Select(a => a.Id).FirstAsync());
+        (await admin.PatchAsJsonAsync($"/api/assets/{first}", new { changes = new[] { new { field = "G4Status", from = (string?)null, to = "Completed" } } })).EnsureSuccessStatusCode();
+
+        // The engineers' new "Pipe Status" column, added to the template with the custom field's name.
+        var bytes = await (await admin.GetAsync("/api/excel-templates/piping/file")).Content.ReadAsByteArrayAsync();
+        using (var wb = new XLWorkbook(new MemoryStream(bytes)))
+        {
+            var table = wb.Worksheet("Line List").Table("Table1");
+            table.InsertColumnsAfter(1);
+            table.HeadersRow().LastCell().SetValue("Line not replaced ");
+            using var ms = new MemoryStream(); wb.SaveAs(ms); bytes = ms.ToArray();
+        }
+        var uploaded = await (await admin.PutAsync("/api/excel-templates/piping", new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", "Piping.xlsx" } })).Content.ReadFromJsonAsync<JsonElement>();
+        try
+        {
+            Assert.Contains(uploaded.GetProperty("notes").EnumerateArray(), n => n.GetString()!.StartsWith("Custom fields filled and imported: Line not replaced"));
+
+            var export = await (await admin.GetAsync($"/api/units/{unitId}/excel/piping/export")).Content.ReadAsByteArrayAsync();
+            using (var wb = new XLWorkbook(new MemoryStream(export)))
+            {
+                var rows = wb.Worksheet("Line List").Table("Table1").DataRange.Rows().ToDictionary(r => r.Field("Tag No").GetString());
+                Assert.Equal("Yes", rows["32-0101-HC-2\"-61055-N"].Field("Nitrogen Blanket").GetString());
+                var second = rows["32-0102-HC-2\"-61055-N"];
+                Assert.Equal("", second.Field("Nitrogen Blanket").GetString());
+                second.Field("Line not replaced ").SetValue("Original line kept");
+                second.Field("Nitrogen Blanket").SetValue("Yes");   // derived from G4: not imported
+                using var ms = new MemoryStream(); wb.SaveAs(ms); export = ms.ToArray();
+            }
+            var changes = Changes(await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/import", export)));
+            var change = Assert.Single(changes);
+            Assert.Equal(("32-0102-HC-2\"-61055-N", "Line not replaced", "Applied"), (change.Tag, change.Field, change.Outcome));
+            Assert.Equal("Original line kept", await app.WithDbAsync(db => db.FieldValues
+                .Where(v => v.Asset.Tag == "32-0102-HC-2\"-61055-N" && v.FieldDefinition.Label == "Line not replaced").Select(v => v.ValueText).FirstAsync()));
+        }
+        finally
+        {
+            await admin.DeleteAsync("/api/excel-templates/piping");   // back to the default for the other tests
+        }
     }
 }

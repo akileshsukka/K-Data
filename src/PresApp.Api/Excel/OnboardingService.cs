@@ -139,7 +139,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                 .GroupBy(c => ExcelColumns.Norm(c.Header)).ToDictionary(g => g.Key, g => g.First().Index);
             // Piping line list: the service comes from the line number; "Process Code" is only compared with it.
             var processCode = columns.FirstOrDefault(c => ExcelColumns.Norm(c.Header) == "processcode")?.Index;
-            var derived = new[] { "processcode", "processdescription" };
+            var derived = new[] { "processcode", "processdescription", "nitrogenblanket", "key" };
             var ignored = columns.Where(c => c.Role == ColumnRole.NotStored && c.Header.Trim().Length > 0 && GroupKindOf(c.Header) is null
                 && !customColumns.ContainsKey(ExcelColumns.Norm(c.Header)) && !derived.Contains(ExcelColumns.Norm(c.Header))).Select(c => c.Header.Trim()).ToList();
 

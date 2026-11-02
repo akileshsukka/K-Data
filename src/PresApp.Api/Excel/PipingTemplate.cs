@@ -38,7 +38,22 @@ public static class PipingTemplate
         [PipingLayout.InspectionHeader] = ["inspectiondone", "inspection"],
         [PipingLayout.CleaningRequiredHeader] = ["cleaningrequired", "cleaningscope"],
         [PipingLayout.CleanedHeader] = ["cleaned", "cleaningdone", "cleaningperformed"],
+        [PipingLayout.N2BlanketHeader] = ["nitrogenblanket", "n2blanket", "n2blanketed", "nitrogenblanketed", "nitrogenblanket05barg", "n2blanket05barg"],
     };
+
+    /// <summary>
+    /// Pipeline custom fields (Admin → Custom fields) written in the line list: a column whose header is the field's
+    /// name (case, spaces and punctuation ignored) and is not a K Data column. The fixed piping fields are not included.
+    /// </summary>
+    public static Dictionary<Domain.Assets.FieldDefinition, int> MapCustom(IReadOnlyList<string> headers, IEnumerable<Domain.Assets.FieldDefinition> defs)
+    {
+        var byName = defs.Where(d => d.IsActive && !PipingLayout.FixedKeys.Contains(d.Key))
+            .GroupBy(d => ExcelColumns.Norm(d.Label)).ToDictionary(g => g.Key, g => g.First());
+        var map = new Dictionary<Domain.Assets.FieldDefinition, int>();
+        for (var i = 0; i < headers.Count; i++)
+            if (Find(headers[i]) is null && byName.TryGetValue(ExcelColumns.Norm(headers[i]), out var def)) map.TryAdd(def, i);
+        return map;
+    }
 
     /// <summary>The K Data column a header stands for, or null (a column K Data does not fill).</summary>
     public static PipingColumn? Find(string header)
@@ -77,7 +92,7 @@ public static class PipingTemplate
     }
 
     /// <summary>What the uploaded template contains, shown after the upload.</summary>
-    public static List<string> Describe(XLWorkbook wb)
+    public static List<string> Describe(XLWorkbook wb, IReadOnlyCollection<string>? customLabels = null)
     {
         var notes = new List<string>();
         var table = FindTable(wb)!;
@@ -85,7 +100,10 @@ public static class PipingTemplate
         var map = Map(headers);
         var missing = PipingLayout.Columns.Where(c => !map.ContainsKey(c)).Select(c => c.Header).ToList();
         if (missing.Count > 0) notes.Add($"Columns K Data will not fill (not in the template): {string.Join(", ", missing)}.");
-        var extra = headers.Where(h => h.Trim().Length > 0 && Find(h) is null).ToList();
+        var custom = (customLabels ?? []).Select(ExcelColumns.Norm).ToHashSet();
+        var fields = headers.Where(h => Find(h) is null && custom.Contains(ExcelColumns.Norm(h))).ToList();
+        if (fields.Count > 0) notes.Add($"Custom fields filled and imported: {string.Join(", ", fields.Select(f => f.Trim()))}.");
+        var extra = headers.Where(h => h.Trim().Length > 0 && Find(h) is null && !custom.Contains(ExcelColumns.Norm(h))).ToList();
         if (extra.Count > 0) notes.Add($"Columns left empty and never imported: {string.Join(", ", extra)}.");
         var cells = wb.Worksheets.SelectMany(w => w.CellsUsed()).Where(c => !c.HasFormula).Select(c => WorkbookFormat.CellText(c).Trim()).ToList();
         if (!cells.Contains(CodePlaceholder)) notes.Add($"No Summary row with {CodePlaceholder} in column B: the Summary is not filled per service code.");
@@ -180,6 +198,7 @@ public static class PipingTemplate
         if (cleaningOptions.Count > 0)
             blocks.Add(("Cleaning scope", cleaningOptions.Select(o => (o, (string?)PipingLayout.CleaningRequiredHeader, true, false)).ToList()));
         blocks.Add(("Cleaning Performed", [("Yes", PipingLayout.CleanedHeader, true, false), (ScopeHeader, null, false, true)]));
+        blocks.Add(("Nitrogen Blanket [0.5 Barg]", [("Yes", PipingLayout.N2BlanketHeader, true, false), ("Complete %", null, false, true)]));
 
         const int groupRow = 3, headerRow = 4, totalRow = 5, codeRow = 6;
         s.Cell(headerRow, 2).SetValue("Process code");

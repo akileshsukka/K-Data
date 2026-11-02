@@ -18,10 +18,10 @@ internal static class SeedData
         (RoleNames.Viewer, "Read-only, can download Excel",
             [Permissions.AssetsView, Permissions.ExcelExport]),
         (RoleNames.FieldTechnician, "Readings, gate statuses and comments",
-            [Permissions.AssetsView, Permissions.ExcelExport, Permissions.ReadingsWrite, Permissions.GatesEdit]),
+            [Permissions.AssetsView, Permissions.HistoryView, Permissions.GroupsView, Permissions.ExcelExport, Permissions.ReadingsWrite, Permissions.GatesEdit]),
         (RoleNames.Engineer, "Full preservation editing and bulk edit",
-            [Permissions.AssetsView, Permissions.ExcelExport, Permissions.ReadingsWrite, Permissions.GatesEdit,
-             Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit]),
+            [Permissions.AssetsView, Permissions.HistoryView, Permissions.GroupsView, Permissions.ExcelExport, Permissions.ReadingsWrite,
+             Permissions.GatesEdit, Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit]),
         (RoleNames.Admin, "Everything, including Excel uploads, Simpro, lists and users",
             Permissions.All.Select(p => p.Key).ToArray()),
     ];

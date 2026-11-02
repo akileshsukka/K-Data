@@ -66,11 +66,11 @@ export function AppShell() {
         { to: `/u/${unit.id}/lines`, label: "Pipeline Register" },
         { to: `/u/${unit.id}/ei`, label: "E&I Register" },
         { to: `/u/${unit.id}/monitoring`, label: "Monitoring" },
-        { to: `/u/${unit.id}/groups`, label: "Workpacks" },
+        ...(session.can(Perm.groupsView) ? [{ to: `/u/${unit.id}/groups`, label: "Workpacks" }] : []),
         ...(session.can(Perm.bulkEdit) ? [{ to: `/u/${unit.id}/bulk`, label: "Bulk edit" }] : []),
         ...(session.can(Perm.excelPage) ? [{ to: `/u/${unit.id}/excel`, label: "Excel" }] : []),
         ...(session.can(Perm.categoriesManage) ? [{ to: `/u/${unit.id}/categories`, label: "Dashboard categories" }] : []),
-        { to: `/u/${unit.id}/history`, label: "History" },
+        ...(session.can(Perm.historyView) ? [{ to: `/u/${unit.id}/history`, label: "History" }] : []),
       ]
     : [];
   const adminItems = useAdminItems();

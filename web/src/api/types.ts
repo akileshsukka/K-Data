@@ -62,6 +62,8 @@ export interface LoginRecord {
 /** Permission keys checked by the API (must match PresApp.Domain.Security.Permissions). */
 export const Perm = {
   assetsView: "assets.view",
+  historyView: "history.view",
+  groupsView: "groups.view",
   excelExport: "excel.export",
   excelPage: "excel.page",
   historySource: "history.source",

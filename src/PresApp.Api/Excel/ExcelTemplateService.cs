@@ -84,7 +84,8 @@ public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvid
         if (buffer.Length == 0 || buffer.Length > ExcelImportService.MaxFileBytes) throw ApiProblem.Invalid("Upload an .xlsx file of at most 20 MB.");
         var bytes = buffer.ToArray();
         List<string> notes;
-        using (var wb = PipingWorkbookExporter.Open(bytes)) notes = PipingTemplate.Describe(wb);
+        var customLabels = (await PipingWorkbookExporter.LoadCustomFieldsAsync(db, tracking: false, ct)).Select(d => d.Label).ToList();
+        using (var wb = PipingWorkbookExporter.Open(bytes)) notes = PipingTemplate.Describe(wb, customLabels);
 
         var template = await db.WorkbookTemplates.FirstOrDefaultAsync(t => t.Key == WorkbookTemplate.PipingKey, ct);
         if (template is null) db.WorkbookTemplates.Add(template = new WorkbookTemplate { Key = WorkbookTemplate.PipingKey });

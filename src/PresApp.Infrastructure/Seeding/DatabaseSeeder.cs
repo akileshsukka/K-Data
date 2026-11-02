@@ -53,6 +53,8 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                 role.Permissions.Add(new RolePermission { Permission = Permissions.AssetsView });
         }
 
+        await SplitViewPermissionsAsync(ct);
+
         // Admin always holds every permission, including ones added in later versions.
         var admin = await db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Name == RoleNames.Admin, ct);
         if (admin is not null)
@@ -61,6 +63,24 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
             {
                 admin.Permissions.Add(new RolePermission { Permission = p.Key });
             }
+        }
+    }
+
+    /// <summary>
+    /// "history.view" and "groups.view" used to be part of "assets.view". The first time they exist, every role except
+    /// Viewer gets them so nothing changes for those roles; Viewer loses the History tab, the History page and Workpacks.
+    /// Runs once: afterwards Admin always holds them, so an admin can untick them freely on any other role.
+    /// </summary>
+    private async Task SplitViewPermissionsAsync(CancellationToken ct)
+    {
+        string[] split = [Permissions.HistoryView, Permissions.GroupsView];
+        var roles = await db.Roles.Include(r => r.Permissions).ToListAsync(ct);
+        foreach (var permission in split)
+        {
+            if (roles.Any(r => r.Permissions.Any(x => x.Permission == permission))) continue;
+            foreach (var role in roles.Where(r => r.Name != RoleNames.Viewer && r.Permissions.Any(x => x.Permission == Permissions.AssetsView)))
+                role.Permissions.Add(new RolePermission { Permission = permission });
+            logger.LogInformation("Granted {Permission} to every role except Viewer", permission);
         }
     }
 
