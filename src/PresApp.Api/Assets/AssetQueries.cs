@@ -48,7 +48,7 @@ public sealed class AssetQueries(PresAppDbContext db)
                 r.P?.LastFieldActionDate, r.P?.PreservedAtUtc, r.DocsPending, r.IsActive,
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
                 r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
-                r.P?.G1BulkLiquidDrained))
+                r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation))
             .ToList();
     }
 

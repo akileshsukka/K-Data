@@ -157,6 +157,7 @@ export interface RegisterRow {
   circuit: string | null;
   custom: Record<string, string | null> | null;
   bulkLiquidDrained?: string | null;
+  readyForPreservation?: string | null;
 }
 
 export type CustomFieldType = "Text" | "Number" | "Date" | "List" | "YesNo";

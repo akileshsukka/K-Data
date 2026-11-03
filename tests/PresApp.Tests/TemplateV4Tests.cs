@@ -95,6 +95,11 @@ public sealed class TemplateV4Tests : IClassFixture<TestApp>
         Assert.Equal(JsonValueKind.Null, profiles[1].GetProperty("dashboardCategory").ValueKind);
         Assert.Equal(JsonValueKind.Null, profiles[2].GetProperty("dashboardCategory").ValueKind);
         Assert.Equal("No", profiles[2].GetProperty("values").GetProperty("ReadyForPreservation").GetString());
+
+        // The register carries the same value, so it can be filtered on.
+        var register = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=Equipment")).EnumerateArray().ToList();
+        Assert.Equal("No", register.First(r => r.GetProperty("tag").GetString() == "39-V-903").GetProperty("readyForPreservation").GetString());
+        Assert.Equal(JsonValueKind.Null, register.First(r => r.GetProperty("tag").GetString() == "39-V-901").GetProperty("readyForPreservation").ValueKind);
     }
 
     private async Task<Guid> CreateAsync(int unitId, string tag)

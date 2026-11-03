@@ -29,10 +29,12 @@ interface Filters {
   text: string;
   discipline: string;
   currentGate: string;
-  gate: string;
+  /** Gates to check (1–8). Several gates = all of them must match (AND). */
+  gates: number[];
   gateStatus: string;
   actionBy: string;
   emWalkdown: string;
+  ready: string;
   drained: string;
   inspection: string;
   cleaning: string;
@@ -42,7 +44,7 @@ interface Filters {
   group: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gate: "", gateStatus: "", actionBy: "", emWalkdown: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "" };
 
 /** EM Walkdown Status values (Completed / Ongoing / N/A); "(not set)" finds the ones still blank. */
 const walkdownStatuses = ["Completed", "Ongoing", "N/A"];
@@ -79,9 +81,10 @@ export function RegisterPage({ type }: { type: AssetType }) {
           (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service) ?? ""}`.toLowerCase().includes(text)) &&
           (!f.discipline || r.discipline === f.discipline) &&
           (!f.currentGate || r.currentGate === f.currentGate) &&
-          gateMatch(r, f.gate, f.gateStatus, gateCount) &&
+          gateMatch(r, f.gates, f.gateStatus, gateCount) &&
           (!f.actionBy || r.actionBy === f.actionBy) &&
           (!f.emWalkdown || (f.emWalkdown === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === f.emWalkdown.toLowerCase())) &&
+          (!f.ready || (f.ready === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === f.ready.toLowerCase())) &&
           (!f.drained || (f.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
           (!f.inspection || (f.inspection === "Yes") === (yesTick(r.custom?.[PipingFieldKeys.inspectionDone]) === "done")) &&
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
@@ -93,7 +96,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
   );
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
-  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false).length;
+  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   const canBulk = session.can(Perm.bulkEdit) || session.can(Perm.groupsManage);
   const groupCodes = [...new Set(all.flatMap((r) => r.groups ?? []))].sort();
   const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
@@ -113,6 +116,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
   }
 
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => setF((prev) => ({ ...prev, [key]: value }));
+  const toggleGate = (g: number) => setF((prev) => ({ ...prev, gates: prev.gates.includes(g) ? prev.gates.filter((x) => x !== g) : [...prev.gates, g].sort((a, b) => a - b) }));
 
   return (
     <div>
@@ -148,7 +152,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
       {lines && <PipingSummaryCards unitId={unitId} />}
       {lines && <PipingNotes unitId={unitId} />}
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(17rem,1.5fr)_minmax(8rem,1fr)]">
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(19rem,1.6fr)_minmax(8rem,1fr)]">
         <TextInput type="search" placeholder={lines ? "Search line number, ID, spec, P&ID, service or remarks" : "Search tag, ID, description or remarks"} value={f.text} onChange={(e) => set("text", e.target.value)} aria-label="Search" className="mt-0" />
         <SelectInput value={f.discipline} onChange={(e) => set("discipline", e.target.value)} aria-label="Discipline" className="mt-0">
           <option value="">All disciplines</option>
@@ -158,13 +162,22 @@ export function RegisterPage({ type }: { type: AssetType }) {
           <option value="">Any Current Gate</option>
           {distinct((r) => r.currentGate).map((d) => <option key={d}>{d}</option>)}
         </SelectInput>
-        <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2">
-          <SelectInput value={f.gate} onChange={(e) => set("gate", e.target.value)} aria-label="Gate" className="mt-0">
-            <option value="">Any gate</option>
-            {Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 1}>G{i + 1}</option>)}
-          </SelectInput>
-          <SelectInput value={f.gateStatus} onChange={(e) => set("gateStatus", e.target.value)} aria-label="Gate status" className="mt-0">
-            <option value="">Any status</option>
+        <div className="flex flex-wrap gap-2">
+          <div role="group" aria-label="Gates (several = all must match)" title="Choose one or more gates. With several, every chosen gate must have the status." className="inline-flex shrink-0 overflow-hidden rounded-md border border-line">
+            {Array.from({ length: gateCount }, (_, i) => i + 1).map((g) => (
+              <button
+                key={g}
+                type="button"
+                aria-pressed={f.gates.includes(g)}
+                onClick={() => toggleGate(g)}
+                className={`min-h-10 min-w-10 border-l border-line px-2 text-sm font-semibold first:border-l-0 ${f.gates.includes(g) ? "bg-violet text-white" : "bg-panel text-ink hover:text-violet"}`}
+              >
+                G{g}
+              </button>
+            ))}
+          </div>
+          <SelectInput value={f.gateStatus} onChange={(e) => set("gateStatus", e.target.value)} aria-label="Gate status" className="mt-0 min-w-[8rem] flex-1">
+            <option value="">{f.gates.length > 1 ? "Any status (all filled)" : "Any status"}</option>
             {["Completed", "Ongoing", "Hold", "Not Applicable", "(empty)"].map((s) => <option key={s}>{s}</option>)}
           </SelectInput>
         </div>
@@ -190,6 +203,16 @@ export function RegisterPage({ type }: { type: AssetType }) {
               <option value="(not set)">EM Walkdown: not set</option>
             </SelectInput>
           </div>
+        {!lines && (
+          <div className="w-full sm:w-60">
+            <SelectInput value={f.ready} onChange={(e) => set("ready", e.target.value)} aria-label="Ready For Preservation" className="mt-0">
+              <option value="">Any Ready for preservation</option>
+              <option value="Yes">Ready for preservation: Yes</option>
+              <option value="No">Ready for preservation: No</option>
+              <option value="(not set)">Ready for preservation: not set</option>
+            </SelectInput>
+          </div>
+        )}
         {lines && (
           <>
             <div className="w-full sm:w-48">
@@ -360,10 +383,15 @@ export function RegisterPage({ type }: { type: AssetType }) {
   );
 }
 
-/** Gate filter: a gate and a status, either one alone (any gate with that status / that gate filled in), or both. */
-function gateMatch(r: RegisterRow, gate: string, status: string, gateCount: number) {
-  if (!gate && !status) return true;
-  const values = gate ? [r.gates[Number(gate) - 1]] : r.gates.slice(0, gateCount);
-  if (!status) return values.some(Boolean);
-  return status === "(empty)" ? values.some((v) => !v) : values.some((v) => v === status);
+/**
+ * Gate filter.
+ * - Gates chosen: EVERY chosen gate must match (G1 + G2 + Ongoing = both G1 and G2 Ongoing). Without a status, every chosen gate must be filled in.
+ * - No gate chosen, status chosen: any of the shown gates has that status.
+ */
+export function gateMatch(r: RegisterRow, gates: number[], status: string, gateCount: number) {
+  const chosen = gates.filter((g) => g <= gateCount);
+  if (chosen.length === 0 && !status) return true;
+  const test = (v: string | null | undefined) => (!status ? !!v : status === "(empty)" ? !v : v === status);
+  if (chosen.length === 0) return r.gates.slice(0, gateCount).some(test);
+  return chosen.every((g) => test(r.gates[g - 1]));
 }
