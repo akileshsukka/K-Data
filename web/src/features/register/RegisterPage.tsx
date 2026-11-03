@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type RegisterRow } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type RegisterRow } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -42,9 +42,54 @@ interface Filters {
   docsPending: boolean;
   inactive: boolean;
   group: string;
+  /** Dashboard figure the register was opened from (tags, preserved, ready, hold, na, available, category-{id}). */
+  card: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "", card: "" };
+
+/** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
+const param: Record<keyof Filters, string> = {
+  text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
+  emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
+  docsPending: "docs", inactive: "inactive", group: "group", card: "card",
+};
+
+/** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
+function readFilters(sp: URLSearchParams): Filters {
+  const f: Filters = { ...empty, gates: [] };
+  for (const key of Object.keys(param) as (keyof Filters)[]) {
+    const v = sp.get(param[key]);
+    if (v === null) continue;
+    if (key === "gates") f.gates = v.split(",").map(Number).filter((g) => g >= 1 && g <= 8);
+    else if (key === "docsPending" || key === "inactive") f[key] = v === "1";
+    else f[key] = v;
+  }
+  return f;
+}
+
+function writeFilters(f: Filters): URLSearchParams {
+  const sp = new URLSearchParams();
+  for (const key of Object.keys(param) as (keyof Filters)[]) {
+    const v = f[key];
+    if (Array.isArray(v)) { if (v.length) sp.set(param[key], v.join(",")); }
+    else if (typeof v === "boolean") { if (v) sp.set(param[key], "1"); }
+    else if (v) sp.set(param[key], v);
+  }
+  return sp;
+}
+
+/** Last filters of each register (per unit and type) for this browser tab, restored when the register is opened again from the menu. */
+const memoryKey = (unitId: number, type: AssetType) => `kdata.register.${unitId}.${type}`;
+const memory = {
+  get: (key: string) => { try { return sessionStorage.getItem(key) ?? ""; } catch { return ""; } },
+  set: (key: string, value: string) => { try { sessionStorage.setItem(key, value); } catch { /* storage unavailable: filters still live in the address */ } },
+};
+
+const otherRegister: Partial<Record<AssetType, { path: string; name: string }>> = {
+  Equipment: { path: "ei", name: "E&I Register" },
+  ElectricalInstrument: { path: "equipment", name: "Equipment Register" },
+};
 
 /** EM Walkdown Status values (Completed / Ongoing / N/A); "(not set)" finds the ones still blank. */
 const walkdownStatuses = ["Completed", "Ongoing", "N/A"];
@@ -52,13 +97,48 @@ const walkdownStatuses = ["Completed", "Ongoing", "N/A"];
 /** All assets of one type in the selected unit, with filters that apply as you type. */
 export function RegisterPage({ type }: { type: AssetType }) {
   const unitId = Number(useParams().unitId);
+  // A fresh page per unit, so the filters of one unit never carry over to another.
+  return <RegisterView key={`${unitId}-${type}`} unitId={unitId} type={type} />;
+}
+
+function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const { unit } = useUnit(unitId);
   const session = useSession();
   const codes = useLineCodes();
   // Inspection Done / Cleaning Required / Cleaned of lines have their own place in the table.
   const customColumns = (useCustomFields(type).data ?? []).filter((c) => c.showInRegister && !(type === "Pipeline" && pipingFixedKeys.includes(c.key)));
   const navigate = useNavigate();
-  const [f, setF] = useState<Filters>(empty);
+  // Filters are React state (every click applies at once) mirrored into the page address (Back and links keep them).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [f, setF] = useState<Filters>(() => readFilters(searchParams));
+  const written = useRef(new Set<string>([searchParams.toString()]));
+  useEffect(() => {
+    const s = writeFilters(f).toString();
+    if (s === searchParams.toString()) return;
+    written.current.add(s);
+    setSearchParams(s, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the filters change
+  }, [f]);
+  useEffect(() => {
+    // The address changed by itself (Back/Forward, a dashboard link, restored filters): adopt it.
+    const s = searchParams.toString();
+    if (written.current.has(s)) return;
+    written.current = new Set([s]);
+    setF(readFilters(searchParams));
+  }, [searchParams]);
+
+  // Opened without filters in the address (menu, tile): bring back the last filters of this register, once.
+  const restoredFor = useRef<string | null>(null);
+  const key = memoryKey(unitId, type);
+  useEffect(() => {
+    if (restoredFor.current === key) return;
+    restoredFor.current = key;
+    const last = memory.get(key);
+    if (searchParams.toString() === "" && last) setSearchParams(new URLSearchParams(last), { replace: true });
+  }, [key, searchParams, setSearchParams]);
+  useEffect(() => {
+    if (restoredFor.current === key) memory.set(key, searchParams.toString());
+  }, [key, searchParams]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState(false);
   const text = useDebounced(f.text.trim().toLowerCase(), 300);
@@ -69,6 +149,13 @@ export function RegisterPage({ type }: { type: AssetType }) {
   });
 
   const all = rows.data ?? [];
+  const card = useQuery({
+    queryKey: ["dashboard-card", unitId, f.card],
+    queryFn: ({ signal }) => api<DashboardCard>(`/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}`, { signal }),
+    enabled: !!f.card,
+  });
+  const cardIds = useMemo(() => (card.data ? new Set(card.data.assetIds) : null), [card.data]);
+  const outsideCard = card.data ? card.data.assetIds.filter((id) => !all.some((r) => r.id === id)).length : 0;
   const distinct = (pick: (r: RegisterRow) => string | null) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const showLaterGates = all.some((r) => r.gates.slice(4).some(Boolean));
   const gateCount = showLaterGates ? 8 : 4;
@@ -90,9 +177,10 @@ export function RegisterPage({ type }: { type: AssetType }) {
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.docsPending || r.documentsPending > 0) &&
+          (!f.card || !!cardIds?.has(r.id)) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
-    [all, text, f, gateCount, codes],
+    [all, text, f, gateCount, codes, cardIds],
   );
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
@@ -177,7 +265,7 @@ export function RegisterPage({ type }: { type: AssetType }) {
             ))}
           </div>
           <SelectInput value={f.gateStatus} onChange={(e) => set("gateStatus", e.target.value)} aria-label="Gate status" className="mt-0 min-w-[8rem] flex-1">
-            <option value="">{f.gates.length > 1 ? "Any status (all filled)" : "Any status"}</option>
+            <option value="">Any status</option>
             {["Completed", "Ongoing", "Hold", "Not Applicable", "(empty)"].map((s) => <option key={s}>{s}</option>)}
           </SelectInput>
         </div>
@@ -253,14 +341,41 @@ export function RegisterPage({ type }: { type: AssetType }) {
           <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => set("inactive", e.target.checked)} />
           Show inactive
         </label>
-        {active > 0 && <button className="font-semibold text-violet" onClick={() => setF({ ...empty, inactive: f.inactive })}>Clear filters</button>}
       </div>
+
+      {active > 0 && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet/30 bg-violet-soft px-4 py-3" role="status">
+          <div className="min-w-0">
+            <p className="font-semibold text-ink">
+              {active === 1 ? "1 filter applied" : `${active} filters applied`} · showing {filtered.length} of {all.length}
+            </p>
+            {f.card && (
+              <p className="mt-0.5 text-sm text-muted">
+                From the dashboard: <span className="font-semibold text-ink">{card.data?.label ?? (card.isError ? "figure not found" : "loading…")}</span>
+                {card.data && ` (${card.data.count})`}
+                {" · "}<Link to={`/u/${unitId}`} className="font-semibold text-violet">Back to dashboard</Link>
+                {" · "}<button type="button" className="font-semibold text-violet" onClick={() => set("card", "")}>Remove this filter</button>
+              </p>
+            )}
+            {outsideCard > 0 && otherRegister[type] && (
+              <p className="mt-0.5 text-sm text-muted">
+                {outsideCard} more of this figure are in the{" "}
+                <Link to={`/u/${unitId}/${otherRegister[type]!.path}?card=${encodeURIComponent(f.card)}`} className="font-semibold text-violet">{otherRegister[type]!.name}</Link>.
+              </p>
+            )}
+          </div>
+          <Button onClick={() => setF({ ...empty, inactive: f.inactive })} className="min-h-11 px-6 text-base">
+            ✕ Clear filters
+          </Button>
+        </div>
+      )}
 
       <AddToGroupDialog open={grouping} onClose={() => setGrouping(false)} unitId={unitId} assetIds={[...selected]} onDone={() => setSelected(new Set())} />
 
-      {rows.isPending && <p className="mt-6 text-muted">Loading…</p>}
+      {(rows.isPending || (f.card && card.isPending)) && <p className="mt-6 text-muted">Loading…</p>}
+      {card.isError && <p className="mt-6 text-hold">This dashboard figure no longer exists (the category may have been removed). Clear the filters to see everything.</p>}
       {rows.error && <p className="mt-6 text-hold">{rows.error.message}</p>}
-      {rows.data && filtered.length === 0 && <p className="mt-6 text-muted">{all.length === 0 ? (lines ? "No lines in this unit yet. Add one, or paste the line list." : "No assets of this type in the unit yet.") : "Nothing matches these filters."}</p>}
+      {rows.data && !(f.card && card.isPending) && filtered.length === 0 && <p className="mt-6 text-muted">{all.length === 0 ? (lines ? "No lines in this unit yet. Add one, or paste the line list." : "No assets of this type in the unit yet.") : "Nothing matches these filters."}</p>}
 
       {filtered.length > 0 && (
         <>

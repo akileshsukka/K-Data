@@ -158,6 +158,9 @@ public static class ExcelEndpoints
         app.MapGet("/api/units/{unitId:int}/dashboard", (int unitId, UnitDashboard d, CancellationToken ct) => d.GetAsync(unitId, ct))
             .RequirePermission(Permissions.AssetsView);
 
+        app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", (int unitId, string card, UnitDashboard d, CancellationToken ct) => d.CardAsync(unitId, card, ct))
+            .RequirePermission(Permissions.AssetsView);
+
         app.MapGet("/api/units/{unitId:int}/categories", (int unitId, UnitDashboard d, CancellationToken ct) => d.CategoriesAsync(unitId, ct))
             .RequirePermission(Permissions.AssetsView);
 

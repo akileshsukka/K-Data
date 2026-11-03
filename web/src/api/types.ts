@@ -530,6 +530,14 @@ export interface CategoryOption {
   section: CategorySection;
 }
 
+/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}). */
+export interface DashboardCard {
+  card: string;
+  label: string;
+  count: number;
+  assetIds: string[];
+}
+
 export interface Dashboard {
   unitId: number;
   unitName: string;

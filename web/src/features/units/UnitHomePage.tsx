@@ -68,7 +68,7 @@ export function UnitHomePage() {
       {d && d.totalTags > 0 && (
         <>
           <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Key figures">
-            <KeyFigures d={d} />
+            <KeyFigures d={d} unitId={unit.id} />
           </section>
 
           <section className="mt-6 rounded-lg border border-line bg-panel p-5">
@@ -91,8 +91,8 @@ export function UnitHomePage() {
           </section>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <CategoryPanel title="Hold categories" rows={d.hold} total={d.totalHold} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
-            <CategoryPanel title="Not applicable categories" rows={d.notApplicable} total={d.totalNotApplicable} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
+            <CategoryPanel title="Hold categories" card="hold" rows={d.hold} total={d.totalHold} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
+            <CategoryPanel title="Not applicable categories" card="na" rows={d.notApplicable} total={d.totalNotApplicable} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
           </div>
 
           <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -112,16 +112,23 @@ export function UnitHomePage() {
   );
 }
 
-/** The six key figures; the caller sets the grid. Also used by the PDF export. */
-export function KeyFigures({ d }: { d: Dashboard }) {
+/** Equipment Register showing exactly the equipment behind one dashboard figure. */
+export const cardLink = (unitId: number, card: string) => `/u/${unitId}/equipment?card=${encodeURIComponent(card)}`;
+
+/**
+ * The six key figures; the caller sets the grid. With a unit, each figure opens the Equipment Register filtered on
+ * its equipment. Also used by the PDF export (no unit: plain figures).
+ */
+export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
+  const to = (card: string) => (unitId ? cardLink(unitId, card) : undefined);
   return (
     <>
-      <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" />
-      <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis />
-      <Stat label="Ready for preservation" value={d.readyForPreservation} detail="G4 ongoing" />
-      <Stat label="On hold" value={d.totalHold} detail="By hold category" />
-      <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" />
-      <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" />
+      <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" to={to("tags")} />
+      <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis to={to("preserved")} />
+      <Stat label="Ready for preservation" value={d.readyForPreservation} detail="Ready For Preservation = Yes" to={to("ready")} />
+      <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("hold")} />
+      <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("na")} />
+      <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("available")} />
     </>
   );
 }
@@ -165,13 +172,20 @@ export function categoryDetail(c: CategoryRow, byKeyword: boolean) {
     (byKeyword && c.keywords.length > 0 ? `Keywords: ${c.keywords.join(", ")}` : "");
 }
 
-function Stat({ label, value, detail, emphasis = false }: { label: string; value: number; detail: string; emphasis?: boolean }) {
-  return (
-    <div className={`rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`}>
+function Stat({ label, value, detail, emphasis = false, to }: { label: string; value: number; detail: string; emphasis?: boolean; to?: string }) {
+  const body = (
+    <>
       <p className="text-sm font-semibold text-muted">{label}</p>
       <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{value}</p>
       <p className="mt-1 text-sm text-muted">{detail}</p>
-    </div>
+    </>
+  );
+  const look = `rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`;
+  if (!to) return <div className={look}>{body}</div>;
+  return (
+    <Link to={to} title={`Open these ${value} in the Equipment Register`} className={`${look} block transition hover:border-violet hover:shadow-sm focus-visible:outline-2 focus-visible:outline-violet`}>
+      {body}
+    </Link>
   );
 }
 
@@ -217,7 +231,7 @@ export function ActivityBar({ row }: { row: ActivityRow }) {
   );
 }
 
-function CategoryPanel({ title, rows, total, unitId, canEdit, byKeyword }: { title: string; rows: CategoryRow[]; total: number; unitId: number; canEdit: boolean; byKeyword: boolean }) {
+function CategoryPanel({ title, card, rows, total, unitId, canEdit, byKeyword }: { title: string; card: string; rows: CategoryRow[]; total: number; unitId: number; canEdit: boolean; byKeyword: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
   return (
     <section className="rounded-lg border border-line bg-panel">
@@ -250,6 +264,11 @@ function CategoryPanel({ title, rows, total, unitId, canEdit, byKeyword }: { tit
               </button>
               {open === c.id && (
                 <div className="px-5 pb-4">
+                  {c.assets.length > 0 && (
+                    <Link to={cardLink(unitId, `category-${c.id}`)} className="mb-2 inline-block text-sm font-semibold text-violet">
+                      Open these {c.count} in the Equipment Register →
+                    </Link>
+                  )}
                   {c.assets.length === 0 ? (
                     <p className="text-sm text-muted">
                       No equipment in this category.
@@ -268,9 +287,11 @@ function CategoryPanel({ title, rows, total, unitId, canEdit, byKeyword }: { tit
               )}
             </li>
           ))}
-          <li className="flex justify-between border-t border-line px-5 py-3 font-semibold">
-            <span>Total</span>
-            <span className="tabular-nums">{total}</span>
+          <li className="border-t border-line">
+            <Link to={cardLink(unitId, card)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title="Open in the Equipment Register">
+              <span>Total</span>
+              <span className="tabular-nums">{total}</span>
+            </Link>
           </li>
         </ul>
       )}

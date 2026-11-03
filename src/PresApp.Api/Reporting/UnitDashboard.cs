@@ -32,6 +32,12 @@ public sealed record DashboardDto(
 public sealed record SaveCategory(int? Id, string Label, string Section, int? Priority = null, List<string>? Keywords = null,
     string? ActionBy = null, string? EmailAction = null, string? Recommendation = null, string? Note = null, bool IsActive = true);
 
+/// <summary>
+/// The equipment behind one dashboard figure, so the register can show exactly those rows.
+/// Card: tags, preserved, ready, hold, na, available or category-{id}.
+/// </summary>
+public sealed record DashboardCardDto(string Card, string Label, int Count, List<Guid> AssetIds);
+
 /// <summary>Category options of a unit for the asset page (active only).</summary>
 public sealed record CategoryOption(int Id, string Code, string Label, string Section);
 
@@ -46,7 +52,29 @@ public sealed class UnitDashboard(PresAppDbContext db)
     private static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase) { "Electrical", "Instrumentation", "E&I" };
     private static readonly string[] Disciplines = ["Static", "Rotating", "Package Mechanical"];
 
-    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct)
+    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct) => (await ComputeAsync(unitId, ct)).Dashboard;
+
+    /// <summary>Equipment counted by one dashboard figure; same computation as the dashboard, so the counts always agree.</summary>
+    public async Task<DashboardCardDto> CardAsync(int unitId, string card, CancellationToken ct)
+    {
+        var (dashboard, cards) = await ComputeAsync(unitId, ct);
+        var key = (card ?? "").Trim().ToLowerInvariant();
+        if (!cards.TryGetValue(key, out var ids)) throw ApiProblem.NotFound("Dashboard figure not found.");
+        var label = key switch
+        {
+            "tags" => "Equipment tags",
+            "preserved" => "Preserved",
+            "ready" => "Ready for preservation",
+            "hold" => "On hold",
+            "na" => "Not applicable",
+            "available" => "Available",
+            _ => dashboard.Hold.Concat(dashboard.NotApplicable).Where(c => $"category-{c.Id}" == key)
+                .Select(c => $"{(c.Section == "Hold" ? "Hold" : "N/A")} {c.Code}: {c.Label}".Replace("  ", " ")).FirstOrDefault() ?? "Category"
+        };
+        return new DashboardCardDto(key, label, ids.Count, ids);
+    }
+
+    private async Task<(DashboardDto Dashboard, Dictionary<string, List<Guid>> Cards)> ComputeAsync(int unitId, CancellationToken ct)
     {
         var unit = await db.Units.AsNoTracking().Include(u => u.Plant).FirstOrDefaultAsync(u => u.Id == unitId, ct)
                    ?? throw ApiProblem.NotFound("Unit not found.");
@@ -54,7 +82,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
             .Select(a => new
             {
                 a.Id, a.Code, a.Tag, a.IsActive, a.Type, Discipline = a.Discipline.Name,
-                Walkdown = a.Preservation!.EmWalkdownStatus, a.Preservation.G1Status, a.Preservation.G2Status, a.Preservation.G3Status,
+                Walkdown = a.Preservation!.EmWalkdownStatus, Ready = a.Preservation.ReadyForPreservation, a.Preservation.G1Status, a.Preservation.G2Status, a.Preservation.G3Status,
                 a.Preservation.G4Status, Eu = a.Preservation.PreservedByEu, Remarks = a.Preservation.PreservationRemarks,
                 CategoryId = a.Preservation.DashboardCategoryId,
                 Gate = (CurrentGate?)a.Preservation.CurrentGate
@@ -117,15 +145,33 @@ public sealed class UnitDashboard(PresAppDbContext db)
             .Select(a => new { Length = a.Pipeline == null ? null : a.Pipeline.LengthM, a.Preservation!.G4Status }).ToListAsync(ct);
         var pendingDocs = await db.GateDocuments.CountAsync(d => d.Asset.UnitId == unitId && d.Asset.IsActive && d.Status == DocumentationStatus.Pending, ct);
 
-        return new DashboardDto(unit.Id, unit.Name, unit.Plant.Name, total, activities, disciplines,
+        // Equipment behind each key figure (the register filters on these; counts equal the figures by construction).
+        var holdIds = hold.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
+        var naIds = na.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
+        var categorized = holdIds.Concat(naIds).ToHashSet();
+        var ready = scope.Where(a => Is(a.Ready, "Yes")).Select(a => a.Id).ToList();
+        var cards = new Dictionary<string, List<Guid>>
+        {
+            ["tags"] = scope.Select(a => a.Id).ToList(),
+            ["preserved"] = scope.Where(a => IsCompleted(a.G4Status)).Select(a => a.Id).ToList(),
+            ["ready"] = ready,
+            ["hold"] = holdIds,
+            ["na"] = naIds,
+            ["available"] = scope.Where(a => !categorized.Contains(a.Id)).Select(a => a.Id).ToList(),
+        };
+        foreach (var c in hold.Concat(na)) cards[$"category-{c.Id}"] = c.Assets.Select(a => a.Id).ToList();
+
+        // Ready for preservation = the "Ready For Preservation" column = Yes, like the Excel Dashboard sheet.
+        var dto = new DashboardDto(unit.Id, unit.Name, unit.Plant.Name, total, activities, disciplines,
             hold, totalHold, na, totalNa, totalHold + totalNa, total - totalHold - totalNa,
-            activities[4].Completed, activities[4].Pending,
+            activities[4].Completed, ready.Count,
             equipment.GroupBy(a => FieldValues.CurrentGateText(a.Gate ?? CurrentGate.New))
                 .OrderBy(g => g.Key == "New" ? 0 : g.Key == "Removed from Site" ? 99 : g.Key[1] - '0')
                 .ToDictionary(g => g.Key, g => g.Count()),
             pendingDocs, active.Count(a => a.Type == AssetType.ElectricalInstrument), all.Count(a => !a.IsActive),
             lines.Count, lines.Sum(l => l.Length ?? 0), lines.Count(l => IsCompleted(l.G4Status)),
             assigned ? "Assigned" : "Keywords");
+        return (dto, cards);
     }
 
     private static CategoryRow ToRow(DashboardCategory c, List<CategoryAsset> assets) =>

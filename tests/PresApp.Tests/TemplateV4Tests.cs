@@ -45,6 +45,30 @@ public sealed class TemplateV4Tests : IClassFixture<TestApp>
         var patch = await admin.PatchAsJsonAsync($"/api/assets/{c}", new { changes = new[] { new { field = "ReadyForPreservation", from = (string?)null, to = "Yes" } } });
         Assert.True(patch.IsSuccessStatusCode, await patch.Content.ReadAsStringAsync());
 
+        // ---- dashboard figures and the equipment behind each one (what the register shows when a card is clicked)
+        var figures = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard");
+        async Task<List<Guid>> Card(string card, string figure)
+        {
+            var dto = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard/cards/{card}");
+            var ids = dto.GetProperty("assetIds").EnumerateArray().Select(x => x.GetGuid()).ToList();
+            Assert.Equal(figures.GetProperty(figure).GetInt32(), ids.Count);
+            return ids;
+        }
+        var readyIds = await Card("ready", "readyForPreservation");   // the Ready For Preservation column = Yes, like the Excel
+        Assert.Contains(c, readyIds);
+        Assert.DoesNotContain(a, readyIds);
+        Assert.Contains(a, await Card("hold", "totalHold"));
+        Assert.Contains(b, await Card("na", "totalNotApplicable"));
+        var available = await Card("available", "availableForPreservation");
+        Assert.Contains(c, available);
+        Assert.DoesNotContain(a, available);
+        Assert.Equal(figures.GetProperty("totalTags").GetInt32(), (await Card("tags", "totalTags")).Count);
+        await Card("preserved", "preserved");
+        var cat1Card = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard/cards/category-{Id("Hold", "Cat1")}");
+        Assert.Equal([a], cat1Card.GetProperty("assetIds").EnumerateArray().Select(x => x.GetGuid()).ToList());
+        Assert.StartsWith("Hold Cat1", cat1Card.GetProperty("label").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/units/{unitId}/dashboard/cards/nonsense")).StatusCode);
+
         // ---- export
         var response = await admin.GetAsync($"/api/units/{unitId}/excel/export");
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
