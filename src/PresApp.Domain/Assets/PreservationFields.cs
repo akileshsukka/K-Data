@@ -165,6 +165,8 @@ public static class PreservationFields
         nameof(AssetPreservation.PreservedBy) => "Preserved by",
         nameof(AssetPreservation.DashboardCategoryId) => "Dashboard category",
         "DashboardCategory" => "Dashboard category",
+        nameof(PipelineDetail.NonStandardNumber) => "Non-standard line number",
+        nameof(PipelineDetail.NumberNote) => "Line number check",
         _ => field
     };
 }

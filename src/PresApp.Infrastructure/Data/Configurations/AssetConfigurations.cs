@@ -99,6 +99,7 @@ internal sealed class PipelineDetailConfiguration : IEntityTypeConfiguration<Pip
         b.Property(x => x.PipeSpec).HasMaxLength(50);
         b.Property(x => x.Service).HasMaxLength(PipelineDetail.CodeLength);
         b.Property(x => x.PidNumber).HasMaxLength(PipelineDetail.PidLength);
+        b.Property(x => x.NumberNote).HasMaxLength(PipelineDetail.NoteLength);
         b.HasIndex(x => x.PipeSpec);
     }
 }

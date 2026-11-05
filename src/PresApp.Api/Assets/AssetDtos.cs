@@ -13,7 +13,8 @@ public sealed record RegisterRow(
     IReadOnlyDictionary<string, string?>? Custom = null, string? BulkLiquidDrained = null, string? ReadyForPreservation = null);
 
 /// <summary>Pipeline columns of the register.</summary>
-public sealed record LineInfo(decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Gasket, string? Service, string? PidNumber, decimal? LengthM);
+public sealed record LineInfo(decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Gasket, string? Service, string? PidNumber, decimal? LengthM,
+    LineNumberCheck? NumberCheck = null);
 
 public sealed record GateDocDto(int Gate, string Status, DateOnly? ReceivedOn, string? Reference, string? Note, string UpdatedBy, DateTime UpdatedAtUtc);
 public sealed record GroupRefDto(int Id, string Code, string Name, string Type);
@@ -24,7 +25,7 @@ public sealed record AssetProfile(
     string CurrentGate, string SuggestedCurrentGate, IReadOnlyDictionary<string, string?> Values,
     IReadOnlyList<GateDocDto> GateDocuments, IReadOnlyList<GroupRefDto> Groups,
     DateTime? PreservedAtUtc, string? PreservedBy, string UpdatedBy, DateTime UpdatedAtUtc,
-    AssetCategoryDto? DashboardCategory = null);
+    AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null);
 
 /// <summary>Hold / N/A dashboard category of an asset (template v4).</summary>
 public sealed record AssetCategoryDto(int Id, string? Code, string Label, string Section);
@@ -41,12 +42,20 @@ public sealed record FieldConflict(string Field, string Label, string? Expected,
 public sealed record SetCurrentGateRequest(string Value, string? Expected);
 public sealed record MarkPreservedRequest(DateOnly? PreservedOn);
 public sealed record GateDocRequest(string Status, DateOnly? ReceivedOn, string? Reference, string? Note);
-public sealed record CreateAssetRequest(string Type, int UnitId, int DisciplineId, string? Tag, string? Description, string? Priority, decimal? LengthM = null, string? PidNumber = null, bool AllowSimilar = false);
+public sealed record CreateAssetRequest(string Type, int UnitId, int DisciplineId, string? Tag, string? Description, string? Priority, decimal? LengthM = null, string? PidNumber = null, bool AllowSimilar = false,
+    bool CheckFormat = true);
 
-public sealed record BulkLinesRequest(string Text);
+/// <summary>CheckFormat false (permission lines.nonStandard) loads line numbers that are not in the standard format, marked as non-standard.</summary>
+public sealed record BulkLinesRequest(string Text, bool CheckFormat = true);
 public sealed record BulkLineRow(int Row, string LineNumber, decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Service, decimal? LengthM,
-    string Outcome, string? Reason, Guid? AssetId, string? Code, string? Warning = null);
+    string Outcome, string? Reason, Guid? AssetId, string? Code, string? Warning = null, bool? NonStandard = null, string? NumberNote = null);
 public sealed record BulkLinesResult(int ToCreate, int Existing, int Invalid, List<BulkLineRow> Rows);
+
+/// <summary>Non-standard lines read again: how many were looked at, how many got a value, how many are still non-standard.</summary>
+public sealed record ReReadLinesResult(int Lines, int Updated, int StillNonStandard);
+
+/// <summary>Internal mark of a line whose number is not standard. Sent only to roles with lines.nonStandard.</summary>
+public sealed record LineNumberCheck(bool NonStandard, string? Note);
 
 public sealed record ReadingDto(long Id, string Measurement, string Label, decimal Value, string? UnitOfMeasure,
     DateTime MeasuredAtUtc, DateTime RecordedAtUtc, string RecordedBy, string Source, string Phase, string? Note);

@@ -557,6 +557,13 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasPrecision(12, 3)
                         .HasColumnType("decimal(12,3)");
 
+                    b.Property<bool>("NonStandardNumber")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("NumberNote")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("PidNumber")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -1385,6 +1392,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("LineFormatCheckOff")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Message")
                         .HasMaxLength(4000)

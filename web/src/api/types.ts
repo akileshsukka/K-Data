@@ -82,6 +82,7 @@ export const Perm = {
   simproSync: "simpro.sync",
   catalogManage: "catalog.manage",
   usersManage: "users.manage",
+  linesNonStandard: "lines.nonStandard",
 } as const;
 
 export type AssetType = "Equipment" | "Pipeline" | "ElectricalInstrument";
@@ -185,6 +186,11 @@ export interface CustomValue {
   value: string | null;
 }
 
+export interface LineNumberCheck {
+  nonStandard: boolean;
+  note: string | null;
+}
+
 export interface LineInfo {
   sizeIn: number | null;
   pipeSpec: string | null;
@@ -194,6 +200,8 @@ export interface LineInfo {
   service: string | null;
   pidNumber: string | null;
   lengthM: number | null;
+  /** Internal mark of a non-standard line number; only sent to roles with lines.nonStandard. */
+  numberCheck?: LineNumberCheck | null;
 }
 
 export interface PipeSpec {
@@ -243,9 +251,11 @@ export interface BulkLineRow {
   assetId: string | null;
   code: string | null;
   warning: string | null;
+  nonStandard?: boolean | null;
+  numberNote?: string | null;
 }
 
-export type LineCodeKind = "Service";
+export type LineCodeKind = "Service" | "Insulation";
 
 export interface LineCode {
   id: number;
@@ -311,6 +321,7 @@ export interface AssetProfile {
   updatedBy: string;
   updatedAtUtc: string;
   dashboardCategory: { id: number; code: string | null; label: string; section: CategorySection } | null;
+  lineNumberCheck?: LineNumberCheck | null;
 }
 
 export interface Proposals {
@@ -414,6 +425,8 @@ export interface ImportRun {
   counts: ImportCounts;
   exportedAtUtc: string | null;
   exportedBy: string | null;
+  /** Line list checked with the line number format check off. */
+  lineFormatCheckOff?: boolean;
 }
 
 export interface ImportChange {

@@ -8,7 +8,7 @@ public sealed record ImportCounts(int Applied, int Derived, int NoChange, int In
 public sealed record ImportRunDto(
     long Id, string Kind, string FileName, int? UnitId, string? UnitName, Guid? SessionId,
     string UploadedBy, DateTime UploadedAtUtc, DateTime? AppliedAtUtc, string Status, string? Message,
-    int RowsInFile, ImportCounts Counts, DateTime? ExportedAtUtc, string? ExportedBy);
+    int RowsInFile, ImportCounts Counts, DateTime? ExportedAtUtc, string? ExportedBy, bool LineFormatCheckOff = false);
 
 public sealed record ImportChangeDto(
     long Id, long RunId, Guid? AssetId, string? AssetCode, string? AssetTag, int? RowNumber,

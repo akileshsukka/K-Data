@@ -17,6 +17,7 @@ import { ReadingsTab } from "./ReadingsTab";
 import { CategoryCard } from "./CategoryCard";
 import { DocumentsTab } from "../documents/DocumentsTab";
 import { useAsset, useAssetHistory, useMarkPreserved, usePatchAsset, useSetActive, useSetCurrentGate } from "./useAsset";
+import { NonStandardBadge } from "../lines/FormatCheckToggle";
 
 const tabs = [
   { key: "overview", label: "Overview" },
@@ -61,8 +62,10 @@ export function AssetPage() {
           <p className="text-muted">
             {a.code} — {a.discipline.name} — {a.unit.name}
             {!a.isActive && <span className="ml-2 rounded bg-hold/10 px-1.5 py-0.5 text-sm font-semibold text-hold">Inactive</span>}
+            {a.lineNumberCheck?.nonStandard && <NonStandardBadge note={a.lineNumberCheck.note} className="ml-2 align-middle" />}
           </p>
           {a.values.Description && <p className="mt-1 max-w-2xl">{a.values.Description}</p>}
+          {a.lineNumberCheck?.nonStandard && <p className="mt-1 text-sm text-ongoing">Non-standard line number (internal): {a.lineNumberCheck.note}. Complete size, spec or service by hand if you know them.</p>}
         </div>
         <div className="text-right">
           <span className="block text-sm text-muted">Current Gate</span>

@@ -23,7 +23,7 @@ internal static class SeedData
         (RoleNames.Engineer, "Full preservation editing and bulk edit",
             [Permissions.AssetsView, Permissions.HistoryView, Permissions.GroupsView, Permissions.DocumentsView, Permissions.DocumentsUpload,
              Permissions.ExcelExport, Permissions.ReadingsWrite,
-             Permissions.GatesEdit, Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit]),
+             Permissions.GatesEdit, Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit, Permissions.LinesNonStandard]),
         (RoleNames.Admin, "Everything, including Excel uploads, Simpro, lists and users",
             Permissions.All.Select(p => p.Key).ToArray()),
     ];
@@ -211,5 +211,10 @@ internal static class SeedData
         (LineCodeKind.Service, "WF", "Well fluid"),
         (LineCodeKind.Service, "WFX", "Well fluid, sour"),
         (LineCodeKind.Service, "WS", "Sweet water"),
+        // Insulation codes seen after the size in trimmed line numbers (Unit 41, Nov 2026). Meanings to be confirmed by the client.
+        (LineCodeKind.Insulation, "IA", "Insulation (meaning to be confirmed)"),
+        (LineCodeKind.Insulation, "IC", "Insulation (meaning to be confirmed)"),
+        (LineCodeKind.Insulation, "IH", "Insulation (meaning to be confirmed)"),
+        (LineCodeKind.Insulation, "IS", "Insulation (meaning to be confirmed)"),
     ];
 }

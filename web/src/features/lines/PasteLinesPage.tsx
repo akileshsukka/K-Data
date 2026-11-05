@@ -11,6 +11,7 @@ import { Button } from "../../components/Button";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { formatSize } from "./lineNumber";
+import { FormatCheckToggle, NonStandardBadge } from "./FormatCheckToggle";
 
 /** Paste the client's line list (from Excel): one line per row, optionally its length in the next column. */
 export function PasteLinesPage() {
@@ -22,11 +23,15 @@ export function PasteLinesPage() {
   const session = useSession();
   const navigate = useNavigate();
   const [sending, setSending] = useState(false);
+  const mayTurnOff = session.can(Perm.linesNonStandard);
+  // On by default; turned back on after every load.
+  const [checkFormat, setCheckFormat] = useState(true);
 
   async function sendList(file: File) {
     setSending(true);
     try {
-      const detail = await upload<ImportRunDetail>(`/api/units/${unitId}/excel/onboarding`, file);
+      const detail = await upload<ImportRunDetail>(`/api/units/${unitId}/excel/onboarding${checkFormat ? "" : "?checkLineFormat=false"}`, file);
+      setCheckFormat(true);
       navigate(`/imports/${detail.run.id}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "The file could not be checked.", "error");
@@ -38,10 +43,11 @@ export function PasteLinesPage() {
 
   const run = useMutation({
     mutationFn: (apply: boolean) =>
-      api<BulkLinesResult>(`/api/units/${unitId}/lines/bulk${apply ? "?apply=true" : ""}`, { method: "POST", body: { text } }).then((r) => ({ ...r, applied: apply })),
+      api<BulkLinesResult>(`/api/units/${unitId}/lines/bulk${apply ? "?apply=true" : ""}`, { method: "POST", body: { text, checkFormat } }).then((r) => ({ ...r, applied: apply })),
     onSuccess: (r) => {
       setResult(r);
       if (r.applied) {
+        setCheckFormat(true);
         client.invalidateQueries({ queryKey: ["register"] });
         client.invalidateQueries({ queryKey: ["unit-summary"] });
         toast(`${r.toCreate} line${r.toCreate === 1 ? "" : "s"} created`);
@@ -63,6 +69,11 @@ export function PasteLinesPage() {
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[24rem_minmax(0,1fr)]">
         <section>
+          {mayTurnOff && (
+            <div className="mb-4">
+              <FormatCheckToggle checked={checkFormat} onChange={(on) => { setCheckFormat(on); setResult(undefined); }} />
+            </div>
+          )}
           <label htmlFor="lines" className="font-semibold text-ink">Lines</label>
           <p className="text-sm text-muted">Copy the Line No. column from Excel (and the length next to it, if you have it). Size, spec and service are read from the line number; rating, face and gasket come from the pipe spec list.</p>
           <textarea
@@ -130,6 +141,7 @@ export function PasteLinesPage() {
                         <td className="border-b border-line px-3 py-2 font-mono text-[14px] whitespace-nowrap">
                           {r.assetId ? <Link to={`/assets/${r.assetId}`} className="text-ink hover:text-violet">{r.lineNumber}</Link> : r.lineNumber}
                           {r.code && <span className="block font-sans text-sm text-muted">{r.code}</span>}
+                          {r.nonStandard && <span className="mt-1 block font-sans"><NonStandardBadge note={r.numberNote} /> <span className="text-sm text-muted">{r.numberNote}</span></span>}
                         </td>
                         <td className="border-b border-line px-3 py-2 text-right tabular-nums">{formatSize(r.sizeIn)}</td>
                         <td className="border-b border-line px-3 py-2">{r.pipeSpec}</td>

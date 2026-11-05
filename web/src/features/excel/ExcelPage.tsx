@@ -11,6 +11,7 @@ import { useToast } from "../../components/Toast";
 import { DownloadExcelButton } from "./DownloadExcelButton";
 import { FileDrop } from "./FileDrop";
 import { StatusChip } from "./ImportBits";
+import { FormatCheckToggle } from "../lines/FormatCheckToggle";
 
 /** Download the unit file, upload it back (preview first), and see what happened to earlier files. */
 export function ExcelPage() {
@@ -20,6 +21,8 @@ export function ExcelPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [busy, setBusy] = useState<"update" | "onboarding" | null>(null);
+  // Line number format check of the client list: on by default, turned back on after every upload.
+  const [checkLineFormat, setCheckLineFormat] = useState(true);
   const overview = useQuery({
     queryKey: ["excel", unitId],
     queryFn: ({ signal }) => api<UnitExcelOverview>(`/api/units/${unitId}/excel`, { signal }),
@@ -28,7 +31,9 @@ export function ExcelPage() {
   async function send(file: File, kind: "update" | "onboarding") {
     setBusy(kind);
     try {
-      const detail = await upload<ImportRunDetail>(`/api/units/${unitId}/excel/${kind === "update" ? "import" : "onboarding"}`, file);
+      const path = kind === "update" ? "import" : `onboarding${checkLineFormat ? "" : "?checkLineFormat=false"}`;
+      const detail = await upload<ImportRunDetail>(`/api/units/${unitId}/excel/${path}`, file);
+      if (kind === "onboarding") setCheckLineFormat(true);
       navigate(`/imports/${detail.run.id}`);
     } catch (e) {
       toast((e as Error).message, "error");
@@ -140,6 +145,12 @@ export function ExcelPage() {
             For a unit's first load or a list sent by the client: rows are matched by EQUIP NO, unknown tags become new equipment with their Equipment ID,
             and filled cells complete or overwrite the data. Empty cells never clear anything. You will see a preview first.
           </p>
+          {session.can(Perm.linesNonStandard) && (
+            <div className="mt-4 max-w-xl">
+              <p className="mb-2 text-sm text-muted">For a line list (Line No. or Tag No column):</p>
+              <FormatCheckToggle checked={checkLineFormat} onChange={setCheckLineFormat} />
+            </div>
+          )}
           <div className="mt-4 max-w-xl">
             <FileDrop busy={busy === "onboarding"} label="Choose the client list" onFile={(f) => send(f, "onboarding")} />
           </div>

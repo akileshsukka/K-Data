@@ -9,7 +9,7 @@ using PresApp.Infrastructure.Data;
 namespace PresApp.Api.Assets;
 
 /// <summary>Read side: registers, profile, search, history, unit summary.</summary>
-public sealed class AssetQueries(PresAppDbContext db)
+public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
 {
     public async Task<List<RegisterRow>> RegisterAsync(int unitId, AssetType type, bool includeInactive, CancellationToken ct)
     {
@@ -37,6 +37,7 @@ public sealed class AssetQueries(PresAppDbContext db)
             .ToDictionary(g => g.Key, g => (IReadOnlyDictionary<string, string?>)g.ToDictionary(
                 v => columns.First(c => c.Id == v.FieldDefinitionId).Key, v => CustomFields.CustomFieldService.Format(columns.First(c => c.Id == v.FieldDefinitionId), v)));
         var specs = type == AssetType.Pipeline ? await PipeSpecLookup.LoadAsync(db, ct) : new PipeSpecLookup([]);
+        var showCheck = ShowsLineCheck;
         return rows
             .OrderBy(r => DisciplineRank(r.Discipline)).ThenBy(r => r.Tag ?? r.Code, NaturalComparer.Instance)
             .Select(r => new RegisterRow(
@@ -47,7 +48,8 @@ public sealed class AssetQueries(PresAppDbContext db)
                 r.P?.PreservedByEu, r.P?.ActionBy, r.P?.N2BlanketStatus, r.P?.CurrentActivity, r.P?.PreservationRemarks,
                 r.P?.LastFieldActionDate, r.P?.PreservedAtUtc, r.DocsPending, r.IsActive,
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
-                r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
+                r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM,
+                    showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
                 r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation))
             .ToList();
     }
@@ -55,7 +57,7 @@ public sealed class AssetQueries(PresAppDbContext db)
     public async Task<AssetProfile> ProfileAsync(Guid id, CancellationToken ct)
     {
         var asset = await LoadAsync(id, tracking: false, ct);
-        return ToProfile(asset);
+        return ToProfile(asset, ShowsLineCheck);
     }
 
     internal async Task<Asset> LoadAsync(Guid id, bool tracking, CancellationToken ct)
@@ -83,7 +85,10 @@ public sealed class AssetQueries(PresAppDbContext db)
         return asset;
     }
 
-    internal static AssetProfile ToProfile(Asset a)
+    /// <summary>The non-standard line number mark is an internal control: only roles with lines.nonStandard receive it.</summary>
+    private bool ShowsLineCheck => http.HttpContext?.User.HasPermission(Domain.Security.Permissions.LinesNonStandard) == true;
+
+    internal static AssetProfile ToProfile(Asset a, bool showLineCheck = false)
     {
         var p = a.Preservation ?? new AssetPreservation();
         var values = PreservationFields.All.Where(f => f.OnlyFor is null || f.OnlyFor == a.Type).ToDictionary(f => f.Key, f => FieldValues.Read(f, a));
@@ -101,7 +106,8 @@ public sealed class AssetQueries(PresAppDbContext db)
             p.PreservedAtUtc, p.PreservedBy, updated.Item1, updated.Item2,
             p.DashboardCategory is { } c
                 ? new AssetCategoryDto(c.Id, c.Code, c.Label, Reporting.UnitDashboard.SectionKey(c.Section))
-                : null);
+                : null,
+            showLineCheck && a.Pipeline is { } line ? new LineNumberCheck(line.NonStandardNumber, line.NumberNote) : null);
     }
 
     public async Task<List<SearchHit>> SearchAsync(string q, int? unitId, AssetType? type, int take, CancellationToken ct)

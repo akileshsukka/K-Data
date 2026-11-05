@@ -11,6 +11,7 @@ import { AdminTabs } from "./AdminTabs";
 
 const kinds: { key: LineCodeKind; label: string; hint: string }[] = [
   { key: "Service", label: "Service designation", hint: "Third part of the line number: 39-0218-LS-16\"-61055-P → LS." },
+  { key: "Insulation", label: "Insulation", hint: "Codes that may come right after the size (41-1017-FD-16\"-IC). They are not stored; they are listed so they are never taken for a pipe spec." },
 ];
 
 /** Meanings of the codes in the line numbers (client line numbering standard). Codes are deactivated, never deleted. */
@@ -25,7 +26,7 @@ export function LineCodesPage() {
   return (
     <div>
       <AdminTabs />
-      <PageHeader title="Line codes" description="Service designations of the line numbers (client line numbering standard). The registers and the line checks show these meanings; a code not in the list is flagged, never guessed." />
+      <PageHeader title="Line codes" description="Service designations and insulation codes of the line numbers (client line numbering standard). The registers and the line checks show these meanings; a code not in the list is flagged, never guessed." />
       <div className={`mt-5 flex-wrap gap-2 ${kinds.length > 1 ? "flex" : "hidden"}`} role="tablist">
         {kinds.map((k) => (
           <button key={k.key} type="button" role="tab" aria-selected={kind === k.key} onClick={() => setKind(k.key)}
@@ -72,7 +73,7 @@ function AddCode({ kind }: { kind: LineCodeKind }) {
     <form onSubmit={submit} className="mt-4 flex max-w-3xl flex-wrap items-end gap-2">
       <label className="w-28">
         <span className="text-sm font-semibold text-ink">Code</span>
-        <TextInput required maxLength={10} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} className="font-mono" />
+        <TextInput required maxLength={10} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} className="font-mono" pattern={kind === "Insulation" ? "[A-Za-z0-9/]+" : "[A-Za-z0-9]+"} />
       </label>
       <label className="min-w-[14rem] flex-1">
         <span className="text-sm font-semibold text-ink">Meaning</span>

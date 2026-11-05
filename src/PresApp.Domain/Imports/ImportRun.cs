@@ -58,6 +58,9 @@ public class ImportRun
     public int WarningCount { get; set; }
     public int RowsInFile { get; set; }
     public string? Message { get; set; }
+
+    /// <summary>Line list loaded with the line number format check turned off: non-standard numbers are created and marked.</summary>
+    public bool LineFormatCheckOff { get; set; }
     public List<ImportChange> Changes { get; set; } = [];
 }
 

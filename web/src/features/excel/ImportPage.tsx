@@ -81,6 +81,7 @@ export function ImportPage() {
         <StatusChip status={run.status} />
         {run.exportedAtUtc && <span className="text-sm text-muted">File downloaded {formatDateTime(run.exportedAtUtc)} by {run.exportedBy}</span>}
         {run.appliedAtUtc && <span className="text-sm text-muted">Applied {formatDateTime(run.appliedAtUtc)}</span>}
+        {run.lineFormatCheckOff && <span className="rounded border border-ongoing/40 bg-ongoing/10 px-1.5 py-0.5 text-sm font-semibold text-ongoing">Line number format check off: non-standard numbers are created and marked</span>}
       </div>
 
       {run.status === "Rejected" && (

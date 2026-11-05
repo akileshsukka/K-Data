@@ -4,7 +4,10 @@ namespace PresApp.Domain.Catalog;
 public enum LineCodeKind
 {
     /// <summary>Service designation (fluid), e.g. HCX = Hydrocarbon, sour.</summary>
-    Service
+    Service,
+
+    /// <summary>Insulation code, e.g. IC. Never stored on the line: it is recognised only so it is never taken for a pipe spec.</summary>
+    Insulation
 }
 
 /// <summary>Meaning of a code used in line numbers (client line numbering standard). Editable by administrators.</summary>

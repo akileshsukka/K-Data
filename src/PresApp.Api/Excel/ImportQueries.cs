@@ -91,7 +91,7 @@ public static class ImportQueries
 
     private static ImportRunDto ToDto(ImportRun r, ImportCounts counts, ExcelSession? session) => new(
         r.Id, r.Kind.ToString(), r.FileName, r.UnitId, r.Unit?.Name, r.SessionId, r.UploadedBy, r.UploadedAtUtc, r.AppliedAtUtc,
-        r.Status.ToString(), r.Message, r.RowsInFile, counts, session?.ExportedAtUtc, session?.ExportedBy);
+        r.Status.ToString(), r.Message, r.RowsInFile, counts, session?.ExportedAtUtc, session?.ExportedBy, r.LineFormatCheckOff);
 
     public static ImportChangeDto ToDto(ImportChange c) => new(
         c.Id, c.ImportRunId, c.AssetId, c.AssetCode, c.AssetTag, c.RowNumber, c.Field, FieldLabel(c.Field),

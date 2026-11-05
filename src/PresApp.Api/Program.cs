@@ -31,6 +31,7 @@ builder.Services.AddPresAppData(connectionString);
 builder.Services.AddPresAppAuth(builder.Configuration, builder.Environment);
 builder.Services.Configure<CloudflareOptions>(builder.Configuration.GetSection(CloudflareOptions.Section));
 builder.Services.AddHttpClient<CloudflareAccessAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetQueries>();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetEditor>();
 builder.Services.AddScoped<PresApp.Api.Assets.RemovedFromSiteAlignment>();

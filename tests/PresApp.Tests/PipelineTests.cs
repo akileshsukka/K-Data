@@ -46,7 +46,8 @@ public sealed class PipelineTests : IClassFixture<TestApp>
     {
         var codes = await admin.GetFromJsonAsync<JsonElement>("/api/catalog/line-codes");
         Assert.Contains(codes.EnumerateArray(), c => c.GetProperty("code").GetString() == "HCX" && c.GetProperty("description").GetString() == "Hydrocarbon, sour");
-        Assert.DoesNotContain(codes.EnumerateArray(), c => c.GetProperty("kind").GetString() != "Service");
+        Assert.DoesNotContain(codes.EnumerateArray(), c => c.GetProperty("kind").GetString() is not ("Service" or "Insulation"));
+        Assert.Contains(codes.EnumerateArray(), c => c.GetProperty("kind").GetString() == "Insulation" && c.GetProperty("code").GetString() == "IC");
 
         var (unitId, _) = await IdsAsync();
         var preview = await (await admin.PostAsJsonAsync($"/api/units/{unitId}/lines/bulk", new { text = "39-0900-QQ-2\"-ZZ9-H\n39-0901-HCX-2\"-1C1-S/FG" })).Content.ReadFromJsonAsync<JsonElement>();

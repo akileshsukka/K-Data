@@ -27,6 +27,7 @@ public static class Permissions
     public const string SimproSync = "simpro.sync";
     public const string CatalogManage = "catalog.manage";
     public const string UsersManage = "users.manage";
+    public const string LinesNonStandard = "lines.nonStandard";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -51,6 +52,7 @@ public static class Permissions
         new(SimproSync, "Sync with Simpro"),
         new(CatalogManage, "Manage lists and custom fields"),
         new(UsersManage, "Manage users and roles"),
+        new(LinesNonStandard, "Load lines whose number is not in the standard format (format check off) and see the internal \"non-standard number\" mark and filter"),
     ];
 
     public static bool IsKnown(string permission) => All.Any(p => p.Key == permission);

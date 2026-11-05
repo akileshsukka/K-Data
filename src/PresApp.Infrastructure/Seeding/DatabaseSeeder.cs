@@ -74,6 +74,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
     /// <item>documents.view: every role that can read the registers, Viewer included.</item>
     /// <item>documents.upload: every role that can edit gates or other fields.</item>
     /// <item>documents.delete: Admin only (added by the Admin rule).</item>
+    /// <item>lines.nonStandard: Engineer (Admin gets it by the Admin rule).</item>
     /// </list>
     /// </summary>
     private async Task GrantNewPermissionsOnceAsync(CancellationToken ct)
@@ -85,6 +86,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
             (Permissions.GroupsView, r => r.Name != RoleNames.Viewer && Has(r, Permissions.AssetsView)),
             (Permissions.DocumentsView, r => Has(r, Permissions.AssetsView)),
             (Permissions.DocumentsUpload, r => Has(r, Permissions.GatesEdit) || Has(r, Permissions.AssetsEdit)),
+            (Permissions.LinesNonStandard, r => r.Name == RoleNames.Engineer),
         };
         var roles = await db.Roles.Include(r => r.Permissions).ToListAsync(ct);
         foreach (var (permission, gets) in grants)

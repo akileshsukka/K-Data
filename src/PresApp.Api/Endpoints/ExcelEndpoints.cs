@@ -63,11 +63,12 @@ public static class ExcelEndpoints
             return await service.PreviewAsync(stream, file.FileName, unitId, user.Identity?.Name ?? "unknown", ct);
         }).RequirePermission(Permissions.ExcelImport).DisableAntiforgery();
 
-        app.MapPost("/api/units/{unitId:int}/excel/onboarding", async (int unitId, IFormFile file, ClaimsPrincipal user, OnboardingService service, CancellationToken ct) =>
+        app.MapPost("/api/units/{unitId:int}/excel/onboarding", async (int unitId, bool? checkLineFormat, IFormFile file, ClaimsPrincipal user, OnboardingService service, CancellationToken ct) =>
         {
             if (!user.HasPermission(Permissions.AssetsManage)) throw ApiProblem.Forbidden("Only an administrator can load a client list (it creates equipment).");
+            if (checkLineFormat == false && !user.HasPermission(Permissions.LinesNonStandard)) throw ApiProblem.Forbidden("Your role cannot turn off the line number format check.");
             await using var stream = file.OpenReadStream();
-            return await service.PreviewAsync(stream, file.FileName, unitId, user.Identity?.Name ?? "unknown", ct);
+            return await service.PreviewAsync(stream, file.FileName, unitId, user.Identity?.Name ?? "unknown", ct, checkLineFormat != false);
         }).RequirePermission(Permissions.ExcelImport).DisableAntiforgery();
 
         // ---------------------------------------------------------------- import runs
@@ -85,6 +86,8 @@ public static class ExcelEndpoints
             if (kind == ImportKind.Onboarding)
             {
                 if (!user.HasPermission(Permissions.AssetsManage)) throw ApiProblem.Forbidden("Only an administrator can apply a client list.");
+                if (await db.ImportRuns.AnyAsync(r => r.Id == id && r.LineFormatCheckOff, ct) && !user.HasPermission(Permissions.LinesNonStandard))
+                    throw ApiProblem.Forbidden("This line list was checked with the line number format check off; your role cannot apply it.");
                 return await onboarding.ApplyAsync(id, by, ct, request?.Decisions);
             }
             return await excel.ApplyAsync(id, by, ct);

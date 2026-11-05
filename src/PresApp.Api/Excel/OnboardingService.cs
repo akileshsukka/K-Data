@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using PresApp.Api.Assets;
 using PresApp.Api.Hosting;
+using PresApp.Api.Piping;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
@@ -45,7 +46,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         _ => null
     };
 
-    public async Task<ImportRunDetail> PreviewAsync(Stream file, string fileName, int unitId, string uploadedBy, CancellationToken ct)
+    public async Task<ImportRunDetail> PreviewAsync(Stream file, string fileName, int unitId, string uploadedBy, CancellationToken ct, bool checkLineFormat = true)
     {
         using var buffer = new MemoryStream();
         await file.CopyToAsync(buffer, ct);
@@ -55,12 +56,13 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         var run = new ImportRun
         {
             Kind = ImportKind.Onboarding, FileName = Path.GetFileName(fileName), UnitId = unitId,
-            UploadedBy = uploadedBy, UploadedAtUtc = clock.GetUtcNow().UtcDateTime, Status = ImportStatus.Previewed
+            UploadedBy = uploadedBy, UploadedAtUtc = clock.GetUtcNow().UtcDateTime, Status = ImportStatus.Previewed,
+            LineFormatCheckOff = !checkLineFormat
         };
         try
         {
-            var (rows, ignored, lines) = Read(bytes, await CustomHeadersAsync(ct));
-            var changes = await AnalyseAsync(rows, unitId, lines, apply: false, ct);
+            var (rows, ignored, lines) = Read(bytes, await CustomHeadersAsync(ct), checkLineFormat);
+            var changes = await AnalyseAsync(rows, unitId, lines, apply: false, ct, checkLineFormat: checkLineFormat);
             if (lines) changes.AddRange(await NotesAsync(bytes, unitId, apply: false, ct));
             Fill(run, rows.Count, changes, ignored);
             db.ImportFiles.Add(new ImportFile { ImportRun = run, Content = bytes });
@@ -89,8 +91,8 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         audit.BatchId = Guid.NewGuid();
         audit.UserName = appliedBy;
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var (rows, ignored, lines) = Read(file.Content, await CustomHeadersAsync(ct));
-        var changes = await AnalyseAsync(rows, run.UnitId ?? 0, lines, apply: true, ct, decisions);
+        var (rows, ignored, lines) = Read(file.Content, await CustomHeadersAsync(ct), !run.LineFormatCheckOff);
+        var changes = await AnalyseAsync(rows, run.UnitId ?? 0, lines, apply: true, ct, decisions, checkLineFormat: !run.LineFormatCheckOff);
         if (lines) changes.AddRange(await NotesAsync(file.Content, run.UnitId ?? 0, apply: true, ct));
         db.ImportChanges.RemoveRange(run.Changes);
         run.Changes = [];
@@ -107,18 +109,24 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
     private static bool IsTagHeader(string h) => ExcelColumns.Norm(h) is "equipno" or "equipmentno" or "lineno" or "linenumber" or "tagno";
     private static bool IsLineHeader(string h) => ExcelColumns.Norm(h) is "lineno" or "linenumber";
 
-    /// <summary>"Tag No" (the piping line list of the engineers) is a line list when its values are line numbers.</summary>
-    private static bool LooksLikeLines(IEnumerable<string?> tags)
+    /// <summary>
+    /// "Tag No" (the piping line list of the engineers) is a line list when its values are line numbers. With the line number
+    /// format check off, trimmed numbers count too (unit digits, then a sequence: 41-1009-A, 41-101-F-2").
+    /// </summary>
+    private static bool LooksLikeLines(IEnumerable<string?> tags, bool checkLineFormat = true)
     {
         var sample = tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(50).ToList();
-        return sample.Count > 0 && sample.Count(t => LineNumber.Parse(t) is not null) * 2 > sample.Count;
+        static bool No(string _) => false;
+        bool IsLine(string? t) => LineNumber.Parse(t) is not null
+            || (!checkLineFormat && LineNumber.Read(t, No, No, No) is { Unit: not null, Sequence: not null });
+        return sample.Count > 0 && sample.Count(IsLine) * 2 > sample.Count;
     }
 
     /// <summary>Normalized labels of the active custom fields (any register): those columns are loaded too.</summary>
     private async Task<HashSet<string>> CustomHeadersAsync(CancellationToken ct) =>
         (await db.FieldDefinitions.AsNoTracking().Where(f => f.IsActive).Select(f => f.Label).ToListAsync(ct)).Select(ExcelColumns.Norm).ToHashSet();
 
-    private static (List<SourceRow> Rows, List<string> Ignored, bool Lines) Read(byte[] bytes, HashSet<string> customHeaders)
+    private static (List<SourceRow> Rows, List<string> Ignored, bool Lines) Read(byte[] bytes, HashSet<string> customHeaders, bool checkLineFormat = true)
     {
         XLWorkbook wb;
         try { wb = new XLWorkbook(new MemoryStream(bytes)); }
@@ -130,7 +138,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             var tagColumn = columns.First(c => c.Role == ColumnRole.Tag && IsTagHeader(c.Header));
             var tag = tagColumn.Index;
             var lines = IsLineHeader(tagColumn.Header)
-                        || (ExcelColumns.Norm(tagColumn.Header) == "tagno" && LooksLikeLines(rows.Select(r => tag < r.Count ? r[tag] : null)));
+                        || (ExcelColumns.Norm(tagColumn.Header) == "tagno" && LooksLikeLines(rows.Select(r => tag < r.Count ? r[tag] : null), checkLineFormat));
             var discipline = columns.FirstOrDefault(c => c.Role == ColumnRole.Discipline)?.Index;
             var description = columns.FirstOrDefault(c => c.Role == ColumnRole.Description)?.Index;
             var fields = columns.Where(c => c.Role == ColumnRole.Field && c.Editable).ToList();
@@ -205,7 +213,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
     // ------------------------------------------------------------------ analysis
 
     private async Task<List<ImportChange>> AnalyseAsync(List<SourceRow> rows, int unitId, bool lines, bool apply, CancellationToken ct,
-        IReadOnlyDictionary<int, string>? decisions = null)
+        IReadOnlyDictionary<int, string>? decisions = null, bool checkLineFormat = true)
     {
         var unit = await db.Units.AsNoTracking().FirstOrDefaultAsync(u => u.Id == unitId, ct) ?? throw new Rejected("Unit not found.");
         var query = db.Assets.Include(a => a.Preservation).Include(a => a.GateDocuments).Include(a => a.Pipeline).Include(a => a.FieldValues)
@@ -213,12 +221,15 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         var customDefs = await db.FieldDefinitions.Include(f => f.OptionSet).ThenInclude(o => o!.Values).Where(f => f.IsActive).ToListAsync(ct);
         var assets = await (apply ? query : query.AsNoTracking()).ToListAsync(ct);
         var byTag = assets.Where(a => a.Tag != null).GroupBy(a => ValueNormalizer.ListKey(a.Tag!)).ToDictionary(g => g.Key, g => g.ToList());
-        // Lines whose number is written differently (insulation code, size format) are found by their identity.
-        var byLineKey = assets.Where(a => a.Type == AssetType.Pipeline && LineNumber.Parse(a.Tag) is not null)
-            .GroupBy(a => LineNumber.IdentityKey(LineNumber.Parse(a.Tag)!)).ToDictionary(g => g.Key, g => g.First());
+        // Lines whose number is written differently (insulation code, size format) are found by their identity;
+        // a non-standard number by its unit and sequence when nothing else contradicts.
+        var rules = lines ? await LineNumberRules.LoadAsync(db, ct) : null;
+        var byLine = new LineMatcher<Asset>();
+        if (rules is not null)
+            foreach (var a in assets.Where(a => a.Type == AssetType.Pipeline)) byLine.Add(rules.Read(a.Tag), a);
         var disciplines = await db.Disciplines.AsNoTracking().Where(d => d.IsActive).ToListAsync(ct);
         var lineCodes = lines
-            ? await db.LineCodes.AsNoTracking().Where(c => c.IsActive).ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct)
+            ? await db.LineCodes.AsNoTracking().Where(c => c.IsActive && c.Kind == LineCodeKind.Service).ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct)
             : new Dictionary<string, string>();
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var today = SiteClock.Today(clock);
@@ -263,22 +274,25 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             }
             else if (lines)
             {
-                var parts = LineNumber.Parse(row.Tag);
+                var parts = rules!.Read(row.Tag);
                 var piping = disciplines.Where(d => d.AssetType == AssetType.Pipeline && !string.IsNullOrWhiteSpace(d.Prefix)).OrderBy(d => d.SortOrder).FirstOrDefault();
-                if (parts is null || parts.Unit != unit.Number || piping is null)
+                var refusal = LineNumberRules.Refusal(parts, unit.Number, unit.Name, checkLineFormat, mayTurnCheckOff: true);
+                if (refusal is not null || piping is null)
                 {
                     changes.Add(Change(null, AssetField, ImportOutcome.Invalid,
-                        parts is null ? "Not a line number like 39-0218-LS-16\"-61055-P: size and spec cannot be read, the line is not created."
-                        : parts.Unit != unit.Number ? $"The line number starts with {parts.Unit}, but this is {unit.Name}."
-                        : "There is no pipeline discipline with an Equipment ID prefix."));
+                        refusal is not null ? $"{refusal} The line is not created." : "There is no pipeline discipline with an Equipment ID prefix."));
                     continue;
                 }
-                var similar = byLineKey.GetValueOrDefault(LineNumber.IdentityKey(parts));
+                var similar = byLine.Find(parts);
                 var decision = similar is null ? null : decisions?.GetValueOrDefault(row.Number);
                 if (similar is not null && decision != "create")
                 {
                     var circuit = groups.FirstOrDefault(g => g.GroupType.Name == "Circuit" && (membersOf.GetValueOrDefault(similar.Id)?.Contains(g.Id) ?? false))?.Code;
-                    var about = $"{similar.Tag} ({(string.IsNullOrEmpty(similar.Code) ? "also in this list" : similar.Code)}) has the same unit, sequence, service, size and spec; only the way the number is written differs. "
+                    var sameIdentity = parts.IsStandard && rules.Read(similar.Tag).IsStandard;
+                    var about = $"{similar.Tag} ({(string.IsNullOrEmpty(similar.Code) ? "also in this list" : similar.Code)}) "
+                        + (sameIdentity
+                            ? "has the same unit, sequence, service, size and spec; only the way the number is written differs. "
+                            : "has the same unit and sequence, and nothing else in the two numbers contradicts it (one of them is not in the standard format). ")
                         + $"P&ID: {similar.Pipeline?.PidNumber ?? "not given"} · circuit: {circuit ?? "none"} · length: {similar.Pipeline?.LengthM?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "not given"} m.";
                     if (decision is not ("update" or "rename"))
                     {
@@ -290,7 +304,12 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     changes.Add(Change(similar, PossibleMatchField, ImportOutcome.Applied, decision == "rename"
                         ? $"Same line as {similar.Tag}: its line number becomes {row.Tag} and it gets the values of the list."
                         : $"Same line as {similar.Tag}: it gets the values of the list; its line number stays.", row.Tag, similar.Tag, decision == "rename" ? row.Tag : similar.Tag));
-                    if (decision == "rename" && apply) similar.Tag = row.Tag;
+                    if (decision == "rename" && apply)
+                    {
+                        similar.Tag = row.Tag;
+                        similar.Pipeline ??= new PipelineDetail { AssetId = similar.Id };
+                        similar.Pipeline.TakeFrom(parts);
+                    }
                 }
                 else
                 {
@@ -299,17 +318,20 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     {
                         Id = Guid.NewGuid(), Type = AssetType.Pipeline, Tag = row.Tag, Description = Truncate(row.Description, 255),
                         DisciplineId = piping.Id, UnitId = unitId, Preservation = new AssetPreservation(),
-                        Pipeline = new PipelineDetail { SizeIn = parts.SizeIn, PipeSpec = parts.Spec, Service = parts.Service }
+                        Pipeline = new PipelineDetail()
                     };
+                    asset.Pipeline.TakeFrom(parts);
                     if (apply)
                     {
                         asset.Code = await AssetEditor.NextCodeAsync(db, piping.Prefix!, unit.Number, ct);
                         db.Assets.Add(asset);
                     }
                     byTag[key] = [asset];
-                    byLineKey[LineNumber.IdentityKey(parts)] = asset;
+                    byLine.Add(parts, asset);
+                    var read = string.Join(" ", new[] { parts.SizeText, parts.Service }.Where(x => x is not null));
                     changes.Add(Change(asset, AssetField, ImportOutcome.Created,
-                        $"New line ({parts.SizeText} {parts.Service}, spec {parts.Spec}){(apply ? "" : $"; its Equipment ID ({piping.Prefix!.Trim().ToUpperInvariant()}-EMP-{unit.Number:000}-…) is given when applied")}.",
+                        (parts.IsStandard ? $"New line ({read}, spec {parts.Spec})" : $"New line with a non-standard number ({parts.Note})")
+                        + $"{(apply ? "" : $"; its Equipment ID ({piping.Prefix!.Trim().ToUpperInvariant()}-EMP-{unit.Number:000}-…) is given when applied")}.",
                         null, null, apply ? asset.Code : null));
                 }
             }

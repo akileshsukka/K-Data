@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type RegisterRow } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
@@ -16,6 +16,8 @@ import { StatusTick, drainedTick, walkdownTick, yesTick } from "../lines/StatusT
 import { PipingNotes } from "../lines/PipingNotes";
 import { PipingSummaryCards } from "../lines/PipingSummaryCards";
 import { CodeMeaning } from "../lines/CodeMeaning";
+import { NonStandardBadge } from "../lines/FormatCheckToggle";
+import { useToast } from "../../components/Toast";
 import { AddToGroupDialog } from "../groups/AddToGroupDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 
@@ -42,17 +44,19 @@ interface Filters {
   docsPending: boolean;
   inactive: boolean;
   group: string;
+  /** Internal control of lines (lines.nonStandard): "nonstandard" or "standard" line numbers. */
+  numberCheck: string;
   /** Dashboard figure the register was opened from (tags, preserved, ready, hold, na, available, category-{id}). */
   card: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", docsPending: false, inactive: false, group: "", card: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docsPending: false, inactive: false, group: "", card: "" };
 
 /** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  docsPending: "docs", inactive: "inactive", group: "group", card: "card",
+  numberCheck: "number", docsPending: "docs", inactive: "inactive", group: "group", card: "card",
 };
 
 /** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
@@ -104,6 +108,18 @@ export function RegisterPage({ type }: { type: AssetType }) {
 function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const { unit } = useUnit(unitId);
   const session = useSession();
+  // Internal control: lines whose number is not standard (only roles with lines.nonStandard).
+  const seesNumberCheck = type === "Pipeline" && session.can(Perm.linesNonStandard);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const reread = useMutation({
+    mutationFn: () => api<{ lines: number; updated: number; stillNonStandard: number }>(`/api/units/${unitId}/lines/reread`, { method: "POST" }),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["register"] });
+      toast(r.lines === 0 ? "No non-standard lines to read again." : `${r.lines} non-standard line${r.lines === 1 ? "" : "s"} read again: ${r.updated} got new values (empty fields only).`);
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
   const codes = useLineCodes();
   // Inspection Done / Cleaning Required / Cleaned of lines have their own place in the table.
   const customColumns = (useCustomFields(type).data ?? []).filter((c) => c.showInRegister && !(type === "Pipeline" && pipingFixedKeys.includes(c.key)));
@@ -176,6 +192,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.inspection || (f.inspection === "Yes") === (yesTick(r.custom?.[PipingFieldKeys.inspectionDone]) === "done")) &&
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
+          (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
           (!f.docsPending || r.documentsPending > 0) &&
           (!f.card || !!cardIds?.has(r.id)) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
@@ -223,6 +240,11 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             )}
             {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
             {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping label="Download line list" />}
+            {seesNumberCheck && session.can(Perm.assetsEdit) && all.some((r) => r.line?.numberCheck?.nonStandard) && (
+              <Button variant="secondary" busy={reread.isPending} onClick={() => reread.mutate()} title="Reads the non-standard numbers again with the current pipe specs and line codes; fills only empty fields.">
+                Re-read non-standard lines
+              </Button>
+            )}
             {session.can(Perm.assetsManage) && lines && (
               <Link to={`/u/${unitId}/lines/paste`} className="inline-flex min-h-10 items-center rounded-md border border-line bg-panel px-4 font-semibold text-ink hover:border-violet hover:text-violet">
                 Add lines in bulk
@@ -331,6 +353,15 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 <option value="(none)">No activity</option>
               </SelectInput>
             </div>
+            {seesNumberCheck && (
+              <div className="w-full sm:w-60">
+                <SelectInput value={f.numberCheck} onChange={(e) => set("numberCheck", e.target.value)} aria-label="Line number format" className="mt-0">
+                  <option value="">Any line number</option>
+                  <option value="nonstandard">Non-standard line number</option>
+                  <option value="standard">Standard line number</option>
+                </SelectInput>
+              </div>
+            )}
           </>
         )}
         <label className="inline-flex items-center gap-2">
@@ -425,6 +456,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     <td className="border-b border-line px-3 py-2">
                       <Link to={`/assets/${r.id}`} className="font-semibold whitespace-pre text-ink group-hover:text-violet">{r.tag ?? r.code}</Link>
                       <span className="block text-sm whitespace-nowrap text-muted">{r.code}{!r.isActive && " · inactive"}</span>
+                      {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} className="mt-1" />}
                     </td>
                     {lines ? (
                       <>
@@ -471,6 +503,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>
+                      {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} />}
                       <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>
                       {lines && (
                         <span className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted">

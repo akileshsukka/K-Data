@@ -49,9 +49,9 @@ public static class AssetEndpoints
         app.MapPost("/api/assets/{id:guid}/readings", (Guid id, AddReadingsRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.AddReadingsAsync(id, request, user, ct)).RequirePermission(Permissions.ReadingsWrite);
 
-        app.MapPost("/api/assets", async (CreateAssetRequest request, AssetEditor e, CancellationToken ct) =>
+        app.MapPost("/api/assets", async (CreateAssetRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
         {
-            var created = await e.CreateAsync(request, ct);
+            var created = await e.CreateAsync(request, user, ct);
             return Results.Created($"/api/assets/{created.Id}", created);
         }).RequirePermission(Permissions.AssetsManage);
 
@@ -64,14 +64,25 @@ public static class AssetEndpoints
         app.MapPost("/api/bulk/apply", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.BulkAsync(request, apply: true, user, ct)).RequirePermission(Permissions.BulkEdit);
 
-        app.MapPost("/api/units/{id:int}/lines/bulk", (int id, bool? apply, BulkLinesRequest request, AssetEditor e, CancellationToken ct) =>
-            e.BulkLinesAsync(id, request.Text, apply == true, ct)).RequirePermission(Permissions.AssetsManage);
+        app.MapPost("/api/units/{id:int}/lines/bulk", (int id, bool? apply, BulkLinesRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
+            e.BulkLinesAsync(id, request.Text, apply == true, ct, request.CheckFormat, user)).RequirePermission(Permissions.AssetsManage);
+
+        // Non-standard line numbers read again (after pipe specs or line codes were added): fills only empty fields.
+        app.MapPost("/api/units/{id:int}/lines/reread", (int id, AssetEditor e, CancellationToken ct) =>
+            e.ReReadNonStandardLinesAsync(id, ct)).RequirePermission(Permissions.LinesNonStandard).RequirePermission(Permissions.AssetsEdit);
     }
 
     private static AssetType? ParseType(string? type) =>
         Enum.TryParse<AssetType>(type, true, out var t) ? t : null;
 
-    /// <summary>Where a change came from (App, Excel, Bulk edit, Simpro…) is shown only to roles with history.source.</summary>
+    /// <summary>
+    /// Where a change came from is shown only to roles with history.source; changes of the internal non-standard line number mark
+    /// only to roles with lines.nonStandard.
+    /// </summary>
     private static List<HistoryEntry> WithSource(List<HistoryEntry> entries, ClaimsPrincipal user) =>
+        WithSourceOnly(user.HasPermission(Permissions.LinesNonStandard) ? entries
+            : entries.Where(e => e.Field is not (nameof(PipelineDetail.NonStandardNumber) or nameof(PipelineDetail.NumberNote))).ToList(), user);
+
+    private static List<HistoryEntry> WithSourceOnly(List<HistoryEntry> entries, ClaimsPrincipal user) =>
         user.HasPermission(Permissions.HistorySource) ? entries : entries.Select(e => e with { Source = null }).ToList();
 }

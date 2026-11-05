@@ -93,7 +93,9 @@ public static class CatalogEndpoints
         if (!Enum.TryParse<LineCodeKind>(r.Kind, out var kind)) throw ApiProblem.Invalid("Unknown kind of code.");
         var code = (r.Code ?? "").Trim().ToUpperInvariant();
         var description = (r.Description ?? "").Trim();
-        if (code.Length == 0 || code.Length > LineCode.CodeLength || !code.All(char.IsLetterOrDigit)) throw ApiProblem.Invalid("The code is letters and digits, at most 10.");
+        // Insulation codes may hold a slash (S/FG).
+        if (code.Length == 0 || code.Length > LineCode.CodeLength || !code.All(ch => char.IsLetterOrDigit(ch) || (kind == LineCodeKind.Insulation && ch == '/')))
+            throw ApiProblem.Invalid(kind == LineCodeKind.Insulation ? "The code is letters, digits and /, at most 10." : "The code is letters and digits, at most 10.");
         if (description.Length == 0 || description.Length > LineCode.DescriptionLength) throw ApiProblem.Invalid("Enter what the code means (at most 120 characters).");
         c.Kind = kind;
         c.Code = code;

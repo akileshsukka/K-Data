@@ -64,15 +64,24 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 $"Someone else changed {string.Join(", ", conflicts.Select(c => c.Label))} while you were editing. Nothing was saved; check the current values and try again.",
                 conflicts);
         }
+        // A new line number re-reads size, spec and service (unless they were edited in the same save) and the non-standard mark.
+        // Only roles that may load non-standard numbers can give a line one.
+        LineNumberReading? reading = null;
+        if (asset.Type == AssetType.Pipeline && changed.Any(f => f.Key == "Tag"))
+        {
+            reading = (await LineNumberRules.LoadAsync(db, ct)).Read(asset.Tag);
+            if (!reading.IsStandard && !user.HasPermission(Permissions.LinesNonStandard))
+                errors["Tag"] = [$"{reading.Problem} Your role can only give a line a number in the standard format."];
+        }
         if (errors.Count > 0) throw ApiProblem.Invalid(errors.Values.First()[0], errors);
 
-        // A new line number re-reads size, spec and service (unless they were edited in the same save).
-        if (asset.Type == AssetType.Pipeline && changed.Any(f => f.Key == "Tag") && LineNumber.Parse(asset.Tag) is { } parts)
+        if (reading is not null)
         {
             asset.Pipeline ??= new PipelineDetail { AssetId = asset.Id };
-            if (!changed.Any(f => f.Key == nameof(PipelineDetail.SizeIn))) asset.Pipeline.SizeIn = parts.SizeIn;
-            if (!changed.Any(f => f.Key == nameof(PipelineDetail.PipeSpec))) asset.Pipeline.PipeSpec = parts.Spec;
-            if (!changed.Any(f => f.Key == nameof(PipelineDetail.Service))) asset.Pipeline.Service = parts.Service;
+            asset.Pipeline.TakeFrom(reading,
+                keepSize: changed.Any(f => f.Key == nameof(PipelineDetail.SizeIn)),
+                keepSpec: changed.Any(f => f.Key == nameof(PipelineDetail.PipeSpec)),
+                keepService: changed.Any(f => f.Key == nameof(PipelineDetail.Service)));
         }
 
         var outcome = PreservationRules.Apply(asset.Preservation!,
@@ -175,7 +184,14 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         return await queries.ProfileAsync(id, ct);
     }
 
-    public async Task<AssetProfile> CreateAsync(CreateAssetRequest request, CancellationToken ct)
+    private sealed record SimilarLine(Guid Id, string Code, string? Tag, string? Pid);
+
+    /// <summary>"is the same line written differently." for two standard numbers; softer when one of them is not standard.</summary>
+    internal static string SameLineText(LineNumberReading a, LineNumberReading b) => a.IsStandard && b.IsStandard
+        ? "is the same line written differently."
+        : "may be the same line: same unit and sequence, and nothing else in the two numbers contradicts it.";
+
+    public async Task<AssetProfile> CreateAsync(CreateAssetRequest request, ClaimsPrincipal user, CancellationToken ct)
     {
         if (!Enum.TryParse<AssetType>(request.Type, true, out var type)) throw ApiProblem.Invalid("Unknown asset type.");
         var unit = await db.Units.FirstOrDefaultAsync(u => u.Id == request.UnitId && u.IsActive, ct) ?? throw ApiProblem.Invalid("Choose a valid unit.");
@@ -188,9 +204,16 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         var tag = ValueNormalizer.CleanText(request.Tag);
         var description = ValueNormalizer.CleanText(request.Description);
         if (tag is null) throw ApiProblem.Invalid(type == AssetType.Pipeline ? "Enter the line number." : "Enter the equipment tag.");
-        var line = type == AssetType.Pipeline ? LineNumber.Parse(tag) : null;
-        if (line is not null && line.Unit != unit.Number)
-            throw ApiProblem.Invalid($"The line number starts with {line.Unit}, but this is {unit.Name}.");
+        LineNumberRules? rules = null;
+        LineNumberReading? line = null;
+        if (type == AssetType.Pipeline)
+        {
+            var mayTurnOff = user.HasPermission(Permissions.LinesNonStandard);
+            if (!request.CheckFormat && !mayTurnOff) throw ApiProblem.Forbidden("Your role cannot turn off the line number format check.");
+            rules = await LineNumberRules.LoadAsync(db, ct);
+            line = rules.Read(tag);
+            if (LineNumberRules.Refusal(line, unit.Number, unit.Name, request.CheckFormat, mayTurnOff) is { } refusal) throw ApiProblem.Invalid(refusal);
+        }
         if (request.LengthM is < 0) throw ApiProblem.Invalid("The length cannot be negative.");
         var pid = ValueNormalizer.CleanText(request.PidNumber);
         if (pid?.Length > PipelineDetail.PidLength) throw ApiProblem.Invalid($"The P&ID number allows at most {PipelineDetail.PidLength} characters.");
@@ -204,15 +227,15 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         }
         if (await db.Assets.AnyAsync(a => a.UnitId == unit.Id && a.Tag == tag && a.IsActive, ct))
             throw ApiProblem.Conflict($"An active asset with tag {tag} already exists in {unit.Name}.");
-        if (line is not null && !request.AllowSimilar)
+        if (line is not null && rules is not null && !request.AllowSimilar)
         {
-            var key = LineNumber.IdentityKey(line);
-            var similar = (await db.Assets.AsNoTracking().Where(a => a.UnitId == unit.Id && a.IsActive && a.Type == AssetType.Pipeline)
-                    .Select(a => new { a.Id, a.Code, a.Tag, Pid = a.Pipeline!.PidNumber }).ToListAsync(ct))
-                .FirstOrDefault(a => LineNumber.Parse(a.Tag) is { } p && LineNumber.IdentityKey(p) == key);
-            if (similar is not null)
+            var matcher = new LineMatcher<SimilarLine>();
+            foreach (var a in await db.Assets.AsNoTracking().Where(a => a.UnitId == unit.Id && a.IsActive && a.Type == AssetType.Pipeline)
+                         .Select(a => new SimilarLine(a.Id, a.Code, a.Tag, a.Pipeline!.PidNumber)).ToListAsync(ct))
+                matcher.Add(rules.Read(a.Tag), a);
+            if (matcher.Find(line) is { } similar)
                 throw new ApiProblem(409, "Possible duplicate",
-                    $"{similar.Tag} ({similar.Code}, P&ID {similar.Pid ?? "not given"}) is the same line written differently. Create it anyway only if it is really a different line.",
+                    $"{similar.Tag} ({similar.Code}, P&ID {similar.Pid ?? "not given"}) {SameLineText(line, rules.Read(similar.Tag))} Create it anyway only if it is really a different line.",
                     new { similar = new { similar.Id, similar.Code, similar.Tag, similar.Pid } });
         }
 
@@ -222,10 +245,9 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             Id = Guid.NewGuid(), Type = type, Code = code, Tag = tag, Description = description,
             DisciplineId = discipline.Id, UnitId = unit.Id, Priority = priority,
             Preservation = new AssetPreservation(),
-            Pipeline = type == AssetType.Pipeline
-                ? new PipelineDetail { SizeIn = line?.SizeIn, PipeSpec = line?.Spec, Service = line?.Service, LengthM = request.LengthM, PidNumber = pid }
-                : null
+            Pipeline = type == AssetType.Pipeline ? new PipelineDetail { LengthM = request.LengthM, PidNumber = pid } : null
         };
+        if (line is not null) asset.Pipeline!.TakeFrom(line);
         db.Assets.Add(asset);
         await db.SaveChangesAsync(ct);
         return await queries.ProfileAsync(asset.Id, ct);
@@ -266,29 +288,36 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
     /// Pasted line list (one per row: line number, optionally a tab or comma and the length in metres).
     /// Preview shows what each row becomes; apply creates the new lines with their Equipment ID.
     /// </summary>
-    public async Task<BulkLinesResult> BulkLinesAsync(int unitId, string text, bool apply, CancellationToken ct)
+    public async Task<BulkLinesResult> BulkLinesAsync(int unitId, string text, bool apply, CancellationToken ct, bool checkFormat = true, ClaimsPrincipal? user = null)
     {
+        var mayTurnOff = user?.HasPermission(Permissions.LinesNonStandard) == true;
+        if (!checkFormat && !mayTurnOff) throw ApiProblem.Forbidden("Your role cannot turn off the line number format check.");
         var unit = await db.Units.FirstOrDefaultAsync(u => u.Id == unitId, ct) ?? throw ApiProblem.NotFound("Unit not found.");
         var discipline = await db.Disciplines.Where(d => d.AssetType == AssetType.Pipeline && d.IsActive && d.Prefix != null)
             .OrderBy(d => d.SortOrder).FirstOrDefaultAsync(ct) ?? throw ApiProblem.Invalid("There is no pipeline discipline with an ID prefix.");
         var existing = (await db.Assets.Where(a => a.UnitId == unitId && a.IsActive && a.Tag != null).Select(a => new { a.Id, a.Code, a.Tag }).ToListAsync(ct))
             .GroupBy(a => ValueNormalizer.ListKey(a.Tag!)).ToDictionary(g => g.Key, g => g.First());
-        var byLineKey = (await db.Assets.Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline)
-                .Select(a => new { a.Id, a.Code, a.Tag, Pid = a.Pipeline!.PidNumber }).ToListAsync(ct))
-            .Where(a => LineNumber.Parse(a.Tag) is not null)
-            .GroupBy(a => LineNumber.IdentityKey(LineNumber.Parse(a.Tag)!)).ToDictionary(g => g.Key, g => g.First());
-        var newKeys = new HashSet<string>();
+        var rules = await LineNumberRules.LoadAsync(db, ct);
+        var registered = new LineMatcher<SimilarLine>();
+        foreach (var a in await db.Assets.Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline)
+                     .Select(a => new SimilarLine(a.Id, a.Code, a.Tag, a.Pipeline!.PidNumber)).ToListAsync(ct))
+            registered.Add(rules.Read(a.Tag), a);
+        var inList = new LineMatcher<string>();
 
         var codes = (await db.LineCodes.AsNoTracking().Where(c => c.IsActive).Select(c => new { c.Kind, c.Code }).ToListAsync(ct))
             .Select(c => (c.Kind, c.Code)).ToHashSet();
         var specs = await PipeSpecLookup.LoadAsync(db, ct);
-        string? Unknown(LineNumberParts p)
+        string? Unknown(LineNumberReading p)
         {
-            var missing = new List<string>();
-            if (!codes.Contains((LineCodeKind.Service, p.Service))) missing.Add($"Service {p.Service} is not in the line codes.");
-            if (!specs.Has(p.Spec)) missing.Add($"Pipe spec {p.Spec} is not in the pipe spec list: rating, face and gasket stay empty until it is added.");
-            return missing.Count == 0 ? null : string.Join(" ", missing);
+            var notes = new List<string>();
+            if (p.Service is not null && !codes.Contains((LineCodeKind.Service, p.Service))) notes.Add($"Service {p.Service} is not in the line codes.");
+            if (p.Spec is not null && !specs.Has(p.Spec)) notes.Add($"Pipe spec {p.Spec} is not in the pipe spec list: rating, face and gasket stay empty until it is added.");
+            return notes.Count == 0 ? null : string.Join(" ", notes);
         }
+        BulkLineRow Row(int row, string tag, LineNumberReading? p, decimal? length, string outcome, string? reason, Guid? id, string? code, string? warning = null) =>
+            new(row, tag, p?.SizeIn, p?.Spec, specs.Class(p?.Spec), specs.Flange(p?.Spec), p?.Service, length, outcome, reason, id, code, warning,
+                p is { IsStandard: false } ? true : null, p?.Note);
+
         var rows = new List<BulkLineRow>();
         var seen = new HashSet<string>();
         var lines = (text ?? "").Replace("\r\n", "\n").Split('\n');
@@ -307,36 +336,40 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 if (ValueNormalizer.TryParseDecimal(cells[1].Replace("m", "", StringComparison.OrdinalIgnoreCase), out var l) && l >= 0) length = l;
                 else problem = $"Length \"{cells[1]}\" is not a number of metres.";
             }
-            var parts = LineNumber.Parse(tag);
+            var parts = rules.Read(tag);
             var key = ValueNormalizer.ListKey(tag);
             problem ??= tag.Length > 55 ? "Longer than 55 characters."
-                : parts is null ? "Not a line number like 39-0218-LS-16\"-61055-P (size and spec cannot be read)."
-                : parts.Unit != unit.Number ? $"Starts with {parts.Unit}, but this is {unit.Name}."
-                : !seen.Add(key) ? "Appears twice in the list."
-                : null;
+                : LineNumberRules.Refusal(parts, unit.Number, unit.Name, checkFormat, mayTurnOff)
+                ?? (!seen.Add(key) ? "Appears twice in the list." : null);
             if (problem is not null)
             {
-                rows.Add(new BulkLineRow(i + 1, tag, parts?.SizeIn, parts?.Spec, specs.Class(parts?.Spec), specs.Flange(parts?.Spec), parts?.Service, length, "Invalid", problem, null, null));
+                rows.Add(Row(i + 1, tag, parts, length, "Invalid", problem, null, null));
                 continue;
             }
             if (existing.TryGetValue(key, out var found))
             {
-                rows.Add(new BulkLineRow(i + 1, tag, parts!.SizeIn, parts.Spec, specs.Class(parts.Spec), specs.Flange(parts.Spec), parts.Service, length, "Exists", "Already in the register.", found.Id, found.Code));
+                rows.Add(Row(i + 1, tag, parts, length, "Exists", "Already in the register.", found.Id, found.Code));
                 continue;
             }
-            var identity = LineNumber.IdentityKey(parts!);
-            if (byLineKey.TryGetValue(identity, out var like))
+            if (registered.Find(parts) is { } like)
             {
-                rows.Add(new BulkLineRow(i + 1, tag, parts!.SizeIn, parts.Spec, specs.Class(parts.Spec), specs.Flange(parts.Spec), parts.Service, length, "Possible match",
-                    $"Same line as {like.Tag} ({like.Code}, P&ID {like.Pid ?? "not given"}) written differently. Not created: check the drawing; create it from New line if it is really different.", like.Id, like.Code));
+                var same = rules.Read(like.Tag);
+                rows.Add(Row(i + 1, tag, parts, length, "Possible match",
+                    parts.IsStandard && same.IsStandard
+                        ? $"Same line as {like.Tag} ({like.Code}, P&ID {like.Pid ?? "not given"}) written differently. Not created: check the drawing; create it from New line if it is really different."
+                        : $"May be the same line as {like.Tag} ({like.Code}, P&ID {like.Pid ?? "not given"}): same unit and sequence, nothing else contradicts it. Not created: check the drawing; create it from New line if it is really different.",
+                    like.Id, like.Code));
                 continue;
             }
-            if (!newKeys.Add(identity))
+            if (inList.Find(parts) is { } earlier)
             {
-                rows.Add(new BulkLineRow(i + 1, tag, parts!.SizeIn, parts.Spec, specs.Class(parts.Spec), specs.Flange(parts.Spec), parts.Service, length, "Invalid",
-                    "The same line appears twice in the list, written differently.", null, null));
+                rows.Add(Row(i + 1, tag, parts, length, "Invalid",
+                    parts.IsStandard && rules.Read(earlier).IsStandard
+                        ? "The same line appears twice in the list, written differently."
+                        : $"May be the same line as {earlier}, earlier in the list.", null, null));
                 continue;
             }
+            inList.Add(parts, tag);
             Guid? id = null;
             string? code = null;
             if (apply)
@@ -346,15 +379,33 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 {
                     Id = Guid.NewGuid(), Type = AssetType.Pipeline, Code = code, Tag = tag, DisciplineId = discipline.Id, UnitId = unit.Id,
                     Preservation = new AssetPreservation(),
-                    Pipeline = new PipelineDetail { SizeIn = parts!.SizeIn, PipeSpec = parts.Spec, Service = parts.Service, LengthM = length }
+                    Pipeline = new PipelineDetail { LengthM = length }
                 };
+                asset.Pipeline.TakeFrom(parts);
                 db.Assets.Add(asset);
                 id = asset.Id;
             }
-            rows.Add(new BulkLineRow(i + 1, tag, parts!.SizeIn, parts.Spec, specs.Class(parts.Spec), specs.Flange(parts.Spec), parts.Service, length, apply ? "Created" : "New", null, id, code, Unknown(parts)));
+            rows.Add(Row(i + 1, tag, parts, length, apply ? "Created" : "New", null, id, code, Unknown(parts)));
         }
         if (apply) await db.SaveChangesAsync(ct);
         return new BulkLinesResult(rows.Count(r => r.Outcome is "New" or "Created"), rows.Count(r => r.Outcome == "Exists"), rows.Count(r => r.Outcome == "Invalid"), rows);
+    }
+
+    /// <summary>
+    /// Reads again the numbers of the unit's lines marked as non-standard (e.g. after pipe specs or line codes were added) and fills
+    /// only the fields that are still empty; values entered by hand are never overwritten. A number that now reads as standard loses the mark.
+    /// </summary>
+    public async Task<ReReadLinesResult> ReReadNonStandardLinesAsync(int unitId, CancellationToken ct)
+    {
+        if (!await db.Units.AnyAsync(u => u.Id == unitId, ct)) throw ApiProblem.NotFound("Unit not found.");
+        var rules = await LineNumberRules.LoadAsync(db, ct);
+        var lines = await db.PipelineDetails.Include(p => p.Asset)
+            .Where(p => p.NonStandardNumber && p.Asset.UnitId == unitId && p.Asset.IsActive).ToListAsync(ct);
+        foreach (var line in lines) line.TakeFrom(rules.Read(line.Asset.Tag), onlyEmpty: true);
+        db.ChangeTracker.DetectChanges();
+        var updated = lines.Count(l => db.Entry(l).Properties.Any(p => p.IsModified && !Equals(p.OriginalValue, p.CurrentValue)));
+        await db.SaveChangesAsync(ct);
+        return new ReReadLinesResult(lines.Count, updated, lines.Count(l => l.NonStandardNumber));
     }
 
     private static bool ExcelHeader(string cell) => ValueNormalizer.ListKey(cell) is "lineno" or "linenumber" or "line" or "lineno." or "line#";
