@@ -13,8 +13,18 @@ export function GateStatus({ value, compact = false }: { value: string | null | 
   return <span className={`inline-block rounded border px-1.5 py-0.5 text-[13px] leading-tight font-semibold whitespace-nowrap ${style}`}>{text}</span>;
 }
 
-/** Current Gate shown as a gate number chip ("G4"), with Removed from Site set apart. */
-export function CurrentGateChip({ value }: { value: string }) {
+/**
+ * Electrical & Instrumentation items call their 8 steps E1–E8 instead of G1–G8. Only the label changes:
+ * the values are stored in the same gate fields (and go to the Excel EIList as E1-Status…).
+ */
+export const gatePrefix = (type: string | null | undefined) => (type === "ElectricalInstrument" ? "E" : "G");
+
+/** "G4" → "E4" for E&I items; New and Removed from Site stay as they are. */
+export const gateText = (value: string, type: string | null | undefined) =>
+  gatePrefix(type) === "E" ? value.replace(/^G([1-8])$/, "E$1") : value;
+
+/** Current Gate shown as a gate number chip ("G4", "E4" for E&I), with Removed from Site set apart. */
+export function CurrentGateChip({ value, type }: { value: string; type?: string | null }) {
   const removed = value === "Removed from Site";
   const isNew = value === "New";
   return (
@@ -23,7 +33,7 @@ export function CurrentGateChip({ value }: { value: string }) {
         removed ? "bg-na/15 text-na" : isNew ? "bg-surface text-muted border border-line" : "bg-ink text-white"
       }`}
     >
-      {value}
+      {gateText(value, type)}
     </span>
   );
 }

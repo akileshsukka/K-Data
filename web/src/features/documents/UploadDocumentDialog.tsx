@@ -3,6 +3,7 @@ import { ApiError } from "../../api/client";
 import type { AssetProfile, SearchHit } from "../../api/types";
 import { AssetSearch } from "../../components/AssetSearch";
 import { Button } from "../../components/Button";
+import { gatePrefix } from "../../components/GateStatus";
 import { Dialog } from "../../components/Dialog";
 import { Field, TextInput } from "../../components/Field";
 import { useToast } from "../../components/Toast";
@@ -57,7 +58,7 @@ function UploadForm({ asset, initialGates, onClose }: { asset: AssetProfile; ini
       gates.length ? gates.map((gate) => ({ assetId, gate })) : [{ assetId, gate: null }]);
     try {
       await upload.mutateAsync({ file, note: note.trim() || null, links });
-      toast(gates.length ? `Uploaded. ${gates.map((g) => `G${g}`).join(", ")} documentation marked as Received.` : "Uploaded.");
+      toast(gates.length ? `Uploaded. ${gates.map((g) => `${gatePrefix(asset.type)}${g}`).join(", ")} documentation marked as Received.` : "Uploaded.");
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not upload the file.");
@@ -86,7 +87,7 @@ function UploadForm({ asset, initialGates, onClose }: { asset: AssetProfile; ini
               onClick={() => toggle(g)}
               className={`min-h-9 min-w-12 rounded-md border px-3 font-semibold ${gates.includes(g) ? "border-violet bg-violet text-white" : "border-line bg-panel text-ink hover:border-violet"}`}
             >
-              G{g}
+              {gatePrefix(asset.type)}{g}
             </button>
           ))}
         </div>

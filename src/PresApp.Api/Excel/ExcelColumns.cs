@@ -36,6 +36,12 @@ public static partial class ExcelColumns
     public const string MasterTable = "MasterList";
     public const string CategoriesTable = "Categories";
 
+    /// <summary>
+    /// Optional second list of the unit file (template v5): the Electrical &amp; Instrumentation items. Their steps
+    /// E1-E8 are stored in the G1-G8 fields. When a template has this table, the MasterList keeps only the other equipment.
+    /// </summary>
+    public const string EiTable = "EIList";
+
     /// <summary>Template v4 named ranges: dashboard rows of the Hold and N/A categories (one row per category).</summary>
     public const string HoldSlotsName = "KD_HoldSlots";
     public const string NaSlotsName = "KD_NASlots";
@@ -138,9 +144,10 @@ public static partial class ExcelColumns
     [GeneratedRegex("[^a-z0-9]")]
     private static partial Regex NonAlnum();
 
-    [GeneratedRegex("^g([1-8])status$")]
+    /// <summary>G1-Status… and, for the E&amp;I list, E1-Status… (same fields).</summary>
+    [GeneratedRegex("^[ge]([1-8])status$")]
     private static partial Regex GateStatusHeader();
 
-    [GeneratedRegex("^g([1-8])comments?$")]
+    [GeneratedRegex("^[ge]([1-8])comments?$")]
     private static partial Regex GateCommentsHeader();
 }

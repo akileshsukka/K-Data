@@ -5,19 +5,21 @@ import { useToast } from "../../components/Toast";
 import { formatDateTime } from "../../components/dates";
 import { documentUrl, formatSize, useDeleteDocument, useUnlinkDocument } from "./useDocuments";
 
-const gateText = (gate: number | null) => (gate ? `G${gate}` : "General");
+const gateText = (gate: number | null, step = "G") => (gate ? `${step}${gate}` : "General");
 
 /**
  * Signed documents of one asset (optionally one gate). The name opens the file in a new tab
  * (PDF and photos show in the browser); "Download" saves it. Links to other gates or assets are shown so
  * nobody uploads the same certificate twice.
  */
-export function DocumentList({ docs, assetId, gate, showGates = false }: {
+export function DocumentList({ docs, assetId, gate, showGates = false, step = "G" }: {
   docs: StoredDocument[];
   assetId: string;
   /** Only documents of this gate (undefined = all of the asset). */
   gate?: number | null;
   showGates?: boolean;
+  /** Gate prefix of this asset: "E" for E&I items (E1–E8). Gates of other assets keep G. */
+  step?: string;
 }) {
   const session = useSession();
   const toast = useToast();
@@ -29,7 +31,7 @@ export function DocumentList({ docs, assetId, gate, showGates = false }: {
 
   async function takeOff(d: StoredDocument) {
     const links = mine(d);
-    const where = gate === undefined ? "this asset" : gateText(gate ?? null);
+    const where = gate === undefined ? "this asset" : gateText(gate ?? null, step);
     const last = d.links.length === links.length;
     if (!window.confirm(`Remove "${d.fileName}" from ${where}?${last ? " It is not linked anywhere else, so the document is removed (an administrator can recover the file)." : ""}\nThe documentation status is not changed: update it by hand if needed.`)) return;
     try {
@@ -65,12 +67,12 @@ export function DocumentList({ docs, assetId, gate, showGates = false }: {
               </a>
               <p className="text-sm text-muted">
                 {formatSize(d.sizeBytes)} · {d.uploadedBy} · {formatDateTime(d.uploadedAtUtc)}
-                {showGates && ` · ${mine(d).map((l) => gateText(l.gate)).join(", ")}`}
+                {showGates && ` · ${mine(d).map((l) => gateText(l.gate, step)).join(", ")}`}
               </p>
               {d.note && <p className="text-sm">{d.note}</p>}
               {elsewhere.length > 0 && (
                 <p className="text-sm text-muted">
-                  Also for: {elsewhere.map((l) => `${l.assetId === assetId ? "" : `${l.assetTag ?? l.assetCode} `}${gateText(l.gate)}`).join(" · ")}
+                  Also for: {elsewhere.map((l) => `${l.assetId === assetId ? "" : `${l.assetTag ?? l.assetCode} `}${gateText(l.gate, l.assetId === assetId ? step : "G")}`).join(" · ")}
                 </p>
               )}
             </div>

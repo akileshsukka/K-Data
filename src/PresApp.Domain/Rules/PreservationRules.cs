@@ -59,9 +59,10 @@ public static class PreservationRules
     /// <summary>
     /// Applies the automatic milestones and the Asset Availability rule, and returns what needs the user's approval.
     /// <paramref name="availabilityBefore"/> is the Asset Availability before this change (only read when it changed).
+    /// <paramref name="n2Blanket"/> is false for Electrical &amp; Instrumentation items: their step 4 (E4) is not an N2 blanket.
     /// </summary>
     public static DerivedOutcome Apply(AssetPreservation p, bool gateStatusChanged, bool fieldActionHappened, DateOnly today,
-        bool availabilityChanged = false, string? availabilityBefore = null)
+        bool availabilityChanged = false, string? availabilityBefore = null, bool n2Blanket = true)
     {
         // Asset Availability first: a removed asset goes to Removed from Site; one that comes back follows its gates.
         // A gate change on a removed asset also aligns it (it can never leave Removed from Site that way).
@@ -76,7 +77,7 @@ public static class PreservationRules
         if (gateStatusChanged)
         {
             if (p.PreservationDate is null && AllGatesClosed(p)) p.PreservationDate = today;
-            if (p.N2BlanketedDate is null && AssetPreservation.IsCompleted(p.G4Status)) p.N2BlanketedDate = today;
+            if (n2Blanket && p.N2BlanketedDate is null && AssetPreservation.IsCompleted(p.G4Status)) p.N2BlanketedDate = today;
 
             var suggested = SuggestedCurrentGate(p);
             if (p.CurrentGate != CurrentGate.RemovedFromSite && suggested != p.CurrentGate) proposedGate = suggested;

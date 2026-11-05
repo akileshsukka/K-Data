@@ -166,7 +166,7 @@ export function GroupPage() {
                     <span className="block text-sm text-muted">{m.code}{!m.isActive && " · inactive"}</span>
                   </td>
                   <td className="border-b border-line px-3 py-2 text-sm">{typeLabel[m.type]}<span className="block text-muted">{m.discipline}</span></td>
-                  <td className="border-b border-line px-3 py-2"><CurrentGateChip value={m.currentGate} /></td>
+                  <td className="border-b border-line px-3 py-2"><CurrentGateChip value={m.currentGate} type={m.type} /></td>
                   {m.gates.slice(0, 4).map((s, i) => <td key={i} className="border-b border-line px-2 py-2"><GateStatus value={s} compact /></td>)}
                   <td className="border-b border-line px-3 py-2 whitespace-nowrap">{m.preservedAtUtc ? formatDate(m.preservedAtUtc) : "—"}</td>
                   <td className="border-b border-line px-3 py-2 text-sm whitespace-nowrap text-muted">{formatDate(m.addedAtUtc)}</td>

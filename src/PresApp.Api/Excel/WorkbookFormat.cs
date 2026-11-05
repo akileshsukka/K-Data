@@ -4,9 +4,18 @@ using ClosedXML.Excel;
 
 namespace PresApp.Api.Excel;
 
-/// <summary>Layout of the MasterList table at export time. Any difference at import stops the import.</summary>
-public sealed record StructureSignature(string Table, int HeaderRow, int FirstColumn, List<string> Headers)
+/// <summary>
+/// Layout of the MasterList table at export time. Any difference at import stops the import.
+/// <c>Others</c>: the other lists of the same file (the E&amp;I list of a v5 template); null in older files.
+/// </summary>
+public sealed record StructureSignature(string Table, int HeaderRow, int FirstColumn, List<string> Headers, List<StructureSignature>? Others = null)
 {
+    public static StructureSignature Of(IXLTable table) => new(table.Name, table.HeadersRow().RowNumber(),
+        table.HeadersRow().FirstCell().Address.ColumnNumber, table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList());
+
+    /// <summary>This list and the others of the file.</summary>
+    public IEnumerable<StructureSignature> All() => Others is null ? [this] : [this, .. Others];
+
     public string ToJson() => JsonSerializer.Serialize(this, WorkbookFormat.Json);
     public static StructureSignature? FromJson(string json) =>
         string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<StructureSignature>(json, WorkbookFormat.Json);

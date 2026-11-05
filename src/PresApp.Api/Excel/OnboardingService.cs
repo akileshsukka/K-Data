@@ -134,46 +134,76 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         using (wb)
         {
             var (headers, rows) = FindList(wb) ?? throw new Rejected("No list with an \"EQUIP NO\", \"Line No.\" or \"Tag No\" column was found on the visible sheets.");
-            var columns = ExcelColumns.Map(headers, headers.Select(_ => false).ToList(), onboarding: true);
-            var tagColumn = columns.First(c => c.Role == ColumnRole.Tag && IsTagHeader(c.Header));
-            var tag = tagColumn.Index;
-            var lines = IsLineHeader(tagColumn.Header)
-                        || (ExcelColumns.Norm(tagColumn.Header) == "tagno" && LooksLikeLines(rows.Select(r => tag < r.Count ? r[tag] : null), checkLineFormat));
-            var discipline = columns.FirstOrDefault(c => c.Role == ColumnRole.Discipline)?.Index;
-            var description = columns.FirstOrDefault(c => c.Role == ColumnRole.Description)?.Index;
-            var fields = columns.Where(c => c.Role == ColumnRole.Field && c.Editable).ToList();
-            var groupColumns = columns.Where(c => GroupKindOf(c.Header) is not null).GroupBy(c => GroupKindOf(c.Header)!).ToDictionary(g => g.Key, g => g.First().Index);
-            var customColumns = columns.Where(c => c.Role == ColumnRole.NotStored && customHeaders.Contains(ExcelColumns.Norm(c.Header)))
-                .GroupBy(c => ExcelColumns.Norm(c.Header)).ToDictionary(g => g.Key, g => g.First().Index);
-            // Piping line list: the service comes from the line number; "Process Code" is only compared with it.
-            var processCode = columns.FirstOrDefault(c => ExcelColumns.Norm(c.Header) == "processcode")?.Index;
-            var derived = new[] { "processcode", "processdescription", "nitrogenblanket", "key" };
-            var ignored = columns.Where(c => c.Role == ColumnRole.NotStored && c.Header.Trim().Length > 0 && GroupKindOf(c.Header) is null
-                && !customColumns.ContainsKey(ExcelColumns.Norm(c.Header)) && !derived.Contains(ExcelColumns.Norm(c.Header))).Select(c => c.Header.Trim()).ToList();
-
-            var result = new List<SourceRow>();
-            for (var i = 0; i < rows.Count; i++)
+            var first = ReadList(headers, rows, customHeaders, checkLineFormat);
+            if (first.Lines) return first;
+            // A unit file of template v5 has a second list, the E&I items (EIList): it is loaded too.
+            foreach (var (moreHeaders, moreRows) in MoreEquipmentTables(wb, headers))
             {
-                var cells = rows[i];
-                string? Get(int? index) => index is { } x && x < cells.Count ? ValueNormalizer.CleanText(cells[x]) : null;
-                var t = Get(tag);
-                if (t is null) continue;
-                var values = new Dictionary<FieldDef, string>();
-                foreach (var f in fields)
-                {
-                    var v = Get(f.Index);
-                    if (v is not null) values[f.Field!] = v;
-                }
-                var groups = new Dictionary<string, string>();
-                foreach (var (kind, index) in groupColumns)
-                    if (Get(index) is { } code) groups[kind] = code.ToUpperInvariant();
-                var custom = new Dictionary<string, string>();
-                foreach (var (norm, index) in customColumns)
-                    if (Get(index) is { } v) custom[norm] = v;
-                result.Add(new SourceRow(i + 1, t, Get(discipline), Get(description), values, groups, custom, Get(processCode)?.ToUpperInvariant()));
+                var more = ReadList(moreHeaders, moreRows, customHeaders, checkLineFormat);
+                first.Rows.AddRange(more.Rows);
+                first.Ignored.AddRange(more.Ignored.Where(h => !first.Ignored.Contains(h)));
             }
-            return (result, ignored, lines);
+            return first;
         }
+    }
+
+    private static (List<SourceRow> Rows, List<string> Ignored, bool Lines) ReadList(List<string> headers, List<List<string>> rows,
+        HashSet<string> customHeaders, bool checkLineFormat)
+    {
+        var columns = ExcelColumns.Map(headers, headers.Select(_ => false).ToList(), onboarding: true);
+        var tagColumn = columns.First(c => c.Role == ColumnRole.Tag && IsTagHeader(c.Header));
+        var tag = tagColumn.Index;
+        var lines = IsLineHeader(tagColumn.Header)
+                    || (ExcelColumns.Norm(tagColumn.Header) == "tagno" && LooksLikeLines(rows.Select(r => tag < r.Count ? r[tag] : null), checkLineFormat));
+        var discipline = columns.FirstOrDefault(c => c.Role == ColumnRole.Discipline)?.Index;
+        var description = columns.FirstOrDefault(c => c.Role == ColumnRole.Description)?.Index;
+        var fields = columns.Where(c => c.Role == ColumnRole.Field && c.Editable).ToList();
+        var groupColumns = columns.Where(c => GroupKindOf(c.Header) is not null).GroupBy(c => GroupKindOf(c.Header)!).ToDictionary(g => g.Key, g => g.First().Index);
+        var customColumns = columns.Where(c => c.Role == ColumnRole.NotStored && customHeaders.Contains(ExcelColumns.Norm(c.Header)))
+            .GroupBy(c => ExcelColumns.Norm(c.Header)).ToDictionary(g => g.Key, g => g.First().Index);
+        // Piping line list: the service comes from the line number; "Process Code" is only compared with it.
+        var processCode = columns.FirstOrDefault(c => ExcelColumns.Norm(c.Header) == "processcode")?.Index;
+        var derived = new[] { "processcode", "processdescription", "nitrogenblanket", "key" };
+        var ignored = columns.Where(c => c.Role == ColumnRole.NotStored && c.Header.Trim().Length > 0 && GroupKindOf(c.Header) is null
+            && !customColumns.ContainsKey(ExcelColumns.Norm(c.Header)) && !derived.Contains(ExcelColumns.Norm(c.Header))).Select(c => c.Header.Trim()).ToList();
+
+        var result = new List<SourceRow>();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var cells = rows[i];
+            string? Get(int? index) => index is { } x && x < cells.Count ? ValueNormalizer.CleanText(cells[x]) : null;
+            var t = Get(tag);
+            if (t is null) continue;
+            var values = new Dictionary<FieldDef, string>();
+            foreach (var f in fields)
+            {
+                var v = Get(f.Index);
+                if (v is not null) values[f.Field!] = v;
+            }
+            var groups = new Dictionary<string, string>();
+            foreach (var (kind, index) in groupColumns)
+                if (Get(index) is { } code) groups[kind] = code.ToUpperInvariant();
+            var custom = new Dictionary<string, string>();
+            foreach (var (norm, index) in customColumns)
+                if (Get(index) is { } v) custom[norm] = v;
+            result.Add(new SourceRow(i + 1, t, Get(discipline), Get(description), values, groups, custom, Get(processCode)?.ToUpperInvariant()));
+        }
+        return (result, ignored, lines);
+    }
+
+    /// <summary>
+    /// The E&amp;I list of a v5 unit file (table <c>EIList</c> with an EQUIP NO column), when the first list was another table.
+    /// Any other file reads exactly one list, as before.
+    /// </summary>
+    private static IEnumerable<(List<string> Headers, List<List<string>> Rows)> MoreEquipmentTables(XLWorkbook wb, List<string> firstHeaders)
+    {
+        var table = WorkbookFormat.FindTable(wb, ExcelColumns.EiTable);
+        if (table is null || table.Worksheet.Visibility == XLWorksheetVisibility.VeryHidden) yield break;
+        var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
+        if (headers.SequenceEqual(firstHeaders)) yield break;   // FindList already read it (no MasterList before it)
+        if (!headers.Any(h => ExcelColumns.Norm(h) is "equipno" or "equipmentno")) yield break;
+        var rows = table.DataRange?.Rows().Select(r => r.Cells().Select(WorkbookFormat.CellText).ToList()).ToList() ?? [];
+        yield return (headers, rows);
     }
 
     /// <summary>The first visible list with an EQUIP NO header: an Excel table, or a header row in the first 15 rows.</summary>
@@ -460,7 +490,8 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             }
 
             var p = asset.Preservation;
-            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore);
+            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore,
+                n2Blanket: asset.Type != AssetType.ElectricalInstrument);
             if (outcome.AvailabilityMove is { } move)
             {
                 changes.Add(Change(asset, nameof(AssetPreservation.CurrentGate), ImportOutcome.Derived, move.Reason,

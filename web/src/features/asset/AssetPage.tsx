@@ -7,7 +7,7 @@ import { useFields, useOptions, useLineCodes, usePipeSpecs } from "../../app/use
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { TextInput } from "../../components/Field";
-import { CurrentGateChip } from "../../components/GateStatus";
+import { CurrentGateChip, gateText } from "../../components/GateStatus";
 import { useToast } from "../../components/Toast";
 import { formatDate, formatDateTime, todayDubai } from "../../components/dates";
 import { FieldSection } from "./FieldSection";
@@ -69,7 +69,7 @@ export function AssetPage() {
         </div>
         <div className="text-right">
           <span className="block text-sm text-muted">Current Gate</span>
-          <CurrentGateChip value={a.currentGate} />
+          <CurrentGateChip value={a.currentGate} type={a.type} />
         </div>
       </header>
 
@@ -130,7 +130,7 @@ export function AssetPage() {
         {tab === "gates" && <GatesTab asset={a} fields={defs} options={opts} onProposals={setProposals} />}
         {tab === "readings" && <ReadingsTab asset={a} onProposals={setProposals} />}
         {tab === "documents" && <DocumentsTab asset={a} />}
-        {tab === "history" && <AssetHistory id={a.id} />}
+        {tab === "history" && <AssetHistory id={a.id} type={a.type} />}
       </div>
     </div>
   );
@@ -160,7 +160,7 @@ function ProposalBanner({ asset, proposals, onDone }: { asset: AssetProfile; pro
     <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-violet/40 bg-violet-soft px-4 py-3" role="status">
       <p className="flex-1">
         {proposals.currentGate && (
-          <>Current Gate should be <strong>{proposals.currentGate}</strong> (now {asset.currentGate}). </>
+          <>Current Gate should be <strong>{gateText(proposals.currentGate, asset.type)}</strong> (now {gateText(asset.currentGate, asset.type)}). </>
         )}
         {proposals.lastFieldActionDate && (
           <>Last Field Action Date can move to <strong>{formatDate(proposals.lastFieldActionDate)}</strong>.</>
@@ -244,10 +244,10 @@ function AdminCard({ asset }: { asset: AssetProfile }) {
   );
 }
 
-function AssetHistory({ id }: { id: string }) {
+function AssetHistory({ id, type }: { id: string; type: string }) {
   const history = useAssetHistory(id);
   if (history.isPending) return <p className="text-muted">Loading…</p>;
-  return <HistoryList entries={history.data ?? []} />;
+  return <HistoryList entries={history.data ?? []} type={type} />;
 }
 
 /** Rating, face and gasket of the line, from the pipe spec list (Admin → Pipe specs). */

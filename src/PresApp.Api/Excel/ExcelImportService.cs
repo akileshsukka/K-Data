@@ -38,6 +38,16 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
 
     private sealed record Plan(ExcelSession Session, int RowsInFile, int MissingRows, List<ImportChange> Changes);
 
+    /// <summary>Columns of one list of the unit file (MasterList or EIList), as the import reads them.</summary>
+    private sealed class ListColumns(List<ExcelColumn> columns)
+    {
+        public int KeyColumn { get; } = columns.First(c => c.Role == ColumnRole.Key).Index + 1;
+        public int? TagColumn { get; } = columns.FirstOrDefault(c => c.Role == ColumnRole.Tag)?.Index + 1;
+        public List<ExcelColumn> Editable { get; } = columns.Where(c => c.Editable).ToList();
+        public ExcelColumn? Hold { get; } = columns.FirstOrDefault(c => c.Role == ColumnRole.HoldCategory);
+        public ExcelColumn? Na { get; } = columns.FirstOrDefault(c => c.Role == ColumnRole.NaCategory);
+    }
+
     // ------------------------------------------------------------------ preview
 
     public async Task<ImportRunDetail> PreviewAsync(Stream file, string fileName, int unitId, string uploadedBy, CancellationToken ct)
@@ -137,44 +147,44 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
         if (session.AssetType == AssetType.Pipeline) return await AnalysePipingAsync(wb, session, tracking, ct);
         var signature = StructureSignature.FromJson(session.StructureSignature)
                         ?? throw new ImportRejected("The export of this file has no recorded structure. Download a new file.");
-        var table = CheckStructure(wb, signature);
         var baseRows = BaseSnapshot.FromJson(session.BaseJson).Rows.ToDictionary(r => r.Key);
 
-        var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
-        var columns = ExcelColumns.Map(headers, headers.Select(_ => false).ToList());
-        var keyColumn = columns.First(c => c.Role == ColumnRole.Key).Index + 1;
-        var tagColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.Tag)?.Index + 1;
-        var editable = columns.Where(c => c.Editable).ToList();
-        var holdColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.HoldCategory);
-        var naColumn = columns.FirstOrDefault(c => c.Role == ColumnRole.NaCategory);
-
-        // ---- the Key column must be exactly as exported
-        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row)>();
+        // ---- every list of the file (MasterList, and the E&I list of a v5 file): same structure, Key column exactly as exported
+        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row, ListColumns Columns)>();
         var changes = new List<ImportChange>();
         var seen = new HashSet<Guid>();
-        var body = table.DataRange;
-        for (var i = 1; i <= (body?.RowCount() ?? 0); i++)
+        foreach (var expected in signature.All())
         {
-            var row = body!.Row(i);
-            var keyText = WorkbookFormat.CellText(row.Cell(keyColumn)).Trim();
-            var tag = tagColumn is { } tc ? ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(tc))) : null;
-            if (keyText.Length == 0)
+            var table = CheckStructure(wb, expected);
+            var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
+            var list = new ListColumns(ExcelColumns.Map(headers, headers.Select(_ => false).ToList()));
+            // Rows of the E&I list are told apart in the messages ("EIList row 3").
+            var where = expected == signature ? "row" : $"{table.Name} row";
+            var body = table.DataRange;
+            for (var i = 1; i <= (body?.RowCount() ?? 0); i++)
             {
-                if (row.Cells().All(c => c.HasFormula || c.IsEmpty())) continue;
-                changes.Add(new ImportChange
+                var row = body!.Row(i);
+                var keyText = WorkbookFormat.CellText(row.Cell(list.KeyColumn)).Trim();
+                var tag = list.TagColumn is { } tc ? ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(tc))) : null;
+                if (keyText.Length == 0)
                 {
-                    RowNumber = i, AssetTag = Truncate(tag, 55), Field = RowField, Outcome = ImportOutcome.Rejected,
-                    Reason = "New row without Key: ignored. Create new equipment in the app (New equipment) or load it with Onboarding."
-                });
-                continue;
+                    if (row.Cells().All(c => c.HasFormula || c.IsEmpty())) continue;
+                    changes.Add(new ImportChange
+                    {
+                        RowNumber = i, AssetTag = Truncate(tag, 55), Field = RowField, Outcome = ImportOutcome.Rejected,
+                        Reason = $"New row without Key{(expected == signature ? "" : $" ({where} {i})")}: ignored. Create new equipment in the app (New equipment) or load it with Onboarding."
+                    });
+                    continue;
+                }
+                if (!Guid.TryParse(keyText, out var key) || !baseRows.TryGetValue(key, out var baseRow))
+                    throw new ImportRejected($"The hidden Key column was changed in {where} {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
+                if (!seen.Add(key))
+                    throw new ImportRejected($"The hidden Key of {where} {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
+                rows.Add((i, baseRow, row, list));
             }
-            if (!Guid.TryParse(keyText, out var key) || !baseRows.TryGetValue(key, out var baseRow))
-                throw new ImportRejected($"The hidden Key column was changed in row {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
-            if (!seen.Add(key))
-                throw new ImportRejected($"The hidden Key of row {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
-            rows.Add((i, baseRow, row));
         }
         var missing = baseRows.Count - rows.Count;
+        var holdOrNa = rows.Any(r => r.Columns.Hold is not null || r.Columns.Na is not null);
 
         // ---- current data
         var ids = rows.Select(r => r.Base.Key).ToList();
@@ -189,10 +199,10 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
         var evidenceLabels = await db.MeasurementTypes.AsNoTracking().Where(m => m.EvidenceForGate != null)
             .ToDictionaryAsync(m => m.EvidenceForGate!.Value, m => m.Label, ct);
         var today = SiteClock.Today(clock);
-        var unitCategories = holdColumn is null && naColumn is null ? []
+        var unitCategories = !holdOrNa ? []
             : await db.DashboardCategories.Where(c => c.UnitId == unitId && c.IsActive && c.Code != null).ToListAsync(ct);
 
-        foreach (var (number, baseRow, row) in rows)
+        foreach (var (number, baseRow, row, list) in rows)
         {
             assets.TryGetValue(baseRow.Key, out var asset);
             ImportChange Change(string field, ImportOutcome outcome, string? reason, string? baseValue = null, string? excel = null, string? current = null, string? newValue = null) => new()
@@ -201,7 +211,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
                 Field = field, BaseValue = baseValue, ExcelValue = excel, CurrentValue = current, NewValue = newValue, Outcome = outcome, Reason = reason
             };
 
-            if (tagColumn is { } tcol)
+            if (list.TagColumn is { } tcol)
             {
                 var tagInFile = ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(tcol)));
                 if (!string.Equals(tagInFile, ValueNormalizer.CleanText(baseRow.Tag), StringComparison.Ordinal))
@@ -211,7 +221,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
 
             var applied = new List<(FieldDef Field, string? NewText)>();
             var availabilityBefore = asset?.Preservation?.AssetAvailability;
-            foreach (var col in editable)
+            foreach (var col in list.Editable)
             {
                 var field = col.Field!;
                 if (!baseRow.Values.TryGetValue(field.Key, out var baseValue)) continue;
@@ -243,10 +253,10 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
             }
 
             // ---- template v4: Hold / N/A category chosen by code (one of the two columns at most)
-            if ((holdColumn is not null || naColumn is not null) && baseRow.Values.TryGetValue(TemplateV4.CategoryField, out var baseCategory))
+            if ((list.Hold is not null || list.Na is not null) && baseRow.Values.TryGetValue(TemplateV4.CategoryField, out var baseCategory))
             {
-                var hold = holdColumn is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(holdColumn.Index + 1)));
-                var na = naColumn is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(naColumn.Index + 1)));
+                var hold = list.Hold is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(list.Hold.Index + 1)));
+                var na = list.Na is null ? null : ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(list.Na.Index + 1)));
                 var excelText = hold is not null && na is not null ? $"Hold:{hold} / N/A:{na}" : hold is not null ? $"Hold:{hold}" : na is not null ? $"N/A:{na}" : null;
                 var section = hold is not null ? CategorySection.Hold : CategorySection.NotApplicable;
                 var code = Reporting.UnitDashboard.NormalizeCode(hold ?? na);
@@ -288,7 +298,8 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
             var gateClosed = applied.Any(a => PreservationFields.IsGateStatus(a.Field) && AssetPreservation.IsCompleted(a.NewText));
             var before = (p.PreservationDate, p.N2BlanketedDate, p.LastFieldActionDate);
             var availabilityChanged = applied.Any(a => a.Field.Key == nameof(AssetPreservation.AssetAvailability));
-            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore);
+            var electrical = asset.Type == AssetType.ElectricalInstrument;
+            var outcome = PreservationRules.Apply(p, gateChanged, gateClosed, today, availabilityChanged, availabilityBefore, n2Blanket: !electrical);
             if (outcome.AvailabilityMove is { } move)
             {
                 changes.Add(Change(CurrentGateField, ImportOutcome.Derived, move.Reason,
@@ -324,7 +335,8 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
                 changes.Add(Change(nameof(AssetPreservation.N2BlanketedDate), ImportOutcome.Derived, "G4 was completed.", newValue: FieldValues.Format(p.N2BlanketedDate)));
             AssetEditor.EnsureDocumentRows(asset);
 
-            // ---- gate evidence
+            // ---- gate evidence (dew point, O2, N2 readings of static and rotating equipment; E&I steps are reported by status only)
+            if (electrical) continue;
             foreach (var (field, newText) in applied)
             {
                 if (field.Gate is not { } gate || !PreservationFields.IsGateStatus(field) || !AssetPreservation.IsCompleted(newText)) continue;

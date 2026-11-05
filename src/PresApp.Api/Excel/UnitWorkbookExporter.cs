@@ -18,7 +18,8 @@ public sealed record ExportResult(string FileName, byte[] Content, Guid SessionI
 /// Builds the client "Master Equipment List – Preservation" workbook of one unit from its template, as the
 /// Power Automate flow did, but without sheet protection: the import checks the structure instead.
 /// <list type="bullet">
-/// <item>One row per active equipment (E&amp;I rows included but hidden by the filter), sorted like the register.</item>
+/// <item>One row per active equipment, sorted like the register. Without an <c>EIList</c> table the E&amp;I rows are in
+/// the MasterList, hidden by the filter; with it (template v5) they go to the EIList and the MasterList keeps the rest.</item>
 /// <item>Hidden "Key" column = asset ID; very hidden <c>_meta</c> (session) and <c>_lists</c> (dropdowns).</item>
 /// <item>Editable cells written as text so Excel never converts a value; list columns get dropdowns.</item>
 /// <item>Categories table and the dashboard category block rebuilt from the unit's categories.</item>
@@ -28,6 +29,9 @@ public sealed record ExportResult(string FileName, byte[] Content, Guid SessionI
 public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock)
 {
     private static readonly HashSet<string> HiddenDisciplines = new(StringComparer.OrdinalIgnoreCase) { "Electrical", "Instrumentation", "E&I" };
+
+    /// <summary>What a table needs to be filled.</summary>
+    private sealed record FillContext(Domain.Catalog.Unit Unit, Dictionary<string, List<string>> OptionsBySet, List<DashboardCategory> Categories, ListSheet Lists);
 
     public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct)
     {
@@ -59,6 +63,104 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         if (v4 && TemplateV4.ShowSlots(wb, categories.Where(c => c.Code is not null).ToList()) is { } slotProblem) throw ApiProblem.Invalid(slotProblem);
         var table = WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable)!;
         var sheet = table.Worksheet;
+        var eiTable = WorkbookFormat.FindTable(wb, ExcelColumns.EiTable);
+
+        // ---- rows: with an E&I list, the E&I items go there and the MasterList keeps the static and rotating equipment
+        var masterAssets = eiTable is null ? assets : assets.Where(a => a.Type != AssetType.ElectricalInstrument).ToList();
+        var eiAssets = eiTable is null ? [] : assets.Where(a => a.Type == AssetType.ElectricalInstrument).ToList();
+        var lists = new ListSheet(wb.Worksheets.Add(WorkbookFormat.ListsSheet));
+        var context = new FillContext(unit, optionsBySet, categories, lists);
+        var masterColumns = Fill(table, masterAssets, context);
+        var eiColumns = eiTable is null ? [] : Fill(eiTable, eiAssets, context);
+
+        // ---- E&I rows of the MasterList hidden by the filter (still in the file, not counted by the dashboard)
+        var disciplineCol = masterColumns.FirstOrDefault(c => c.Role == ColumnRole.Discipline);
+        if (disciplineCol is not null && masterAssets.Count > 0)
+        {
+            var body = table.DataRange;
+            var all = masterAssets.Select(a => a.Discipline.Name).Distinct().ToList();
+            var keep = all.Where(d => !HiddenDisciplines.Contains(d.Trim())).ToList();
+            if (keep.Count > 0 && keep.Count < all.Count)
+            {
+                var filter = table.AutoFilter.Column(disciplineCol.Index + 1);
+                foreach (var d in keep) filter.AddFilter(d);
+                for (var i = 0; i < masterAssets.Count; i++)
+                {
+                    if (HiddenDisciplines.Contains(masterAssets[i].Discipline.Name.Trim())) body.Row(i + 1).WorksheetRow().Hide();
+                }
+            }
+        }
+        lists.Sheet.Visibility = XLWorksheetVisibility.VeryHidden;
+
+        // ---- placeholders, categories and dashboard
+        var reportDate = local.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
+        ReplacePlaceholders(wb, unit.Number.ToString(CultureInfo.InvariantCulture), reportDate);
+        if (v4) TemplateV4.WriteCategories(wb, categories.Where(c => c.Code is not null).ToList());
+        else DashboardSheetWriter.Write(wb, categories);
+
+        // ---- session sheet
+        var n = assets.Count;
+        var meta = wb.Worksheets.Add(WorkbookFormat.MetaSheet);
+        string[][] metaRows =
+        [
+            ["SessionId", sessionId.ToString()],
+            ["Unit", unit.Name],
+            ["ExportedAtUtc", now.ToString("O", CultureInfo.InvariantCulture)],
+            ["ExportedBy", exportedBy],
+            ["FormatVersion", formatVersion.ToString(CultureInfo.InvariantCulture)],
+            ["RowCount", n.ToString(CultureInfo.InvariantCulture)],
+            ["App", WorkbookFormat.AppName]
+        ];
+        for (var r = 0; r < metaRows.Length; r++)
+        {
+            meta.Cell(r + 1, 1).SetValue(metaRows[r][0]);
+            meta.Cell(r + 1, 2).SetValue(metaRows[r][1]);
+        }
+        meta.Visibility = XLWorksheetVisibility.VeryHidden;
+
+        // Only the master list is selected and active; a template saved with another sheet selected
+        // would otherwise open with both grouped ("cannot make changes ... when multiple sheets are selected").
+        foreach (var w in wb.Worksheets) { w.TabActive = false; w.TabSelected = false; }
+        sheet.TabSelected = true;
+        sheet.SetTabActive();
+        wb.FullCalculationOnLoad = true;
+
+        var fileName = $"Unit_{unit.Number}_Master_Equipment_List_Preservation_{local.ToString("dd_MMM_yyyy_HHmm", CultureInfo.InvariantCulture)}.xlsx";
+        using var output = new MemoryStream();
+        wb.SaveAs(output);
+
+        // ---- session: layout and values at export, kept on the server
+        var signature = StructureSignature.Of(table);
+        if (eiTable is not null) signature = signature with { Others = [StructureSignature.Of(eiTable)] };
+        var editable = masterColumns.Concat(eiColumns).Where(c => c.Editable).Select(c => c.Field!).DistinctBy(f => f.Key).ToList();
+        db.ExcelSessions.Add(new ExcelSession
+        {
+            Id = sessionId,
+            UnitId = unitId,
+            AssetType = AssetType.Equipment,
+            ExportedAtUtc = now,
+            ExportedBy = exportedBy,
+            Status = ExcelSessionStatus.Open,
+            FormatVersion = formatVersion,
+            FileName = fileName,
+            RowCount = n,
+            StructureSignature = signature.ToJson(),
+            BaseJson = new BaseSnapshot(assets.Select(a =>
+            {
+                var values = editable.ToDictionary(f => f.Key, f => FieldValues.Read(f, a));
+                if (v4) values[TemplateV4.CategoryField] = a.Preservation?.DashboardCategory is { IsActive: true } c ? TemplateV4.Token(c) : null;
+                return new BaseRow(a.Id, a.Tag, a.Code, values);
+            }).ToList()).ToJson()
+        });
+        await db.SaveChangesAsync(ct);
+
+        return new ExportResult(fileName, output.ToArray(), sessionId, n);
+    }
+
+    /// <summary>Writes one row per asset into a list table, adds its hidden Key column and its dropdowns.</summary>
+    private static List<ExcelColumn> Fill(IXLTable table, List<Asset> assets, FillContext context)
+    {
+        var sheet = table.Worksheet;
         var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
         var templateRow = table.DataRange.FirstRow();
         var formulas = templateRow.Cells().Select(c => c.HasFormula ? c.FormulaR1C1 : null).ToList();
@@ -78,7 +180,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                 switch (col.Role)
                 {
                     case ColumnRole.Serial: cell.Value = i + 1; break;
-                    case ColumnRole.OperatingUnit: cell.Value = unit.Number; break;
+                    case ColumnRole.OperatingUnit: cell.Value = context.Unit.Number; break;
                     case ColumnRole.Discipline: cell.Value = a.Discipline.Name; break;
                     case ColumnRole.Tag: cell.Value = a.Tag ?? ""; break;
                     case ColumnRole.Description: cell.Value = a.Description ?? ""; break;
@@ -112,131 +214,56 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         }
         sheet.Column(keyColumn).Hide();
 
-        // ---- E&I rows hidden by the filter (still in the file, not counted by the dashboard)
-        var disciplineCol = columns.FirstOrDefault(c => c.Role == ColumnRole.Discipline);
-        if (disciplineCol is not null && n > 0)
-        {
-            var all = assets.Select(a => a.Discipline.Name).Distinct().ToList();
-            var keep = all.Where(d => !HiddenDisciplines.Contains(d.Trim())).ToList();
-            if (keep.Count > 0 && keep.Count < all.Count)
-            {
-                var filter = table.AutoFilter.Column(disciplineCol.Index + 1);
-                foreach (var d in keep) filter.AddFilter(d);
-                for (var i = 0; i < n; i++)
-                {
-                    if (HiddenDisciplines.Contains(assets[i].Discipline.Name.Trim())) body.Row(i + 1).WorksheetRow().Hide();
-                }
-            }
-        }
-
         // ---- dropdowns from the active options (very hidden _lists sheet)
-        var lists = wb.Worksheets.Add(WorkbookFormat.ListsSheet);
-        var listColumn = 0;
-        foreach (var col in columns.Where(c => c.Editable && c.Field!.OptionSet is not null).GroupBy(c => c.Field!.OptionSet!))
+        if (n == 0) return columns;
+        foreach (var col in columns.Where(c => c.Editable && c.Field!.OptionSet is not null))
         {
-            var values = optionsBySet.GetValueOrDefault(col.Key) ?? [];
-            listColumn++;
-            lists.Cell(1, listColumn).Value = col.Key;
-            if (values.Count == 0) continue;
-            for (var v = 0; v < values.Count; v++) lists.Cell(v + 2, listColumn).SetValue(values[v]);
-            var source = lists.Range(2, listColumn, values.Count + 1, listColumn);
-            if (n == 0) continue;
-            foreach (var c in col)
-            {
-                var dv = body.Column(c.Index + 1).CreateDataValidation();
-                dv.List(source, true);
-                dv.IgnoreBlanks = true;
-                dv.ShowErrorMessage = true;
-                dv.ErrorStyle = XLErrorStyle.Stop;
-                dv.ErrorTitle = "Invalid value";
-                dv.ErrorMessage = "Select a value from the list.";
-            }
+            var setKey = col.Field!.OptionSet!;
+            var source = context.Lists.Source(setKey, context.OptionsBySet.GetValueOrDefault(setKey) ?? []);
+            if (source is null) continue;
+            AddList(body.Column(col.Index + 1), source, "Invalid value", "Select a value from the list.");
         }
         // v4: Hold / N/A category columns take the active codes of their section
         foreach (var (role, section) in new[] { (ColumnRole.HoldCategory, CategorySection.Hold), (ColumnRole.NaCategory, CategorySection.NotApplicable) })
         {
             if (!columns.Any(c => c.Role == role)) continue;
-            var codes = TemplateV4.Ordered(categories).Where(c => c.Section == section).Select(c => c.Code!).ToList();
-            listColumn++;
-            lists.Cell(1, listColumn).Value = section == CategorySection.Hold ? "HoldCategory" : "NACategory";
-            if (codes.Count == 0 || n == 0) continue;
-            for (var v = 0; v < codes.Count; v++) lists.Cell(v + 2, listColumn).SetValue(codes[v]);
-            var source = lists.Range(2, listColumn, codes.Count + 1, listColumn);
+            var codes = TemplateV4.Ordered(context.Categories).Where(c => c.Section == section).Select(c => c.Code!).ToList();
+            var source = context.Lists.Source(section == CategorySection.Hold ? "HoldCategory" : "NACategory", codes);
+            if (source is null) continue;
             foreach (var c in columns.Where(c => c.Role == role))
-            {
-                var dv = body.Column(c.Index + 1).CreateDataValidation();
-                dv.List(source, true);
-                dv.IgnoreBlanks = true;
-                dv.ShowErrorMessage = true;
-                dv.ErrorStyle = XLErrorStyle.Stop;
-                dv.ErrorTitle = "Invalid category";
-                dv.ErrorMessage = "Pick a category code of this section. Categories are created in K Data.";
-            }
+                AddList(body.Column(c.Index + 1), source, "Invalid category", "Pick a category code of this section. Categories are created in K Data.");
         }
-        lists.Visibility = XLWorksheetVisibility.VeryHidden;
+        return columns;
+    }
 
-        // ---- placeholders, categories and dashboard
-        var reportDate = local.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
-        ReplacePlaceholders(wb, unit.Number.ToString(CultureInfo.InvariantCulture), reportDate);
-        if (v4) TemplateV4.WriteCategories(wb, categories.Where(c => c.Code is not null).ToList());
-        else DashboardSheetWriter.Write(wb, categories);
+    private static void AddList(IXLRangeColumn column, IXLRange source, string title, string message)
+    {
+        var dv = column.CreateDataValidation();
+        dv.List(source, true);
+        dv.IgnoreBlanks = true;
+        dv.ShowErrorMessage = true;
+        dv.ErrorStyle = XLErrorStyle.Stop;
+        dv.ErrorTitle = title;
+        dv.ErrorMessage = message;
+    }
 
-        // ---- session sheet
-        var meta = wb.Worksheets.Add(WorkbookFormat.MetaSheet);
-        string[][] metaRows =
-        [
-            ["SessionId", sessionId.ToString()],
-            ["Unit", unit.Name],
-            ["ExportedAtUtc", now.ToString("O", CultureInfo.InvariantCulture)],
-            ["ExportedBy", exportedBy],
-            ["FormatVersion", formatVersion.ToString(CultureInfo.InvariantCulture)],
-            ["RowCount", n.ToString(CultureInfo.InvariantCulture)],
-            ["App", WorkbookFormat.AppName]
-        ];
-        for (var r = 0; r < metaRows.Length; r++)
+    /// <summary>The very hidden <c>_lists</c> sheet: one column per list (header = list key), written once and shared by every table.</summary>
+    private sealed class ListSheet(IXLWorksheet sheet)
+    {
+        private readonly Dictionary<string, IXLRange?> written = new(StringComparer.Ordinal);
+        public IXLWorksheet Sheet { get; } = sheet;
+
+        /// <summary>Range of the values of a list (null when it has none).</summary>
+        public IXLRange? Source(string key, IReadOnlyList<string> values)
         {
-            meta.Cell(r + 1, 1).SetValue(metaRows[r][0]);
-            meta.Cell(r + 1, 2).SetValue(metaRows[r][1]);
+            if (written.TryGetValue(key, out var range)) return range;
+            var column = written.Count + 1;
+            Sheet.Cell(1, column).Value = key;
+            for (var v = 0; v < values.Count; v++) Sheet.Cell(v + 2, column).SetValue(values[v]);
+            range = values.Count == 0 ? null : Sheet.Range(2, column, values.Count + 1, column);
+            written[key] = range;
+            return range;
         }
-        meta.Visibility = XLWorksheetVisibility.VeryHidden;
-
-        // Only the master list is selected and active; a template saved with another sheet selected
-        // would otherwise open with both grouped ("cannot make changes ... when multiple sheets are selected").
-        foreach (var w in wb.Worksheets) { w.TabActive = false; w.TabSelected = false; }
-        sheet.TabSelected = true;
-        sheet.SetTabActive();
-        wb.FullCalculationOnLoad = true;
-
-        var fileName = $"Unit_{unit.Number}_Master_Equipment_List_Preservation_{local.ToString("dd_MMM_yyyy_HHmm", CultureInfo.InvariantCulture)}.xlsx";
-        using var output = new MemoryStream();
-        wb.SaveAs(output);
-
-        // ---- session: layout and values at export, kept on the server
-        var finalHeaders = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
-        var editable = columns.Where(c => c.Editable).Select(c => c.Field!).ToList();
-        db.ExcelSessions.Add(new ExcelSession
-        {
-            Id = sessionId,
-            UnitId = unitId,
-            AssetType = AssetType.Equipment,
-            ExportedAtUtc = now,
-            ExportedBy = exportedBy,
-            Status = ExcelSessionStatus.Open,
-            FormatVersion = formatVersion,
-            FileName = fileName,
-            RowCount = n,
-            StructureSignature = new StructureSignature(table.Name, table.HeadersRow().RowNumber(),
-                table.HeadersRow().FirstCell().Address.ColumnNumber, finalHeaders).ToJson(),
-            BaseJson = new BaseSnapshot(assets.Select(a =>
-            {
-                var values = editable.ToDictionary(f => f.Key, f => FieldValues.Read(f, a));
-                if (v4) values[TemplateV4.CategoryField] = a.Preservation?.DashboardCategory is { IsActive: true } c ? TemplateV4.Token(c) : null;
-                return new BaseRow(a.Id, a.Tag, a.Code, values);
-            }).ToList()).ToJson()
-        });
-        await db.SaveChangesAsync(ct);
-
-        return new ExportResult(fileName, output.ToArray(), sessionId, n);
     }
 
     /// <summary>Opens a template and checks the rules every template must follow.</summary>
@@ -256,16 +283,24 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
     {
         var table = WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable);
         if (table is null) return "The template has no table named \"MasterList\".";
-        if (table.DataRange is null || table.DataRange.RowCount() < 1) return "The MasterList table must keep one empty data row.";
-        var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
-        if (headers.Any(h => ExcelColumns.Norm(h) == "key")) return "The template already has a \"Key\" column. Remove it: the app adds it.";
-        if (!headers.Any(h => ExcelColumns.Norm(h) is "equipno" or "equipmentno" or "tag")) return "The MasterList table has no \"EQUIP NO\" column.";
+        if (ListProblem(table) is { } problem) return problem;
+        if (WorkbookFormat.FindTable(wb, ExcelColumns.EiTable) is { } ei && ListProblem(ei) is { } eiProblem) return eiProblem;
         foreach (var name in new[] { WorkbookFormat.MetaSheet, WorkbookFormat.ListsSheet, WorkbookFormat.BaseSheet })
         {
             if (wb.TryGetWorksheet(name, out _)) return $"The template must not have a sheet named {name}. Upload the clean template, not an exported file.";
         }
         if (wb.Worksheets.Any(w => w.IsProtected)) return "The template has a protected sheet. Remove the protection and upload it again.";
         return TemplateV4.IsV4(wb) ? TemplateV4.Problem(wb) : null;
+    }
+
+    /// <summary>Rules of a list table of the template (MasterList, EIList).</summary>
+    private static string? ListProblem(IXLTable table)
+    {
+        if (table.DataRange is null || table.DataRange.RowCount() < 1) return $"The {table.Name} table must keep one empty data row.";
+        var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
+        if (headers.Any(h => ExcelColumns.Norm(h) == "key")) return $"The {table.Name} table already has a \"Key\" column. Remove it: the app adds it.";
+        if (!headers.Any(h => ExcelColumns.Norm(h) is "equipno" or "equipmentno" or "tag")) return $"The {table.Name} table has no \"EQUIP NO\" column.";
+        return null;
     }
 
     private static void ReplacePlaceholders(XLWorkbook wb, string unitNumber, string reportDate)

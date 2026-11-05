@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Perm, type AssetProfile } from "../../api/types";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
+import { gatePrefix } from "../../components/GateStatus";
 import { DocumentList } from "./DocumentList";
 import { UploadDocumentDialog } from "./UploadDocumentDialog";
 import { useAssetDocuments } from "./useDocuments";
@@ -15,7 +16,7 @@ export function DocumentsTab({ asset }: { asset: AssetProfile }) {
   const docs = documents.data ?? [];
   const groups: { gate: number | null; title: string }[] = [
     { gate: null, title: "General" },
-    ...Array.from({ length: 8 }, (_, i) => ({ gate: i + 1, title: `G${i + 1}` })),
+    ...Array.from({ length: 8 }, (_, i) => ({ gate: i + 1, title: `${gatePrefix(asset.type)}${i + 1}` })),
   ];
 
   return (
@@ -36,7 +37,7 @@ export function DocumentsTab({ asset }: { asset: AssetProfile }) {
           .map((g) => (
             <section key={g.title} className="rounded-lg border border-line bg-panel px-4 py-3">
               <h2 className="text-lg font-semibold">{g.title}</h2>
-              <DocumentList docs={docs} assetId={asset.id} gate={g.gate} />
+              <DocumentList docs={docs} assetId={asset.id} gate={g.gate} step={gatePrefix(asset.type)} />
             </section>
           ))
       )}

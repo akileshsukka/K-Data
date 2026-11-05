@@ -158,7 +158,7 @@ function MonitoringTable({ rows }: { rows: MonitoringRow[] }) {
                 </td>
                 <td className="border-b border-line px-3 py-2 text-right tabular-nums">{r.pressureBarg ?? "—"}</td>
                 <td className="border-b border-line px-3 py-2 text-right tabular-nums">{r.o2Pct ?? "—"}</td>
-                <td className="border-b border-line px-3 py-2"><CurrentGateChip value={r.currentGate} /></td>
+                <td className="border-b border-line px-3 py-2"><CurrentGateChip value={r.currentGate} type={r.type} /></td>
                 <td className="border-b border-line px-3 py-2 text-sm">{r.groups.join(", ")}</td>
               </tr>
             ))}

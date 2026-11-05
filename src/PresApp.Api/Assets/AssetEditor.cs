@@ -88,7 +88,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             gateStatusChanged: changed.Any(PreservationFields.IsGateStatus),
             fieldActionHappened: changed.Any(f => PreservationRules.IsFieldAction(f.Key)),
             SiteClock.Today(clock),
-            availabilityChanged: changed.Any(IsAvailability), availabilityBefore);
+            availabilityChanged: changed.Any(IsAvailability), availabilityBefore, n2Blanket: asset.Type != AssetType.ElectricalInstrument);
         EnsureDocumentRows(asset);
 
         await db.SaveChangesAsync(ct);
@@ -506,7 +506,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
                 // Bulk edit sets automatic milestones and the Asset Availability rule, but never proposes
                 // the highest completed gate (as in the Power App).
                 PreservationRules.Apply(asset.Preservation, PreservationFields.IsGateStatus(field!), PreservationRules.IsFieldAction(field!.Key), today,
-                    availabilityChanged: IsAvailability(field!), availabilityBefore);
+                    availabilityChanged: IsAvailability(field!), availabilityBefore, n2Blanket: asset.Type != AssetType.ElectricalInstrument);
                 EnsureDocumentRows(asset);
             }
         }

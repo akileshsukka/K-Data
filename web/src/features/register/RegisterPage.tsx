@@ -7,7 +7,7 @@ import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
-import { CurrentGateChip, GateStatus } from "../../components/GateStatus";
+import { CurrentGateChip, GateStatus, gatePrefix, gateText } from "../../components/GateStatus";
 import { PageHeader } from "../../components/PageHeader";
 import { useDebounced } from "../../components/useDebounced";
 import { formatDate } from "../../components/dates";
@@ -174,7 +174,9 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const outsideCard = card.data ? card.data.assetIds.filter((id) => !all.some((r) => r.id === id)).length : 0;
   const distinct = (pick: (r: RegisterRow) => string | null) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const showLaterGates = all.some((r) => r.gates.slice(4).some(Boolean));
-  const gateCount = showLaterGates ? 8 : 4;
+  // E&I items always show their 8 steps (E1–E8); equipment and lines show G5–G8 only once someone uses them.
+  const gateCount = showLaterGates || type === "ElectricalInstrument" ? 8 : 4;
+  const step = gatePrefix(type);
 
   const lines = type === "Pipeline";
   const filtered = useMemo(
@@ -270,7 +272,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         </SelectInput>
         <SelectInput value={f.currentGate} onChange={(e) => set("currentGate", e.target.value)} aria-label="Current Gate" className="mt-0">
           <option value="">Any Current Gate</option>
-          {distinct((r) => r.currentGate).map((d) => <option key={d}>{d}</option>)}
+          {distinct((r) => r.currentGate).map((d) => <option key={d} value={d}>{gateText(d, type)}</option>)}
         </SelectInput>
         <div className="flex flex-wrap gap-2">
           <div role="group" aria-label="Gates (several = all must match)" title="Choose one or more gates. With several, every chosen gate must have the status." className="inline-flex shrink-0 overflow-hidden rounded-md border border-line">
@@ -282,7 +284,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 onClick={() => toggleGate(g)}
                 className={`min-h-10 min-w-10 border-l border-line px-2 text-sm font-semibold first:border-l-0 ${f.gates.includes(g) ? "bg-violet text-white" : "bg-panel text-ink hover:text-violet"}`}
               >
-                G{g}
+                {step}{g}
               </button>
             ))}
           </div>
@@ -440,7 +442,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                   {customColumns.map((c) => <th key={c.key} className="border-b border-line px-3 py-2.5 font-semibold">{c.label}</th>)}
                   <th className="border-b border-line px-3 py-2.5 font-semibold">Current Gate</th>
                   {Array.from({ length: gateCount }, (_, i) => (
-                    <th key={i} className="border-b border-line px-2 py-2.5 font-semibold">G{i + 1}</th>
+                    <th key={i} className="border-b border-line px-2 py-2.5 font-semibold">{step}{i + 1}</th>
                   ))}
                   <th className="border-b border-line px-3 py-2.5 font-semibold">Action By</th>
                 </tr>
@@ -483,7 +485,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     )}
                     {customColumns.map((c) => <td key={c.key} className="border-b border-line px-3 py-2 text-sm">{c.dataType === "Date" && r.custom?.[c.key] ? <span className="whitespace-nowrap">{formatDate(r.custom[c.key])}</span> : r.custom?.[c.key] ?? ""}</td>)}
                     <td className="border-b border-line px-3 py-2">
-                      <CurrentGateChip value={r.currentGate} />
+                      <CurrentGateChip value={r.currentGate} type={type} />
                       {r.documentsPending > 0 && <span className="mt-1 block text-sm text-ongoing">{r.documentsPending} doc. pending</span>}
                     </td>
                     {r.gates.slice(0, gateCount).map((g, i) => (
@@ -514,11 +516,11 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                         </span>
                       )}
                     </div>
-                    <CurrentGateChip value={r.currentGate} />
+                    <CurrentGateChip value={r.currentGate} type={type} />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {r.gates.slice(0, gateCount).map((g, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 text-sm text-muted">G{i + 1}<GateStatus value={g} compact /></span>
+                      <span key={i} className="inline-flex items-center gap-1 text-sm text-muted">{step}{i + 1}<GateStatus value={g} compact /></span>
                     ))}
                   </div>
                 </Link>

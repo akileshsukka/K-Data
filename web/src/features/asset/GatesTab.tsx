@@ -4,7 +4,7 @@ import { Perm, type AssetProfile, type FieldDef, type GateDoc, type Proposals, t
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
-import { GateStatus } from "../../components/GateStatus";
+import { GateStatus, gatePrefix } from "../../components/GateStatus";
 import { useToast } from "../../components/Toast";
 import { formatDate, todayDubai } from "../../components/dates";
 import { DocumentList } from "../documents/DocumentList";
@@ -16,7 +16,7 @@ import { usePatchAsset, useSetGateDoc } from "./useAsset";
 const docLabel: Record<GateDoc["status"], string> = { Pending: "Pending", Received: "Received", NotApplicable: "Not Applicable" };
 
 /**
- * G1–G8 in one place: each gate's status, its details and comments, and next to it whether its
+ * G1–G8 (E1–E8 for E&I items) in one place: each gate's status, its details and comments, and next to it whether its
  * formal documentation arrived. A Completed gate always shows its documentation line.
  */
 export function GatesTab({ asset, fields, options, onProposals }: {
@@ -57,7 +57,9 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
   const patch = usePatchAsset(asset.id);
   const statusField = fields.find((f) => f.key === `G${gate}Status`)!;
   const commentField = fields.find((f) => f.key === `G${gate}Comments`)!;
-  const details = fields.filter((f) => f !== statusField && f !== commentField);
+  const step = `${gatePrefix(asset.type)}${gate}`;
+  // The G1/G5/G6 details (bulk liquid drained, mechanical isolation, cleaning method) are process steps: not shown for E&I items.
+  const details = asset.type === "ElectricalInstrument" ? [] : fields.filter((f) => f !== statusField && f !== commentField);
   const status = asset.values[statusField.key];
   const doc = asset.gateDocuments.find((d) => d.gate === gate);
   const canEdit = session.can(statusField.permission) && (asset.isActive || session.can("assets.manage"));
@@ -69,7 +71,7 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
   async function saveStatus(value: string) {
     try {
       const r = await patch.mutateAsync([{ field: statusField.key, from: status ?? null, to: value || null }]);
-      toast(`G${gate} set to ${value || "empty"}`);
+      toast(`${step} set to ${value || "empty"}`);
       onProposals(r.proposals);
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Could not save.", "error");
@@ -85,7 +87,7 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
       if (changes.length > 0) {
         const r = await patch.mutateAsync(changes);
         onProposals(r.proposals);
-        toast(`G${gate} details saved`);
+        toast(`${step} details saved`);
       }
       setEditing(null);
     } catch (err) {
@@ -96,10 +98,10 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
   return (
     <li className="rounded-lg border border-line bg-panel">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <span className="w-10 font-display text-2xl font-bold text-ink">G{gate}</span>
+        <span className="w-10 font-display text-2xl font-bold text-ink">{step}</span>
         <div className="min-w-[11rem]">
           {canEdit ? (
-            <SelectInput value={status ?? ""} disabled={patch.isPending} onChange={(e) => saveStatus(e.target.value)} aria-label={`G${gate} status`} className="mt-0">
+            <SelectInput value={status ?? ""} disabled={patch.isPending} onChange={(e) => saveStatus(e.target.value)} aria-label={`${step} status`} className="mt-0">
               <option value="">Not set</option>
               {(options.GateStatus ?? []).map((o) => <option key={o}>{o}</option>)}
             </SelectInput>
@@ -123,12 +125,12 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
           {[...details, commentField].map((f) =>
             editing ? (
               <label key={f.key} className="block">
-                <span className="text-sm text-muted">{f.label}</span>
+                <span className="text-sm text-muted">{f === commentField ? `${step} Comments` : f.label}</span>
                 <FieldInput field={f} value={editing[f.key] ?? ""} onChange={(v) => setEditing({ ...editing, [f.key]: v })} options={options} />
               </label>
             ) : asset.values[f.key] ? (
               <div key={f.key}>
-                <span className="text-sm text-muted">{f.label}</span>
+                <span className="text-sm text-muted">{f === commentField ? `${step} Comments` : f.label}</span>
                 <p className="whitespace-pre-line">{asset.values[f.key]}</p>
               </div>
             ) : null,
@@ -145,7 +147,7 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
       {gateDocs.length > 0 && (
         <div className="border-t border-line px-4 py-2">
           <span className="text-sm text-muted">Signed documents</span>
-          <DocumentList docs={gateDocs} assetId={asset.id} gate={gate} />
+          <DocumentList docs={gateDocs} assetId={asset.id} gate={gate} step={gatePrefix(asset.type)} />
         </div>
       )}
       {canUpload && <UploadDocumentDialog asset={asset} open={uploading} onClose={() => setUploading(false)} initialGates={[gate]} />}
@@ -171,7 +173,7 @@ function DocumentCell({ asset, gate, doc, completed }: { asset: AssetProfile; ga
         reference: form.reference || null,
         note: doc?.note ?? null,
       });
-      toast(`G${gate} documentation saved`);
+      toast(`${gatePrefix(asset.type)}${gate} documentation saved`);
       setForm(null);
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Could not save.", "error");
