@@ -7,12 +7,13 @@ import { useFields, useOptions, useLineCodes, usePipeSpecs } from "../../app/use
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { TextInput } from "../../components/Field";
-import { CurrentGateChip, gateText } from "../../components/GateStatus";
+import { CurrentGateChip, gatePrefix, gateText } from "../../components/GateStatus";
 import { useToast } from "../../components/Toast";
 import { formatDate, formatDateTime, todayDubai } from "../../components/dates";
 import { FieldSection } from "./FieldSection";
 import { GatesTab } from "./GatesTab";
 import { HistoryList } from "./HistoryList";
+import { ElectricalTestTab } from "./ElectricalTestTab";
 import { ReadingsTab } from "./ReadingsTab";
 import { CategoryCard } from "./CategoryCard";
 import { DocumentsTab } from "../documents/DocumentsTab";
@@ -22,6 +23,7 @@ import { NonStandardBadge } from "../lines/FormatCheckToggle";
 const tabs = [
   { key: "overview", label: "Overview" },
   { key: "gates", label: "Gates" },
+  { key: "electrical", label: "Electrical test" },
   { key: "readings", label: "Readings" },
   { key: "documents", label: "Documents", permission: Perm.documentsView },
   { key: "history", label: "History", permission: Perm.historyView },
@@ -32,10 +34,15 @@ export function AssetPage() {
   const id = useParams().id!;
   const [params, setParams] = useSearchParams();
   const session = useSession();
-  const visibleTabs = tabs.filter((t) => !("permission" in t) || session.can(t.permission));
+  const asset = useAsset(id);
+  // The E7 electrical test: E&I items (where it is activated per motor) and any asset that already requires it.
+  const electrical = asset.data?.type === "ElectricalInstrument" || !!asset.data?.electricalTest?.required;
+  const visibleTabs = tabs
+    .filter((t) => !("permission" in t) || session.can(t.permission))
+    .filter((t) => t.key !== "electrical" || electrical)
+    .map((t) => (t.key === "electrical" ? { ...t, label: `${gatePrefix(asset.data?.type)}7 test` } : t));
   // A tab the role cannot see (e.g. ?tab=history in a shared link) falls back to the overview.
   const tab = visibleTabs.some((t) => t.key === params.get("tab")) ? params.get("tab")! : "overview";
-  const asset = useAsset(id);
   const fields = useFields();
   const options = useOptions();
   const [proposals, setProposals] = useState<Proposals | null>(null);
@@ -91,7 +98,7 @@ export function AssetPage() {
         {tab === "overview" && (
           <div className="grid gap-5 xl:grid-cols-2">
             <div className="space-y-5">
-              <FieldSection title="Identification" fields={section("Identification").map((f) => (f.key === "Tag" && a.type === "Pipeline" ? { ...f, label: "Line number" } : f))} asset={a} options={opts} onProposals={setProposals} />
+              <FieldSection title="Identification" fields={section("Identification").filter((f) => f.key !== "NameplateData" || a.type !== "Pipeline").map((f) => (f.key === "Tag" && a.type === "Pipeline" ? { ...f, label: "Line number" } : f))} asset={a} options={opts} onProposals={setProposals} />
               {a.type === "Pipeline" && (
                 <div>
                   <FieldSection title="Line" fields={section("Line")} asset={a} options={opts} onProposals={setProposals} />
@@ -128,6 +135,7 @@ export function AssetPage() {
           </div>
         )}
         {tab === "gates" && <GatesTab asset={a} fields={defs} options={opts} onProposals={setProposals} />}
+        {tab === "electrical" && <ElectricalTestTab asset={a} />}
         {tab === "readings" && <ReadingsTab asset={a} onProposals={setProposals} />}
         {tab === "documents" && <DocumentsTab asset={a} />}
         {tab === "history" && <AssetHistory id={a.id} type={a.type} />}

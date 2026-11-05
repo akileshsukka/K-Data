@@ -41,8 +41,11 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
 }
 
 /** Downloads a file from the API and hands it to the browser with the server's file name. */
-export async function download(path: string): Promise<string> {
-  const response = await fetch(path, { headers: csrf, credentials: "include" });
+/** Downloads a file. With a body, the request is a POST (e.g. the report of the equipment chosen in a register). */
+export async function download(path: string, body?: unknown): Promise<string> {
+  const response = await fetch(path, body === undefined
+    ? { headers: csrf, credentials: "include" }
+    : { method: "POST", headers: { ...csrf, "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
   if (!response.ok) await read(response);
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);

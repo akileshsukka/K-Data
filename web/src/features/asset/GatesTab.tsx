@@ -120,6 +120,12 @@ function GateRow({ gate, asset, fields, options, onProposals, documents }: {
         )}
       </div>
 
+      {gate === 7 && status === "Completed" && asset.electricalTest?.required && !asset.electricalTest.complete && (
+        <p className="border-t border-line bg-ongoing/8 px-4 py-2 text-sm text-ongoing" role="status">
+          {step} is Completed but the electrical test is not complete ({asset.electricalTest.missing.length} required value{asset.electricalTest.missing.length === 1 ? "" : "s"} missing). Record it in the {step} test tab.
+        </p>
+      )}
+
       {(editing || details.some((f) => asset.values[f.key]) || asset.values[commentField.key]) && (
         <div className="space-y-3 border-t border-line px-4 py-3">
           {[...details, commentField].map((f) =>

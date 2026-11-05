@@ -17,4 +17,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="PresApp.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Client E7 electrical test sheet (empty), filled by the E7 report. -->
+    <EmbeddedResource Include="Excel\Resources\E7_Electrical_Test_Template.xlsx" LogicalName="E7_Electrical_Test_Template.xlsx" />
+  </ItemGroup>
 </Project>

@@ -322,7 +322,25 @@ export interface AssetProfile {
   updatedAtUtc: string;
   dashboardCategory: { id: number; code: string | null; label: string; section: CategorySection } | null;
   lineNumberCheck?: LineNumberCheck | null;
+  electricalTest?: ElectricalTest | null;
 }
+
+/** E7 electrical test of an asset (motors). Values by measure key; ratios (DAR, PI) calculated by the server per block key. */
+export interface ElectricalTest {
+  required: boolean;
+  testedOn: string | null;
+  values: Record<string, number | null>;
+  ratios: Record<string, number | null>;
+  complete: boolean;
+  missing: string[];
+  updatedBy: string;
+  updatedAtUtc: string;
+}
+
+export interface ElectricalMeasure { key: string; label: string; block: string; required: boolean }
+
+/** A block of the client E7 sheet (one colour). The ratio, when there is one, is the second value ÷ the first. */
+export interface ElectricalBlock { key: string; title: string; unit: string | null; required: boolean; measures: ElectricalMeasure[]; ratioLabel: string | null }
 
 export interface Proposals {
   currentGate: string | null;
@@ -411,7 +429,7 @@ export type ImportOutcome = "Applied" | "Derived" | "No change" | "Invalid" | "C
 
 export interface ImportRun {
   id: number;
-  kind: "Update" | "Onboarding";
+  kind: "Update" | "Onboarding" | "ElectricalTest";
   fileName: string;
   unitId: number | null;
   unitName: string | null;

@@ -18,6 +18,7 @@ public static class ExcelEndpoints
     private const string XlsxType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     public sealed record ExcelSettingsDto(int MaxAgeHours);
+    public sealed record ElectricalReportRequest(IReadOnlyList<Guid>? AssetIds);
 
     public static void MapExcelEndpoints(this IEndpointRouteBuilder app)
     {
@@ -63,6 +64,27 @@ public static class ExcelEndpoints
             return await service.PreviewAsync(stream, file.FileName, unitId, user.Identity?.Name ?? "unknown", ct);
         }).RequirePermission(Permissions.ExcelImport).DisableAntiforgery();
 
+        // E7 electrical test sheet: report of the unit and upload of the filled sheet.
+        app.MapGet("/api/units/{unitId:int}/electrical-tests/export", async (int unitId, ElectricalTestWorkbook workbook, CancellationToken ct) =>
+        {
+            var result = await workbook.ExportAsync(unitId, ct);
+            return Results.File(result.Content, XlsxType, result.FileName);
+        }).RequirePermission(Permissions.ExcelExport);
+
+        // The same report for the equipment chosen in the register.
+        app.MapPost("/api/units/{unitId:int}/electrical-tests/export", async (int unitId, ElectricalReportRequest request, ElectricalTestWorkbook workbook, CancellationToken ct) =>
+        {
+            var result = await workbook.ExportAsync(unitId, ct, request.AssetIds ?? []);
+            return Results.File(result.Content, XlsxType, result.FileName);
+        }).RequirePermission(Permissions.ExcelExport);
+
+        app.MapPost("/api/units/{unitId:int}/electrical-tests/import", async (int unitId, IFormFile file, ClaimsPrincipal user, ElectricalTestWorkbook workbook, CancellationToken ct) =>
+        {
+            if (!user.HasPermission(Permissions.GatesEdit)) throw ApiProblem.Forbidden("Your role cannot load electrical tests.");
+            await using var stream = file.OpenReadStream();
+            return await workbook.PreviewAsync(stream, file.FileName, unitId, user.Identity?.Name ?? "unknown", ct);
+        }).RequirePermission(Permissions.ExcelImport).DisableAntiforgery();
+
         app.MapPost("/api/units/{unitId:int}/excel/onboarding", async (int unitId, bool? checkLineFormat, IFormFile file, ClaimsPrincipal user, OnboardingService service, CancellationToken ct) =>
         {
             if (!user.HasPermission(Permissions.AssetsManage)) throw ApiProblem.Forbidden("Only an administrator can load a client list (it creates equipment).");
@@ -76,7 +98,7 @@ public static class ExcelEndpoints
 
         imports.MapGet("/{id:long}", (long id, PresAppDbContext db, CancellationToken ct) => ImportQueries.DetailAsync(db, id, ct));
 
-        imports.MapPost("/{id:long}/apply", async (long id, HttpRequest http, ClaimsPrincipal user, PresAppDbContext db, ExcelImportService excel, OnboardingService onboarding, CancellationToken ct) =>
+        imports.MapPost("/{id:long}/apply", async (long id, HttpRequest http, ClaimsPrincipal user, PresAppDbContext db, ExcelImportService excel, OnboardingService onboarding, ElectricalTestWorkbook electrical, CancellationToken ct) =>
         {
             // Optional body: the choices made in the preview for lines that look like existing ones.
             var request = http.ContentLength > 0 ? await http.ReadFromJsonAsync<ApplyImportRequest>(ct) : null;
@@ -89,6 +111,11 @@ public static class ExcelEndpoints
                 if (await db.ImportRuns.AnyAsync(r => r.Id == id && r.LineFormatCheckOff, ct) && !user.HasPermission(Permissions.LinesNonStandard))
                     throw ApiProblem.Forbidden("This line list was checked with the line number format check off; your role cannot apply it.");
                 return await onboarding.ApplyAsync(id, by, ct, request?.Decisions);
+            }
+            if (kind == ImportKind.ElectricalTest)
+            {
+                if (!user.HasPermission(Permissions.GatesEdit)) throw ApiProblem.Forbidden("Your role cannot load electrical tests.");
+                return await electrical.ApplyAsync(id, by, ct);
             }
             return await excel.ApplyAsync(id, by, ct);
         });

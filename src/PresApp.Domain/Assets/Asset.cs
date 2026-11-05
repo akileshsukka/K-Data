@@ -23,6 +23,14 @@ public class Asset : AuditableEntity, IFieldAudited
     public string? Tag { get; set; }
 
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Nameplate data of the equipment (serial no., type, voltage, power, RPM…), several lines. Kept apart from
+    /// <see cref="Description"/>; it is the DESCRIPTION column of the E7 electrical test sheet.
+    /// </summary>
+    public string? NameplateData { get; set; }
+    public const int NameplateMaxLength = 2000;
+
     public int DisciplineId { get; set; }
     public Discipline Discipline { get; set; } = null!;
     public int UnitId { get; set; }
@@ -39,6 +47,7 @@ public class Asset : AuditableEntity, IFieldAudited
 
     public AssetPreservation? Preservation { get; set; }
     public PipelineDetail? Pipeline { get; set; }
+    public ElectricalTest? ElectricalTest { get; set; }
     public List<GateDocumentation> GateDocuments { get; set; } = [];
     public List<AssetFieldValue> FieldValues { get; set; } = [];
     public List<AssetGroupMember> GroupMemberships { get; set; } = [];

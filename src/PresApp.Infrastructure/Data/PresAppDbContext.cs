@@ -19,6 +19,7 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<AssetPreservation> Preservations => Set<AssetPreservation>();
     public DbSet<GateDocumentation> GateDocuments => Set<GateDocumentation>();
     public DbSet<PipelineDetail> PipelineDetails => Set<PipelineDetail>();
+    public DbSet<ElectricalTest> ElectricalTests => Set<ElectricalTest>();
     public DbSet<FieldDefinition> FieldDefinitions => Set<FieldDefinition>();
     public DbSet<AssetFieldValue> FieldValues => Set<AssetFieldValue>();
     public DbSet<EquipmentIdSequence> EquipmentIdSequences => Set<EquipmentIdSequence>();

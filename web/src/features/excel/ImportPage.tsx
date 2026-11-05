@@ -67,7 +67,7 @@ export function ImportPage() {
   return (
     <div>
       <PageHeader
-        title={run.kind === "Onboarding" ? "Client list" : "Excel upload"}
+        title={run.kind === "Onboarding" ? "Client list" : run.kind === "ElectricalTest" ? "E7 electrical test sheet" : "Excel upload"}
         description={`${run.fileName} · ${run.unitName ?? ""} · uploaded ${formatDateTime(run.uploadedAtUtc)} by ${run.uploadedBy}`}
         actions={
           <>

@@ -135,6 +135,7 @@ public static partial class ExcelColumns
             "currentactivity" => nameof(AssetPreservation.CurrentActivity),
             "assetavailability" => nameof(AssetPreservation.AssetAvailability),
             "priority" => "Priority",
+            "nameplatedata" or "nameplate" or "nameplatedetails" => nameof(Asset.NameplateData),
             "length" or "lengthm" or "linelength" or "linelengthm" => nameof(PipelineDetail.LengthM),
             "pid" or "pidno" or "pidnumber" or "pidref" or "pandid" or "pandidno" => nameof(PipelineDetail.PidNumber),
             _ => null

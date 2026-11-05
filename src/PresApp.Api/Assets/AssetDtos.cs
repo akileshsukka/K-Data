@@ -25,7 +25,14 @@ public sealed record AssetProfile(
     string CurrentGate, string SuggestedCurrentGate, IReadOnlyDictionary<string, string?> Values,
     IReadOnlyList<GateDocDto> GateDocuments, IReadOnlyList<GroupRefDto> Groups,
     DateTime? PreservedAtUtc, string? PreservedBy, string UpdatedBy, DateTime UpdatedAtUtc,
-    AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null);
+    AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null, ElectricalTestDto? ElectricalTest = null);
+
+/// <summary>E7 electrical test of an asset: values by measure key, calculated DAR / PI ratios by block key, required values still missing.</summary>
+public sealed record ElectricalTestDto(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values,
+    IReadOnlyDictionary<string, decimal?> Ratios, bool Complete, IReadOnlyList<string> Missing, string UpdatedBy, DateTime UpdatedAtUtc);
+
+/// <summary>Saves the E7 test. Values: every measure key (null = empty). Expected: UpdatedAtUtc the user saw (null when there was no test yet).</summary>
+public sealed record SaveElectricalTestRequest(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values, DateTime? Expected);
 
 /// <summary>Hold / N/A dashboard category of an asset (template v4).</summary>
 public sealed record AssetCategoryDto(int Id, string? Code, string Label, string Section);

@@ -86,6 +86,9 @@ public static class CatalogEndpoints
             await db.MeasurementTypes.AsNoTracking().Where(m => m.IsActive).OrderBy(m => m.SortOrder)
                 .Select(m => new MeasurementDto(m.Id, m.Key, m.Label, m.UnitOfMeasure, m.Gate, m.EvidenceForGate, m.MinValue, m.MaxValue))
                 .ToListAsync(ct));
+
+        // Layout of the E7 electrical test (blocks of the client sheet, required values, ratios).
+        group.MapGet("/electrical-test", () => Domain.Assets.ElectricalTestSpec.Blocks);
     }
 
     private static void Fill(LineCode c, SaveLineCodeRequest r)

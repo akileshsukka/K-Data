@@ -20,7 +20,7 @@ export function ExcelPage() {
   const session = useSession();
   const navigate = useNavigate();
   const toast = useToast();
-  const [busy, setBusy] = useState<"update" | "onboarding" | null>(null);
+  const [busy, setBusy] = useState<"update" | "onboarding" | "electrical" | null>(null);
   // Line number format check of the client list: on by default, turned back on after every upload.
   const [checkLineFormat, setCheckLineFormat] = useState(true);
   const overview = useQuery({
@@ -28,11 +28,12 @@ export function ExcelPage() {
     queryFn: ({ signal }) => api<UnitExcelOverview>(`/api/units/${unitId}/excel`, { signal }),
   });
 
-  async function send(file: File, kind: "update" | "onboarding") {
+  async function send(file: File, kind: "update" | "onboarding" | "electrical") {
     setBusy(kind);
     try {
-      const path = kind === "update" ? "import" : `onboarding${checkLineFormat ? "" : "?checkLineFormat=false"}`;
-      const detail = await upload<ImportRunDetail>(`/api/units/${unitId}/excel/${path}`, file);
+      const path = kind === "electrical" ? `/api/units/${unitId}/electrical-tests/import`
+        : `/api/units/${unitId}/excel/${kind === "update" ? "import" : `onboarding${checkLineFormat ? "" : "?checkLineFormat=false"}`}`;
+      const detail = await upload<ImportRunDetail>(path, file);
       if (kind === "onboarding") setCheckLineFormat(true);
       navigate(`/imports/${detail.run.id}`);
     } catch (e) {
@@ -136,6 +137,22 @@ export function ExcelPage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="mt-6 rounded-lg border border-line bg-panel p-5">
+        <h2 className="text-xl font-semibold">E7 electrical tests (motors)</h2>
+        <p className="mt-2 max-w-3xl text-muted">
+          The client E7 test sheet with the motors that require the test: winding resistance, insulation resistance, DAR and the optional PI. Ratios are calculated.
+          Uploading the filled sheet matches rows by ITEM TAG; filled cells set the value, empty cells never clear anything, and DESCRIPTION fills the Nameplate Data.
+        </p>
+        <div className="mt-4 flex flex-wrap items-start gap-6">
+          <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} label="Download E7 test report" />
+          {canImport && session.can(Perm.gatesEdit) && (
+            <div className="min-w-72 flex-1">
+              <FileDrop busy={busy === "electrical"} label="Upload a filled E7 sheet" onFile={(f) => send(f, "electrical")} hint="You will see every change before anything is saved." />
+            </div>
+          )}
+        </div>
       </section>
 
       {session.can(Perm.assetsManage) && canImport && (

@@ -94,6 +94,7 @@ public static class PreservationFields
             new("Code", "Equipment ID", SectionIdentity, FieldKind.ReadOnly, FieldOwner.Asset, null, Asset.CodeMaxLength, Permissions.AssetsManage, BulkEditable: false),
             new("Tag", "Equipment Tag", SectionIdentity, FieldKind.Text, FieldOwner.Asset, null, 55, Permissions.AssetsEdit, BulkEditable: false),
             new("Description", "Description", SectionIdentity, FieldKind.Text, FieldOwner.Asset, null, 255, Permissions.AssetsEdit, BulkEditable: false),
+            new(nameof(Asset.NameplateData), "Nameplate Data", SectionIdentity, FieldKind.LongText, FieldOwner.Asset, null, Asset.NameplateMaxLength, Permissions.AssetsEdit, BulkEditable: false),
             new("Priority", "Priority", SectionIdentity, FieldKind.Choice, FieldOwner.Asset, OptionSetKeys.Priority, 40, Permissions.AssetsEdit),
 
             // Line (pipelines only): size, spec, service and insulation come from the line number
@@ -156,8 +157,10 @@ public static class PreservationFields
     }
 
     /// <summary>Display label for a ChangeLog field name, falling back to the raw name.</summary>
-    public static string LabelOf(string field) => Find(field)?.Label ?? field switch
+    public static string LabelOf(string field) => Find(field)?.Label ?? ElectricalTestSpec.Find(field)?.Label ?? field switch
     {
+        nameof(ElectricalTest.Required) => "Electrical test (E7) required",
+        nameof(ElectricalTest.TestedOn) => "Electrical test date",
         "(created)" => "Created",
         nameof(Asset.IsActive) => "Active",
         nameof(Asset.DisciplineId) => "Discipline",

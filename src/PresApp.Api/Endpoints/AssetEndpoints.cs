@@ -37,6 +37,9 @@ public static class AssetEndpoints
         app.MapPut("/api/assets/{id:guid}/dashboard-category", (Guid id, SetCategoryRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.SetCategoryAsync(id, request, user, ct)).RequirePermission(Permissions.AssetsEdit);
 
+        app.MapPut("/api/assets/{id:guid}/electrical-test", (Guid id, SaveElectricalTestRequest request, ClaimsPrincipal user, ElectricalTestService s, CancellationToken ct) =>
+            s.SaveAsync(id, request, user, ct)).RequirePermission(Permissions.GatesEdit);
+
         app.MapPost("/api/assets/{id:guid}/current-gate", (Guid id, SetCurrentGateRequest request, AssetEditor e, CancellationToken ct) =>
             e.SetCurrentGateAsync(id, request, ct)).RequirePermission(Permissions.GatesEdit);
 

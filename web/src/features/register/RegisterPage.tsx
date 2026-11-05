@@ -48,15 +48,17 @@ interface Filters {
   numberCheck: string;
   /** Dashboard figure the register was opened from (tags, preserved, ready, hold, na, available, category-{id}). */
   card: string;
+  /** Tags pasted from Excel (lower case, comma separated): only those rows are shown. */
+  tags: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docsPending: false, inactive: false, group: "", card: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docsPending: false, inactive: false, group: "", card: "", tags: "" };
 
 /** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  numberCheck: "number", docsPending: "docs", inactive: "inactive", group: "group", card: "card",
+  numberCheck: "number", docsPending: "docs", inactive: "inactive", group: "group", card: "card", tags: "tags",
 };
 
 /** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
@@ -179,6 +181,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const step = gatePrefix(type);
 
   const lines = type === "Pipeline";
+  const tagSet = useMemo(() => new Set(f.tags.split(",").filter(Boolean)), [f.tags]);
+  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => (r.tag ?? "").toLowerCase() === t || r.code.toLowerCase() === t));
   const filtered = useMemo(
     () =>
       all.filter(
@@ -197,14 +201,16 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
           (!f.docsPending || r.documentsPending > 0) &&
           (!f.card || !!cardIds?.has(r.id)) &&
+          (tagSet.size === 0 || tagSet.has((r.tag ?? "").toLowerCase()) || tagSet.has(r.code.toLowerCase())) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
-    [all, text, f, gateCount, codes, cardIds],
+    [all, text, f, gateCount, codes, cardIds, tagSet],
   );
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
-  const canBulk = session.can(Perm.bulkEdit) || session.can(Perm.groupsManage);
+  // Rows can be selected for bulk edit, groups and (E&I register) the E7 report of the selected motors.
+  const canBulk = session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
   const groupCodes = [...new Set(all.flatMap((r) => r.groups ?? []))].sort();
   const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
 
@@ -240,6 +246,10 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 Bulk edit {selected.size} selected
               </Button>
             )}
+            {session.can(Perm.excelExport) && type === "ElectricalInstrument" && selected.size > 0 && (
+              <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} body={{ assetIds: [...selected] }}
+                label={`E7 report (${selected.size} selected)`} />
+            )}
             {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
             {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping label="Download line list" />}
             {seesNumberCheck && session.can(Perm.assetsEdit) && all.some((r) => r.line?.numberCheck?.nonStandard) && (
@@ -264,7 +274,10 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
       {lines && <PipingSummaryCards unitId={unitId} />}
       {lines && <PipingNotes unitId={unitId} />}
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(19rem,1.6fr)_minmax(8rem,1fr)]">
+      {/* With 8 gates (E&I, or G5–G8 in use) the gate buttons need about 21rem: that block gets two columns until the screen is wide enough. */}
+      <div className={`mt-5 grid gap-2 sm:grid-cols-2 ${gateCount > 4
+        ? "lg:grid-cols-3 2xl:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(21rem,2fr)_minmax(8rem,1fr)]"
+        : "lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(19rem,1.6fr)_minmax(8rem,1fr)]"}`}>
         <TextInput type="search" placeholder={lines ? "Search line number, ID, spec, P&ID, service or remarks" : "Search tag, ID, description or remarks"} value={f.text} onChange={(e) => set("text", e.target.value)} aria-label="Search" className="mt-0" />
         <SelectInput value={f.discipline} onChange={(e) => set("discipline", e.target.value)} aria-label="Discipline" className="mt-0">
           <option value="">All disciplines</option>
@@ -274,7 +287,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           <option value="">Any Current Gate</option>
           {distinct((r) => r.currentGate).map((d) => <option key={d} value={d}>{gateText(d, type)}</option>)}
         </SelectInput>
-        <div className="flex flex-wrap gap-2">
+        <div className={`flex min-w-0 flex-wrap gap-2 ${gateCount > 4 ? "sm:col-span-2 2xl:col-span-1" : ""}`}>
           <div role="group" aria-label="Gates (several = all must match)" title="Choose one or more gates. With several, every chosen gate must have the status." className="inline-flex shrink-0 overflow-hidden rounded-md border border-line">
             {Array.from({ length: gateCount }, (_, i) => i + 1).map((g) => (
               <button
@@ -366,6 +379,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             )}
           </>
         )}
+        <TagListFilter value={f.tags} onChange={(v) => set("tags", v)} />
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" className="size-4 accent-violet" checked={f.docsPending} onChange={(e) => set("docsPending", e.target.checked)} />
           Documentation pending
@@ -382,6 +396,13 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             <p className="font-semibold text-ink">
               {active === 1 ? "1 filter applied" : `${active} filters applied`} · showing {filtered.length} of {all.length}
             </p>
+            {tagSet.size > 0 && (
+              <p className="mt-0.5 text-sm text-muted">
+                Pasted tags: {tagSet.size - tagsNotFound.length} of {tagSet.size} found
+                {tagsNotFound.length > 0 && <> · <span className="text-hold">not found: {tagsNotFound.slice(0, 15).join(", ").toUpperCase()}{tagsNotFound.length > 15 ? ` and ${tagsNotFound.length - 15} more` : ""}</span></>}
+                {" · "}<button type="button" className="font-semibold text-violet" onClick={() => set("tags", "")}>Remove this filter</button>
+              </p>
+            )}
             {f.card && (
               <p className="mt-0.5 text-sm text-muted">
                 From the dashboard: <span className="font-semibold text-ink">{card.data?.label ?? (card.isError ? "figure not found" : "loading…")}</span>
@@ -544,4 +565,41 @@ export function gateMatch(r: RegisterRow, gates: number[], status: string, gateC
   const test = (v: string | null | undefined) => (!status ? !!v : status === "(empty)" ? !v : v === status);
   if (chosen.length === 0) return r.gates.slice(0, gateCount).some(test);
   return chosen.every((g) => test(r.gates[g - 1]));
+}
+
+/**
+ * Filter by a list of tags pasted from Excel (one per line, or separated by commas / semicolons), like the bulk edit.
+ * Matches the tag or the Equipment ID, case ignored. Then "select all" takes exactly those rows.
+ */
+function TagListFilter({ value, onChange }: { value: string; onChange: (tags: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const count = value ? value.split(",").length : 0;
+  function apply() {
+    const tags = [...new Set(text.split(/[\n\r,;\t]+/).map((t) => t.trim().toLowerCase()).filter(Boolean))];
+    onChange(tags.join(","));
+    setOpen(false);
+    setText("");
+  }
+  if (!open) {
+    return (
+      <Button variant="secondary" onClick={() => setOpen(true)} className="min-h-10">
+        {count > 0 ? `Pasted tags (${count})` : "Paste tags"}
+      </Button>
+    );
+  }
+  return (
+    <div className="w-full rounded-lg border border-line bg-panel p-3">
+      <label className="block">
+        <span className="text-sm font-semibold text-ink">Tags to show, one per line (paste a column from Excel)</span>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} autoFocus placeholder={"39-EM-102-01A\n39-EM-102-01B"}
+          className="mt-1 block w-full rounded-md border border-line bg-panel px-3 py-2 text-[15px] focus:border-violet focus:outline-none" />
+      </label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button disabled={!text.trim()} onClick={apply}>Filter by these tags</Button>
+        {count > 0 && <Button variant="secondary" onClick={() => { onChange(""); setOpen(false); }}>Remove tag filter</Button>}
+        <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </div>
+  );
 }

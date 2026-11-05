@@ -188,7 +188,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
 
         // ---- current data
         var ids = rows.Select(r => r.Base.Key).ToList();
-        var query = db.Assets.Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.GateDocuments).Where(a => ids.Contains(a.Id));
+        var query = db.Assets.Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.GateDocuments).Include(a => a.ElectricalTest).Where(a => ids.Contains(a.Id));
         var assets = await (tracking ? query : query.AsNoTracking()).ToDictionaryAsync(a => a.Id, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var evidence = (await db.Readings.AsNoTracking()
@@ -334,6 +334,16 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
             if (before.N2BlanketedDate is null && p.N2BlanketedDate is not null)
                 changes.Add(Change(nameof(AssetPreservation.N2BlanketedDate), ImportOutcome.Derived, "G4 was completed.", newValue: FieldValues.Format(p.N2BlanketedDate)));
             AssetEditor.EnsureDocumentRows(asset);
+
+            // ---- step 7 of an asset that requires the electrical test: completed without a complete test
+            var step = electrical ? "E" : "G";
+            if (asset.ElectricalTest is { Required: true } test && !ElectricalTestSpec.IsComplete(test)
+                && applied.FirstOrDefault(a => a.Field.Key == "G7Status") is { Field: not null } g7 && AssetPreservation.IsCompleted(g7.NewText))
+            {
+                changes.Add(Change(g7.Field.Key, ImportOutcome.Warning,
+                    $"{step}7 completed without a complete electrical test ({ElectricalTestSpec.Missing(test).Count()} required values missing). Record the test in the app or load the E7 sheet.",
+                    newValue: g7.NewText));
+            }
 
             // ---- gate evidence (dew point, O2, N2 readings of static and rotating equipment; E&I steps are reported by status only)
             if (electrical) continue;

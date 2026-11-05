@@ -15,6 +15,7 @@ internal sealed class AssetConfiguration : IEntityTypeConfiguration<Asset>
         b.Property(x => x.Code).HasMaxLength(Asset.CodeMaxLength).IsRequired();
         b.Property(x => x.Tag).HasMaxLength(55);
         b.Property(x => x.Description).HasMaxLength(255);
+        b.Property(x => x.NameplateData).HasMaxLength(Asset.NameplateMaxLength);
         b.Property(x => x.Priority).HasMaxLength(40);
         b.Property(x => x.MigrationNotes).HasMaxLength(4000);
 
@@ -27,6 +28,18 @@ internal sealed class AssetConfiguration : IEntityTypeConfiguration<Asset>
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Preservation).WithOne(x => x.Asset).HasForeignKey<AssetPreservation>(x => x.AssetId);
         b.HasOne(x => x.Pipeline).WithOne(x => x.Asset).HasForeignKey<PipelineDetail>(x => x.AssetId);
+        b.HasOne(x => x.ElectricalTest).WithOne(x => x.Asset).HasForeignKey<ElectricalTest>(x => x.AssetId);
+    }
+}
+
+internal sealed class ElectricalTestConfiguration : IEntityTypeConfiguration<ElectricalTest>
+{
+    public void Configure(EntityTypeBuilder<ElectricalTest> b)
+    {
+        b.ToTable("ElectricalTest");
+        b.HasKey(x => x.AssetId);
+        foreach (var m in ElectricalTestSpec.Measures) b.Property(m.Key).HasPrecision(18, 4);
+        b.HasIndex(x => x.Required);
     }
 }
 

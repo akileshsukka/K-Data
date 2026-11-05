@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { AssetType, CustomField, Discipline, FieldDef, LineCode, LineCodeKind, Measurement, OptionSet, PipeSpec, Plant, Unit } from "../api/types";
+import type { AssetType, CustomField, ElectricalBlock, Discipline, FieldDef, LineCode, LineCodeKind, Measurement, OptionSet, PipeSpec, Plant, Unit } from "../api/types";
 
 const LONG = 30 * 60_000;
 
@@ -91,3 +91,8 @@ export function useCustomFields(type?: AssetType, all = false) {
   });
 }
 
+
+/** Layout of the E7 electrical test sheet (blocks, required values, ratios). */
+export function useElectricalTestSpec() {
+  return useQuery({ queryKey: ["catalog", "electrical-test"], queryFn: ({ signal }) => api<ElectricalBlock[]>("/api/catalog/electrical-test", { signal }), staleTime: Infinity });
+}

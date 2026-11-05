@@ -8,7 +8,10 @@ public enum ImportKind
     Update = 0,
 
     /// <summary>A client master list used to create or complete assets.</summary>
-    Onboarding = 1
+    Onboarding = 1,
+
+    /// <summary>The E7 electrical test sheet of a unit (one row per motor), matched by ITEM TAG.</summary>
+    ElectricalTest = 2
 }
 
 public enum ImportStatus

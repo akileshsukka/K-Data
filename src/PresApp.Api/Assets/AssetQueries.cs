@@ -65,6 +65,7 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
         var query = db.Assets
             .Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory)
             .Include(a => a.Pipeline)
+            .Include(a => a.ElectricalTest)
             .Include(a => a.Discipline)
             .Include(a => a.Unit).ThenInclude(u => u.Plant)
             .Include(a => a.GateDocuments)
@@ -107,8 +108,15 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
             p.DashboardCategory is { } c
                 ? new AssetCategoryDto(c.Id, c.Code, c.Label, Reporting.UnitDashboard.SectionKey(c.Section))
                 : null,
-            showLineCheck && a.Pipeline is { } line ? new LineNumberCheck(line.NonStandardNumber, line.NumberNote) : null);
+            showLineCheck && a.Pipeline is { } line ? new LineNumberCheck(line.NonStandardNumber, line.NumberNote) : null,
+            a.ElectricalTest is { } test ? ToDto(test) : null);
     }
+
+    internal static ElectricalTestDto ToDto(ElectricalTest t) => new(
+        t.Required, t.TestedOn,
+        ElectricalTestSpec.Measures.ToDictionary(m => m.Key, m => ElectricalTestSpec.Get(t, m.Key)),
+        ElectricalTestSpec.Blocks.Where(b => b.RatioLabel is not null).ToDictionary(b => b.Key, b => ElectricalTestSpec.Ratio(t, b)),
+        ElectricalTestSpec.IsComplete(t), ElectricalTestSpec.Missing(t).Select(m => m.Key).ToList(), t.UpdatedBy, t.UpdatedAtUtc);
 
     public async Task<List<SearchHit>> SearchAsync(string q, int? unitId, AssetType? type, int take, CancellationToken ct)
     {
