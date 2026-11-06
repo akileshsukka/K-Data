@@ -304,13 +304,12 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             registered.Add(rules.Read(a.Tag), a);
         var inList = new LineMatcher<string>();
 
-        var codes = (await db.LineCodes.AsNoTracking().Where(c => c.IsActive).Select(c => new { c.Kind, c.Code }).ToListAsync(ct))
-            .Select(c => (c.Kind, c.Code)).ToHashSet();
+        var codes = await LineCodeMeanings.LoadAsync(db, ct);
         var specs = await PipeSpecLookup.LoadAsync(db, ct);
         string? Unknown(LineNumberReading p)
         {
             var notes = new List<string>();
-            if (p.Service is not null && !codes.Contains((LineCodeKind.Service, p.Service))) notes.Add($"Service {p.Service} is not in the line codes.");
+            if (p.Service is not null && codes.Service(p.Service, unit.Id) is null) notes.Add($"Service {p.Service} is not in the line codes for {unit.Name}.");
             if (p.Spec is not null && !specs.Has(p.Spec)) notes.Add($"Pipe spec {p.Spec} is not in the pipe spec list: rating, face and gasket stay empty until it is added.");
             return notes.Count == 0 ? null : string.Join(" ", notes);
         }

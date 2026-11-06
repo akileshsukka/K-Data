@@ -91,7 +91,9 @@ internal sealed class LineCodeConfiguration : IEntityTypeConfiguration<LineCode>
         b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.Code).HasMaxLength(LineCode.CodeLength).IsRequired();
         b.Property(x => x.Description).HasMaxLength(LineCode.DescriptionLength).IsRequired();
-        b.HasIndex(x => new { x.Kind, x.Code }).IsUnique();
+        b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        // One general meaning per code (no filter: SQL Server then counts the NULL units as equal) and one exception per unit.
+        b.HasIndex(x => new { x.Kind, x.Code, x.UnitId }).IsUnique().HasFilter(null);
     }
 }
 

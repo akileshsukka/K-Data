@@ -39,8 +39,8 @@ export function NewAssetPage() {
   const isLine = type === "Pipeline";
   const catalogue = {
     isSpec: (c: string) => !!specs.find(c),
-    isInsulation: (c: string) => !!codes.describe("Insulation", c),
-    isService: (c: string) => !!codes.describe("Service", c),
+    isInsulation: (c: string) => !!codes.describe("Insulation", c, unitId),
+    isService: (c: string) => !!codes.describe("Service", c, unitId),
   };
   const reading = isLine && form.tag.trim() ? readLineNumber(form.tag, catalogue) : null;
   // With the check on only a standard number is accepted; with it off, unit and sequence are enough.
@@ -111,7 +111,7 @@ export function NewAssetPage() {
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
                       <Part label="Size" value={formatSize(parts.sizeIn) || "—"} meaning={parts.sizeIn === null ? "Not read: stays empty" : undefined} />
                       <Part label="Pipe spec" value={parts.spec ?? "—"} meaning={parts.spec === null ? "Not read: stays empty" : specs.find(parts.spec) ? [specs.find(parts.spec)!.pressureClass, specs.find(parts.spec)!.flangeType, specs.find(parts.spec)!.gasket].filter(Boolean).join(" · ") || undefined : "Not in the pipe spec list"} />
-                      <Part label="Service" value={parts.service ?? "—"} meaning={parts.service === null ? "Not read: stays empty" : codes.describe("Service", parts.service) ?? "Not in the line codes"} />
+                      <Part label="Service" value={parts.service ?? "—"} meaning={parts.service === null ? "Not read: stays empty" : codes.describe("Service", parts.service, unitId) ?? "Not in the line codes"} />
                     </dl>
                     {!parts.standard && <p className="mt-2 text-sm text-ongoing">Non-standard line number: {readingNote(parts)}. It will be marked so it can be found and completed later.</p>}
                   </>

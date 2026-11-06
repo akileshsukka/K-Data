@@ -32,8 +32,7 @@ public sealed class PipingSummaryService(PresAppDbContext db)
                 .Select(v => new { v.AssetId, v.FieldDefinitionId, v.ValueText }).ToListAsync(ct))
             .ToLookup(v => v.AssetId);
         string? Value(Guid asset, string key) => defs.TryGetValue(key, out var d) ? values[asset].FirstOrDefault(v => v.FieldDefinitionId == d.Id)?.ValueText : null;
-        var codes = await db.LineCodes.AsNoTracking().Where(c => c.IsActive && c.Kind == LineCodeKind.Service)
-            .ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct);
+        var codes = await LineCodeMeanings.LoadAsync(db, ct);
 
         var rows = lines.Select(l =>
         {
@@ -71,7 +70,7 @@ public sealed class PipingSummaryService(PresAppDbContext db)
             rows.Count(r => r.Cleaning is null),
             cleaningRows,
             rows.GroupBy(r => r.Service).OrderBy(g => g.Key, StringComparer.Ordinal)
-                .Select(g => new PipingServiceRow(g.Key, codes.GetValueOrDefault(g.Key), g.Count(), g.Count(r => r.Walkdown), g.Count(r => r.Drained),
+                .Select(g => new PipingServiceRow(g.Key, codes.Service(g.Key, unitId), g.Count(), g.Count(r => r.Walkdown), g.Count(r => r.Drained),
                     g.Count(r => r.Inspected), g.Count(r => r.InScope), g.Count(r => r.Cleaned && r.InScope)))
                 .ToList());
     }

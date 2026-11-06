@@ -180,7 +180,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
 
     private async Task SeedLineCodesAsync(CancellationToken ct)
     {
-        var existing = (await db.LineCodes.Select(c => new { c.Kind, c.Code }).ToListAsync(ct)).Select(c => (c.Kind, c.Code)).ToHashSet();
+        var existing = (await db.LineCodes.Where(c => c.UnitId == null).Select(c => new { c.Kind, c.Code }).ToListAsync(ct)).Select(c => (c.Kind, c.Code)).ToHashSet();
         foreach (var c in SeedData.LineCodes.Where(c => !existing.Contains((c.Kind, c.Code))))
             db.LineCodes.Add(new LineCode { Kind = c.Kind, Code = c.Code, Description = c.Description });
     }

@@ -2,9 +2,9 @@ import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { LineCode, LineCodeKind } from "../../api/types";
-import { useLineCodes } from "../../app/useCatalog";
+import { useLineCodes, usePlants } from "../../app/useCatalog";
 import { Button } from "../../components/Button";
-import { TextInput } from "../../components/Field";
+import { SelectInput, TextInput } from "../../components/Field";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { AdminTabs } from "./AdminTabs";
@@ -21,12 +21,12 @@ export function LineCodesPage() {
   const [search, setSearch] = useState("");
   const current = kinds.find((k) => k.key === kind)!;
   const q = search.trim().toLowerCase();
-  const rows = book.all.filter((c) => c.kind === kind && (!q || `${c.code} ${c.description}`.toLowerCase().includes(q)));
+  const rows = book.all.filter((c) => c.kind === kind && (!q || `${c.code} ${c.description} ${c.unitName ?? ""}`.toLowerCase().includes(q)));
 
   return (
     <div>
       <AdminTabs />
-      <PageHeader title="Line codes" description="Service designations and insulation codes of the line numbers (client line numbering standard). The registers and the line checks show these meanings; a code not in the list is flagged, never guessed." />
+      <PageHeader title="Line codes" description="Service designations and insulation codes of the line numbers (client line numbering standard). The registers and the line checks show these meanings; a code not in the list is flagged, never guessed. A code means the same in every unit unless a unit has its own meaning for it: add the code again and choose that unit." />
       <div className={`mt-5 flex-wrap gap-2 ${kinds.length > 1 ? "flex" : "hidden"}`} role="tablist">
         {kinds.map((k) => (
           <button key={k.key} type="button" role="tab" aria-selected={kind === k.key} onClick={() => setKind(k.key)}
@@ -54,9 +54,9 @@ function useSave() {
   const client = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (c: { id?: number; kind: LineCodeKind; code: string; description: string; isActive: boolean }) =>
+    mutationFn: (c: { id?: number; kind: LineCodeKind; code: string; description: string; isActive: boolean; unitId: number | null }) =>
       api<LineCode>(c.id ? `/api/line-codes/${c.id}` : "/api/line-codes", { method: c.id ? "PUT" : "POST", body: c }),
-    onSuccess: (c) => { client.invalidateQueries({ queryKey: ["catalog", "line-codes"] }); toast(`${c.code} saved`); },
+    onSuccess: (c) => { client.invalidateQueries({ queryKey: ["catalog", "line-codes"] }); toast(`${c.code}${c.unitName ? ` (${c.unitName})` : ""} saved`); },
     onError: (e) => toast(e.message, "error"),
   });
 }
@@ -65,9 +65,11 @@ function AddCode({ kind }: { kind: LineCodeKind }) {
   const save = useSave();
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
+  const [unitId, setUnitId] = useState("");
+  const plants = usePlants();
   function submit(e: FormEvent) {
     e.preventDefault();
-    save.mutate({ kind, code, description, isActive: true }, { onSuccess: () => { setCode(""); setDescription(""); } });
+    save.mutate({ kind, code, description, isActive: true, unitId: unitId ? Number(unitId) : null }, { onSuccess: () => { setCode(""); setDescription(""); setUnitId(""); } });
   }
   return (
     <form onSubmit={submit} className="mt-4 flex max-w-3xl flex-wrap items-end gap-2">
@@ -78,6 +80,17 @@ function AddCode({ kind }: { kind: LineCodeKind }) {
       <label className="min-w-[14rem] flex-1">
         <span className="text-sm font-semibold text-ink">Meaning</span>
         <TextInput required maxLength={120} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </label>
+      <label className="w-52">
+        <span className="text-sm font-semibold text-ink">Applies to</span>
+        <SelectInput value={unitId} onChange={(e) => setUnitId(e.target.value)}>
+          <option value="">All units (general)</option>
+          {(plants.data ?? []).map((p) => (
+            <optgroup key={p.id} label={p.name}>
+              {p.units.map((u) => <option key={u.id} value={u.id}>Only {u.name}</option>)}
+            </optgroup>
+          ))}
+        </SelectInput>
       </label>
       <Button type="submit" busy={save.isPending}>Add code</Button>
     </form>
@@ -91,6 +104,10 @@ function CodeRow({ code }: { code: LineCode }) {
   return (
     <li className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 ${code.isActive ? "" : "opacity-60"}`}>
       <span className="w-16 font-mono font-semibold text-ink">{code.code}</span>
+      <span className={`w-28 text-sm ${code.unitId ? "font-semibold text-violet" : "text-muted"}`}
+        title={code.unitId ? `Replaces the general meaning for the lines of ${code.unitName}` : "Applies to every unit without its own meaning"}>
+        {code.unitName ? `Only ${code.unitName}` : "All units"}
+      </span>
       {editing ? (
         <form className="flex min-w-0 flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); save.mutate({ ...code, description: text }, { onSuccess: () => setEditing(false) }); }}>
           <TextInput autoFocus maxLength={120} value={text} onChange={(e) => setText(e.target.value)} className="mt-0" aria-label={`Meaning of ${code.code}`} />

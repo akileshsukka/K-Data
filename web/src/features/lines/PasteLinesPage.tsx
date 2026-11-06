@@ -147,7 +147,7 @@ export function PasteLinesPage() {
                         <td className="border-b border-line px-3 py-2">{r.pipeSpec}</td>
                         <td className="border-b border-line px-3 py-2 whitespace-nowrap">{r.pressureClass}</td>
                         <td className="border-b border-line px-3 py-2 whitespace-nowrap">{r.flangeType}</td>
-                        <td className="max-w-[12rem] border-b border-line px-3 py-2"><CodeMeaning code={r.service} meaning={codes.describe("Service", r.service)} /></td>
+                        <td className="max-w-[12rem] border-b border-line px-3 py-2"><CodeMeaning code={r.service} meaning={codes.describe("Service", r.service, unitId)} /></td>
                         <td className="border-b border-line px-3 py-2 text-right tabular-nums">{r.lengthM ?? ""}</td>
                         <td className="border-b border-line px-3 py-2">
                           <Outcome outcome={r.outcome} />

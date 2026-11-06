@@ -26,8 +26,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
                 .Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline).ToListAsync(ct))
             .OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance).ToList();
         var defs = await LoadFixedFieldsAsync(db, tracking: false, ct);
-        var codes = await db.LineCodes.AsNoTracking().Where(c => c.IsActive && c.Kind == LineCodeKind.Service)
-            .ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct);
+        var codes = await Piping.LineCodeMeanings.LoadAsync(db, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var notes = (await db.PipingNotes.AsNoTracking().Where(n => n.UnitId == unitId && n.IsActive).ToListAsync(ct))
             .ToDictionary(n => Piping.PipingNoteService.Key(n.NoteDate), n => n.Text);
@@ -74,7 +73,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
                     case PipingRole.Serial: cell.Value = i + 1; break;
                     case PipingRole.Tag: cell.SetValue(a.Tag ?? a.Code); break;
                     case PipingRole.ProcessCode: cell.SetValue(service ?? ""); break;
-                    case PipingRole.ProcessDescription: cell.SetValue(service is not null && codes.TryGetValue(service, out var d) ? d.ToUpperInvariant() : ""); break;
+                    case PipingRole.ProcessDescription: cell.SetValue(codes.Service(service, unitId)?.ToUpperInvariant() ?? ""); break;
                     case PipingRole.N2Blanket: cell.SetValue(PipingLayout.N2Blanket(a) ?? ""); break;
                     default:
                         cell.Style.NumberFormat.Format = "@";

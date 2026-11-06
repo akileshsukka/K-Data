@@ -846,9 +846,14 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<int?>("UnitId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Kind", "Code")
+                    b.HasIndex("UnitId");
+
+                    b.HasIndex("Kind", "Code", "UnitId")
                         .IsUnique();
 
                     b.ToTable("LineCode", (string)null);
@@ -2235,6 +2240,16 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Catalog.LineCode", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Unit");
                 });
 
             modelBuilder.Entity("PresApp.Domain.Catalog.OptionValue", b =>

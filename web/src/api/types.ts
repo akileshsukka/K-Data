@@ -263,6 +263,9 @@ export interface LineCode {
   code: string;
   description: string;
   isActive: boolean;
+  /** Null for the general meaning; a unit for an exception that applies only to the lines of that unit. */
+  unitId: number | null;
+  unitName: string | null;
 }
 
 export interface BulkLinesResult {

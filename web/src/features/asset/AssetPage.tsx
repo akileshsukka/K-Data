@@ -103,7 +103,7 @@ export function AssetPage() {
                 <div>
                   <FieldSection title="Line" fields={section("Line")} asset={a} options={opts} onProposals={setProposals} />
                   <SpecDetails spec={a.values.PipeSpec} />
-                  <LineMeaning service={a.values.Service} />
+                  <LineMeaning service={a.values.Service} unitId={a.unit.id} />
                 </div>
               )}
               <FieldSection title="Status" fields={section("Status")} asset={a} options={opts} onProposals={setProposals} />
@@ -283,12 +283,12 @@ function SpecDetails({ spec }: { spec: string | null | undefined }) {
 }
 
 /** Meaning of the service code (Admin → Line codes). */
-function LineMeaning({ service }: { service: string | null | undefined }) {
+function LineMeaning({ service, unitId }: { service: string | null | undefined; unitId: number }) {
   const codes = useLineCodes();
   if (!service) return null;
   return (
     <p className="mt-2 px-1 text-sm text-muted">
-      <strong className="text-ink">{service}</strong>: {codes.describe("Service", service) ?? "not in the line codes"}
+      <strong className="text-ink">{service}</strong>: {codes.describe("Service", service, unitId) ?? "not in the line codes"}
     </p>
   );
 }

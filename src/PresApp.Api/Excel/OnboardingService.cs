@@ -258,9 +258,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         if (rules is not null)
             foreach (var a in assets.Where(a => a.Type == AssetType.Pipeline)) byLine.Add(rules.Read(a.Tag), a);
         var disciplines = await db.Disciplines.AsNoTracking().Where(d => d.IsActive).ToListAsync(ct);
-        var lineCodes = lines
-            ? await db.LineCodes.AsNoTracking().Where(c => c.IsActive && c.Kind == LineCodeKind.Service).ToDictionaryAsync(c => c.Code, c => c.Description, StringComparer.OrdinalIgnoreCase, ct)
-            : new Dictionary<string, string>();
+        var lineCodes = await LineCodeMeanings.LoadAsync(db, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
         var today = SiteClock.Today(clock);
         var groupTypes = await db.GroupTypes.AsNoTracking().Where(t => t.IsActive).ToDictionaryAsync(t => t.Name, t => t.Id, StringComparer.OrdinalIgnoreCase, ct);
@@ -399,7 +397,7 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
             if (lines && row.ProcessCode is { } listCode && LineNumber.Parse(row.Tag) is { } numberParts && !string.Equals(listCode, numberParts.Service, StringComparison.OrdinalIgnoreCase))
             {
                 changes.Add(Change(asset, "Process Code", ImportOutcome.Warning,
-                    $"The list says {listCode}, but the line number says {numberParts.Service}{(lineCodes.GetValueOrDefault(numberParts.Service) is { } meaning ? $" ({meaning})" : "")}. K Data keeps {numberParts.Service}, the code of the line number.",
+                    $"The list says {listCode}, but the line number says {numberParts.Service}{(lineCodes.Service(numberParts.Service, unitId) is { } meaning ? $" ({meaning})" : "")}. K Data keeps {numberParts.Service}, the code of the line number.",
                     listCode, listCode, numberParts.Service));
             }
 

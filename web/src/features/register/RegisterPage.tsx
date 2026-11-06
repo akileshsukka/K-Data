@@ -187,7 +187,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     () =>
       all.filter(
         (r) =>
-          (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service) ?? ""}`.toLowerCase().includes(text)) &&
+          (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service, unitId) ?? ""}`.toLowerCase().includes(text)) &&
           (!f.discipline || r.discipline === f.discipline) &&
           (!f.currentGate || r.currentGate === f.currentGate) &&
           gateMatch(r, f.gates, f.gateStatus, gateCount) &&
@@ -483,7 +483,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     </td>
                     {lines ? (
                       <>
-                        <td className="max-w-[14rem] border-b border-line px-3 py-2"><CodeMeaning code={r.line?.service} meaning={codes.describe("Service", r.line?.service)} /></td>
+                        <td className="max-w-[14rem] border-b border-line px-3 py-2"><CodeMeaning code={r.line?.service} meaning={codes.describe("Service", r.line?.service, unitId)} /></td>
                         <td className="border-b border-line px-3 py-2 text-sm whitespace-pre">{r.line?.pidNumber}</td>
                         <td className="border-b border-line px-3 py-2 text-sm whitespace-nowrap">{r.circuit}</td>
                         <td className="border-b border-line px-2 py-2 text-center">
@@ -527,7 +527,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     <div className="min-w-0">
                       <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>
                       {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} />}
-                      <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>
+                      <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service, unitId) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>
                       {lines && (
                         <span className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted">
                           <StatusTick tick={walkdownTick(r.emWalkdown)} label="EM Walkdown" value={r.emWalkdown} />

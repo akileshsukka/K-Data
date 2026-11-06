@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PresApp.Domain.Assets;
+using PresApp.Domain.Catalog;
 using PresApp.Tests.Support;
 
 namespace PresApp.Tests;
@@ -52,12 +53,53 @@ public sealed class PipelineTests : IClassFixture<TestApp>
         var (unitId, _) = await IdsAsync();
         var preview = await (await admin.PostAsJsonAsync($"/api/units/{unitId}/lines/bulk", new { text = "39-0900-QQ-2\"-ZZ9-H\n39-0901-HCX-2\"-1C1-S/FG" })).Content.ReadFromJsonAsync<JsonElement>();
         var rows = preview.GetProperty("rows").EnumerateArray().ToList();
-        Assert.Contains("Service QQ is not in the line codes.", rows[0].GetProperty("warning").GetString());
+        Assert.Contains("Service QQ is not in the line codes for Unit 39.", rows[0].GetProperty("warning").GetString());
         Assert.Contains("Pipe spec ZZ9 is not in the pipe spec list", rows[0].GetProperty("warning").GetString());
 
         var added = await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "qq", description = "Test fluid" });
         Assert.Equal(HttpStatusCode.OK, added.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QQ", description = "Again" })).StatusCode);
+    }
+
+    [Fact]
+    public void A_unit_exception_replaces_the_general_meaning_only_in_that_unit()
+    {
+        var codes = PresApp.Api.Piping.LineCodeMeanings.From([
+            new() { Kind = LineCodeKind.Service, Code = "AD", Description = "Area drain (surface drainage)" },
+            new() { Kind = LineCodeKind.Service, Code = "AD", Description = "Sewage", UnitId = 41 },
+            new() { Kind = LineCodeKind.Service, Code = "ZQ", Description = "Only here", UnitId = 41 },
+            new() { Kind = LineCodeKind.Service, Code = "OLD", Description = "Gone", IsActive = false },
+        ]);
+        Assert.Equal("Area drain (surface drainage)", codes.Service("AD", 39));
+        Assert.Equal("Sewage", codes.Service("ad", 41));
+        Assert.Equal("Only here", codes.Service("ZQ", 41));
+        Assert.Null(codes.Service("ZQ", 39));
+        Assert.Null(codes.Service("OLD", 39));
+        Assert.Null(codes.Describe(LineCodeKind.Insulation, "AD", 41));
+    }
+
+    [Fact]
+    public async Task A_code_has_one_general_meaning_and_one_exception_per_unit()
+    {
+        var (unitId, _) = await IdsAsync();
+        var other = await app.WithDbAsync(db => db.Units.Where(u => u.Id != unitId).Select(u => u.Id).FirstAsync());
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QX", description = "General" })).StatusCode);
+        var exception = await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QX", description = "Special", unitId });
+        Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QX", description = "Other", unitId = other })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QX", description = "Again" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync("/api/line-codes", new { kind = "Service", code = "QX", description = "Again", unitId })).StatusCode);
+
+        var saved = await exception.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(unitId, saved.GetProperty("unitId").GetInt32());
+        var codes = (await admin.GetFromJsonAsync<JsonElement>("/api/catalog/line-codes")).EnumerateArray().Where(c => c.GetProperty("code").GetString() == "QX").ToList();
+        Assert.Equal(3, codes.Count);
+        Assert.Equal(JsonValueKind.Null, codes[0].GetProperty("unitId").ValueKind); // the general meaning first
+
+        // The bulk check reads the meaning of the unit: known here, so no warning about the service.
+        var preview = await (await admin.PostAsJsonAsync($"/api/units/{unitId}/lines/bulk", new { text = "39-0910-QX-2\"-1C1" })).Content.ReadFromJsonAsync<JsonElement>();
+        var warning = preview.GetProperty("rows")[0].GetProperty("warning");
+        Assert.True(warning.ValueKind == JsonValueKind.Null || !warning.GetString()!.Contains("QX"));
     }
 
     [Fact]

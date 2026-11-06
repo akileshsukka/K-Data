@@ -30,8 +30,8 @@ export function useMeasurements() {
 }
 
 export interface LineCodeBook {
-  /** Meaning of a code, or undefined when it is not in the list (or inactive). */
-  describe: (kind: LineCodeKind, code: string | null | undefined) => string | undefined;
+  /** Meaning of a code for a unit (its exception, else the general meaning), or undefined when it is not in the list (or inactive). */
+  describe: (kind: LineCodeKind, code: string | null | undefined, unitId: number | undefined) => string | undefined;
   all: LineCode[];
 }
 
@@ -39,8 +39,12 @@ export interface LineCodeBook {
 export function useLineCodes(): LineCodeBook {
   const q = useQuery({ queryKey: ["catalog", "line-codes"], queryFn: ({ signal }) => api<LineCode[]>("/api/catalog/line-codes", { signal }), staleTime: LONG });
   const all = q.data ?? [];
-  const map = new Map(all.filter((c) => c.isActive).map((c) => [`${c.kind}:${c.code}`, c.description]));
-  const describe = (kind: LineCodeKind, code: string | null | undefined) => (code ? map.get(`${kind}:${code.toUpperCase()}`) : undefined);
+  const map = new Map(all.filter((c) => c.isActive).map((c) => [`${c.kind}:${c.code}:${c.unitId ?? ""}`, c.description]));
+  const describe = (kind: LineCodeKind, code: string | null | undefined, unitId: number | undefined) => {
+    if (!code) return undefined;
+    const key = `${kind}:${code.toUpperCase()}:`;
+    return (unitId ? map.get(key + unitId) : undefined) ?? map.get(key);
+  };
   return { describe, all };
 }
 

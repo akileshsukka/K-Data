@@ -18,8 +18,9 @@ public static class CatalogEndpoints
     public sealed record DisciplineDto(int Id, string Name, string AssetType, string? Prefix);
     public sealed record FieldDto(string Key, string Label, string Section, string Kind, string? OptionSet, int MaxLength,
         string Permission, int? Gate, bool BulkEditable, string? OnlyFor, string? PipelineOptionSet = null, bool PipelineMultiple = false);
-    public sealed record LineCodeDto(int Id, string Kind, string Code, string Description, bool IsActive);
-    public sealed record SaveLineCodeRequest(string Kind, string Code, string Description, bool IsActive = true);
+    public sealed record LineCodeDto(int Id, string Kind, string Code, string Description, bool IsActive, int? UnitId = null, string? UnitName = null);
+    /// <summary>UnitId null: the general meaning of the code; a unit: an exception that applies only to the lines of that unit.</summary>
+    public sealed record SaveLineCodeRequest(string Kind, string Code, string Description, bool IsActive = true, int? UnitId = null);
     public sealed record MeasurementDto(int Id, string Key, string Label, string? UnitOfMeasure, int? Gate, int? EvidenceForGate,
         decimal? MinValue, decimal? MaxValue);
 
@@ -47,27 +48,25 @@ public static class CatalogEndpoints
             new FieldDto(f.Key, f.Label, f.Section, f.Kind.ToString(), f.OptionSet, f.MaxLength, f.Permission, f.Gate, f.BulkEditable && f.IsEditable, f.OnlyFor?.ToString(), f.PipelineOptionSet, f.PipelineMultiple)));
 
         group.MapGet("/line-codes", async (PresAppDbContext db, CancellationToken ct) =>
-            (await db.LineCodes.AsNoTracking().OrderBy(c => c.Kind).ThenBy(c => c.Code).ToListAsync(ct))
-            .Select(c => new LineCodeDto(c.Id, c.Kind.ToString(), c.Code, c.Description, c.IsActive)));
+            (await db.LineCodes.AsNoTracking().Include(c => c.Unit).OrderBy(c => c.Kind).ThenBy(c => c.Code).ThenBy(c => c.UnitId != null).ThenBy(c => c.Unit!.Number).ToListAsync(ct))
+            .Select(ToDto));
 
         // Administrators keep the meanings of the line number codes (new codes, wording, deactivate).
         app.MapPost("/api/line-codes", async (SaveLineCodeRequest r, PresAppDbContext db, CancellationToken ct) =>
         {
             var c = new LineCode();
-            Fill(c, r);
-            if (await db.LineCodes.AnyAsync(x => x.Kind == c.Kind && x.Code == c.Code, ct)) throw ApiProblem.Conflict($"{c.Code} is already in the list.");
+            await FillAsync(c, r, db, ct);
             db.LineCodes.Add(c);
             await db.SaveChangesAsync(ct);
-            return new LineCodeDto(c.Id, c.Kind.ToString(), c.Code, c.Description, c.IsActive);
+            return ToDto(c);
         }).RequirePermission(Permissions.CatalogManage);
 
         app.MapPut("/api/line-codes/{id:int}", async (int id, SaveLineCodeRequest r, PresAppDbContext db, CancellationToken ct) =>
         {
             var c = await db.LineCodes.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw ApiProblem.NotFound("Code not found.");
-            Fill(c, r);
-            if (await db.LineCodes.AnyAsync(x => x.Id != id && x.Kind == c.Kind && x.Code == c.Code, ct)) throw ApiProblem.Conflict($"{c.Code} is already in the list.");
+            await FillAsync(c, r, db, ct);
             await db.SaveChangesAsync(ct);
-            return new LineCodeDto(c.Id, c.Kind.ToString(), c.Code, c.Description, c.IsActive);
+            return ToDto(c);
         }).RequirePermission(Permissions.CatalogManage);
 
         // Pipe specs: class and flange type of the lines come from here.
@@ -91,7 +90,10 @@ public static class CatalogEndpoints
         group.MapGet("/electrical-test", () => Domain.Assets.ElectricalTestSpec.Blocks);
     }
 
-    private static void Fill(LineCode c, SaveLineCodeRequest r)
+    private static LineCodeDto ToDto(LineCode c) => new(c.Id, c.Kind.ToString(), c.Code, c.Description, c.IsActive, c.UnitId, c.Unit?.Name);
+
+    /// <summary>Checks and copies a code; a code has one general meaning and at most one exception per unit.</summary>
+    private static async Task FillAsync(LineCode c, SaveLineCodeRequest r, PresAppDbContext db, CancellationToken ct)
     {
         if (!Enum.TryParse<LineCodeKind>(r.Kind, out var kind)) throw ApiProblem.Invalid("Unknown kind of code.");
         var code = (r.Code ?? "").Trim().ToUpperInvariant();
@@ -104,5 +106,13 @@ public static class CatalogEndpoints
         c.Code = code;
         c.Description = description;
         c.IsActive = r.IsActive;
+
+        var unit = r.UnitId is { } unitId
+            ? await db.Units.FirstOrDefaultAsync(u => u.Id == unitId, ct) ?? throw ApiProblem.Invalid("Unit not found.")
+            : null;
+        if (await db.LineCodes.AnyAsync(x => x.Id != c.Id && x.Kind == kind && x.Code == code && x.UnitId == r.UnitId, ct))
+            throw ApiProblem.Conflict(unit is null ? $"{code} already has a general meaning." : $"{code} already has a meaning for {unit.Name}.");
+        c.UnitId = unit?.Id;
+        c.Unit = unit;
     }
 }
