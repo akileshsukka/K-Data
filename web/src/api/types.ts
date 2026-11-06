@@ -681,6 +681,8 @@ export interface MonitoringRow {
 export interface MonitoringSettings {
   intervalDays: number;
   minPressureBarg: number | null;
+  /** N2 blanket pressure that completes the blanket while DURING (0.5 by default). */
+  targetN2Barg: number | null;
 }
 
 export interface MonitoringView {

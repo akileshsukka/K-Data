@@ -24,6 +24,13 @@ public static class MonitoringEndpoints
         app.MapPost("/api/monitoring/rounds", (RoundRequest r, ClaimsPrincipal user, MonitoringService s, CancellationToken ct) => s.SaveRoundAsync(r, user, ct))
             .RequirePermission(Permissions.ReadingsWrite);
 
+        // Monitoring report to read and share: until preservation (N2 by ISO week), post-preservation (Pressure by ISO week), all readings.
+        app.MapGet("/api/units/{unitId:int}/monitoring/report", async (int unitId, int? groupId, DateOnly? from, DateOnly? to, MonitoringReportWorkbook workbook, CancellationToken ct) =>
+        {
+            var result = await workbook.ExportAsync(unitId, groupId, from, to, ct);
+            return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+        }).RequirePermission(Permissions.ExcelExport);
+
         // Readings in bulk from Excel: the empty template (downloaded once, reused) and the upload (preview, then apply in /api/imports).
         app.MapGet("/api/units/{unitId:int}/monitoring/readings-template", async (int unitId, ReadingsWorkbook workbook, CancellationToken ct) =>
         {

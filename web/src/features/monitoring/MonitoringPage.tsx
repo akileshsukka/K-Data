@@ -7,11 +7,12 @@ import { useMeasurements, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
+import { Dialog } from "../../components/Dialog";
 import { CurrentGateChip } from "../../components/GateStatus";
 import { PageHeader } from "../../components/PageHeader";
 import { TagListFilter, tagKey, tagList } from "../../components/TagListFilter";
 import { useToast } from "../../components/Toast";
-import { dubaiLocalToUtc, formatDate, formatDateTime, nowDubaiLocal } from "../../components/dates";
+import { dubaiLocalToUtc, formatDate, formatDateTime, nowDubaiLocal, todayDubai } from "../../components/dates";
 import { useDebounced } from "../../components/useDebounced";
 import { MonitoringStatusChip } from "./MonitoringStatusChip";
 
@@ -79,10 +80,11 @@ export function MonitoringPage() {
       <PageHeader
         title="Monitoring"
         description={unit ? `${unit.name} — while an asset is being preserved its pressure is kept as G4 N2 blanket. Once it is marked as preserved, it is kept as Pressure and is due every ${settings?.intervalDays ?? "…"} days${settings?.minPressureBarg != null ? `; below ${settings.minPressureBarg} barg is low` : ""}.` : undefined}
-        actions={canRound && !round ? (
+        actions={!round && (session.can(Perm.excelExport) || canRound) ? (
           <>
-            <ExcelReadings unitId={unitId} canUpload={canUpload} />
-            <Button onClick={() => setRound(true)}>Record a round</Button>
+            {session.can(Perm.excelExport) && <ReportButton unitId={unitId} group={(groups.data ?? []).find((g) => String(g.id) === groupId)} />}
+            {canRound && <ExcelReadings unitId={unitId} canUpload={canUpload} />}
+            {canRound && <Button onClick={() => setRound(true)}>Record a round</Button>}
           </>
         ) : undefined}
       />
@@ -142,6 +144,62 @@ export function MonitoringPage() {
 
       {session.can(Perm.catalogManage) && settings && <SettingsCard settings={settings} />}
     </div>
+  );
+}
+
+/**
+ * The monitoring report to read and share: until preservation (N2 by ISO week), post-preservation (Pressure by ISO week)
+ * and every reading. Optional date range; the workpack or group chosen on the page applies.
+ */
+function ReportButton({ unitId, group }: { unitId: number; group?: Group }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    try {
+      const query = new URLSearchParams();
+      if (group) query.set("groupId", String(group.id));
+      if (from) query.set("from", from);
+      if (to) query.set("to", to);
+      toast(`${await download(`/api/units/${unitId}/monitoring/report?${query}`)} downloaded`);
+      setOpen(false);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Button variant="secondary" onClick={() => setOpen(true)}>Monitoring report</Button>
+      <Dialog open={open} title="Monitoring report" onClose={() => setOpen(false)}>
+        <p className="text-[15px]">
+          Three sheets: <strong>Until preservation</strong> (N2 blanket by ISO week), <strong>Post-preservation</strong> (Pressure by ISO week,
+          with the status of each asset) and <strong>Readings</strong> (every reading). Each week shows its last reading.
+        </p>
+        {group && <p className="mt-2 text-sm text-muted">Only {group.code} — {group.name}, as filtered on the page.</p>}
+        <div className="mt-4 flex flex-wrap gap-3">
+          <label>
+            <span className="block text-sm font-semibold text-ink">From (optional)</span>
+            <TextInput type="date" value={from} max={to || todayDubai()} onChange={(e) => setFrom(e.target.value)} className="mt-1" />
+          </label>
+          <label>
+            <span className="block text-sm font-semibold text-ink">To (optional)</span>
+            <TextInput type="date" value={to} min={from || undefined} max={todayDubai()} onChange={(e) => setTo(e.target.value)} className="mt-1" />
+          </label>
+        </div>
+        <p className="mt-2 text-sm text-muted">Empty: from the first reading to this week.</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button busy={busy} onClick={run}>{busy ? "Preparing file…" : "Download"}</Button>
+        </div>
+      </Dialog>
+    </>
   );
 }
 
@@ -435,8 +493,9 @@ function SettingsCard({ settings }: { settings: MonitoringSettings }) {
   const client = useQueryClient();
   const [days, setDays] = useState(String(settings.intervalDays));
   const [min, setMin] = useState(settings.minPressureBarg?.toString() ?? "");
+  const [target, setTarget] = useState(settings.targetN2Barg?.toString() ?? "0.5");
   const save = useMutation({
-    mutationFn: () => api<MonitoringSettings>("/api/settings/monitoring", { method: "PUT", body: { intervalDays: Number(days), minPressureBarg: min.trim() === "" ? null : Number(min.replace(",", ".")) } }),
+    mutationFn: () => api<MonitoringSettings>("/api/settings/monitoring", { method: "PUT", body: { intervalDays: Number(days), minPressureBarg: min.trim() === "" ? null : Number(min.replace(",", ".")), targetN2Barg: target.trim() === "" ? null : Number(target.replace(",", ".")) } }),
     onSuccess: () => { client.invalidateQueries({ queryKey: ["monitoring"] }); toast("Monitoring settings saved"); },
     onError: (e) => toast(e.message, "error"),
   });
@@ -452,10 +511,14 @@ function SettingsCard({ settings }: { settings: MonitoringSettings }) {
           <span className="block text-sm font-semibold text-ink">Low pressure below (barg)</span>
           <TextInput inputMode="decimal" value={min} placeholder="Off" onChange={(e) => setMin(e.target.value)} className="mt-1 w-32" />
         </label>
+        <label>
+          <span className="block text-sm font-semibold text-ink">N2 blanket target (barg)</span>
+          <TextInput inputMode="decimal" value={target} placeholder="0.5" onChange={(e) => setTarget(e.target.value)} className="mt-1 w-32" />
+        </label>
         <Button type="submit" busy={save.isPending}>Save</Button>
       </form>
       <p className="mt-2 text-sm text-muted">
-        Both apply only to assets marked as preserved, with their Pressure (barg) readings. Assets still being preserved (G4 N2 blanket) are never due or low.
+        Both apply only to assets marked as preserved, with their Pressure (barg) readings. Assets still being preserved (G4 N2 blanket) are never due or low; the report shows when they reach the N2 blanket target.
         Leave the minimum empty until engineering confirms the value; nothing is flagged as low meanwhile.
       </p>
     </details>

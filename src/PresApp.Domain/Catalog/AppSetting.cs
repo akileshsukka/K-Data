@@ -16,4 +16,6 @@ public static class AppSettingKeys
     public const string MonitoringIntervalDays = "Monitoring.IntervalDays";
     /// <summary>Minimum Pressure (barg) of a POST asset; below it the asset is flagged as low. Empty = off.</summary>
     public const string MonitoringMinPressureBarg = "Monitoring.MinPressureBarg";
+    /// <summary>N2 blanket pressure (barg) that completes the blanket while DURING (0.5 by default): the system can then be closed.</summary>
+    public const string MonitoringTargetN2Barg = "Monitoring.TargetN2Barg";
 }

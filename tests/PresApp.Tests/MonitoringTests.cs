@@ -152,6 +152,61 @@ public sealed class MonitoringTests : IClassFixture<TestApp>
         Assert.Contains(("31-RDG-3", "G4N2BlanketBarg", "No change"), again);
     }
 
+    [Fact]
+    public async Task The_monitoring_report_shows_the_last_reading_of_each_ISO_week_until_and_after_preservation()
+    {
+        var (unitId, building) = await CreateAsync("31-RPT-1");
+        var (_, preserved) = await CreateAsync("31-RPT-2");
+        var n2 = await N2Async();
+        var pressure = await TypeAsync("PressureBarg");
+        var today = DateTime.UtcNow.AddHours(4).Date;   // Dubai
+        DateTime Noon(DateTime day) => day.AddHours(8);  // 12:00 Dubai in UTC
+        DateTime Monday(DateTime day) => day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
+        async Task Add(Guid id, int type, DateTime day, decimal value) =>
+            Assert.True((await admin.PostAsJsonAsync($"/api/assets/{id}/readings", new { measuredAtUtc = Noon(day), values = new[] { new { measurementTypeId = type, value } } })).IsSuccessStatusCode);
+
+        var twoWeeksAgo = Monday(today.AddDays(-14));
+        await Add(building, n2, today.AddDays(-21), 0.2m);
+        await Add(building, n2, twoWeeksAgo, 0.4m);
+        await Add(building, n2, twoWeeksAgo.AddDays(2), 0.5m);            // same week: the last one is shown, target reached
+        await Add(preserved, n2, today.AddDays(-35), 0.3m);               // before it was preserved
+        (await admin.PostAsJsonAsync($"/api/assets/{preserved}/preserved", new { preservedOn = DateOnly.FromDateTime(today.AddDays(-30)) })).EnsureSuccessStatusCode();
+        await Add(preserved, pressure, today.AddDays(-10), 0.8m);
+
+        var response = await admin.GetAsync($"/api/units/{unitId}/monitoring/report");
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        using var wb = new XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
+        Assert.Equal(["Until preservation", "Post-preservation", "Readings"], wb.Worksheets.Select(w => w.Name));
+
+        static IXLRow Row(IXLWorksheet ws, string tag) => ws.RowsUsed().Single(r => r.Cell(1).GetString() == tag);
+        static int Week(IXLWorksheet ws, DateTime day)
+        {
+            var label = $"W{System.Globalization.ISOWeek.GetWeekOfYear(day):00} {System.Globalization.ISOWeek.GetYear(day)}";
+            return ws.Row(4).CellsUsed().Single(c => c.GetString().StartsWith(label, StringComparison.Ordinal)).Address.ColumnNumber;
+        }
+
+        var until = wb.Worksheet("Until preservation");
+        var b = Row(until, "31-RPT-1");
+        Assert.Equal("Yes", b.Cell(7).GetString());
+        Assert.Equal(0.2, b.Cell(Week(until, today.AddDays(-21))).GetDouble());
+        var week = b.Cell(Week(until, twoWeeksAgo));
+        Assert.Equal(0.5, week.GetDouble());
+        Assert.True(week.HasComment);
+        Assert.Equal("No", Row(until, "31-RPT-2").Cell(7).GetString());   // 0.3 never reached 0.5 before it was preserved
+
+        var post = wb.Worksheet("Post-preservation");
+        Assert.DoesNotContain(post.RowsUsed(), r => r.Cell(1).GetString() == "31-RPT-1");
+        var p = Row(post, "31-RPT-2");
+        Assert.Equal("Overdue", p.Cell(10).GetString());
+        Assert.Equal(0.8, p.Cell(Week(post, today.AddDays(-10))).GetDouble());
+        Assert.Contains(p.CellsUsed(), c => c.GetString() == "MISSING");
+        Assert.Empty(p.Cell(Week(post, today)).GetString());              // the current week is not over
+
+        var readings = wb.Worksheet("Readings");
+        Assert.Equal(3, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-1"));
+        Assert.Equal(2, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-2"));
+    }
+
     private async Task<JsonElement> PostFileAsync(string url, byte[] bytes)
     {
         var content = new ByteArrayContent(bytes);

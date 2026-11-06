@@ -10,7 +10,8 @@ using PresApp.Infrastructure.Data;
 
 namespace PresApp.Api.Monitoring;
 
-public sealed record MonitoringSettingsDto(int IntervalDays, decimal? MinPressureBarg);
+/// <summary><paramref name="TargetN2Barg"/>: empty when saving = the default, 0.5 barg.</summary>
+public sealed record MonitoringSettingsDto(int IntervalDays, decimal? MinPressureBarg, decimal? TargetN2Barg = null);
 
 public sealed record MonitoringRow(
     Guid Id, string Code, string? Tag, string? Description, string Type, string Discipline, string CurrentGate,
@@ -51,6 +52,7 @@ public sealed class MonitoringService(PresAppDbContext db, AssetEditor editor, T
     public const string Removed = "Removed from site";
     public const string N2Key = "G4N2BlanketBarg";
     public const string PressureKey = "PressureBarg";
+    public const decimal DefaultTargetN2Barg = 0.5m;
 
     /// <summary>Where a measured pressure goes: Pressure (barg) once the asset is preserved at that time, G4 - N2 Blanket before.</summary>
     public static string PressureKeyFor(DateTime? preservedAtUtc, DateTime measuredAtUtc) =>
@@ -59,17 +61,20 @@ public sealed class MonitoringService(PresAppDbContext db, AssetEditor editor, T
     public async Task<MonitoringSettingsDto> SettingsAsync(CancellationToken ct)
     {
         var s = await db.Settings.AsNoTracking()
-            .Where(x => x.Key == AppSettingKeys.MonitoringIntervalDays || x.Key == AppSettingKeys.MonitoringMinPressureBarg)
+            .Where(x => x.Key == AppSettingKeys.MonitoringIntervalDays || x.Key == AppSettingKeys.MonitoringMinPressureBarg || x.Key == AppSettingKeys.MonitoringTargetN2Barg)
             .ToDictionaryAsync(x => x.Key, x => x.Value, ct);
         var days = int.TryParse(s.GetValueOrDefault(AppSettingKeys.MonitoringIntervalDays), NumberStyles.Integer, CultureInfo.InvariantCulture, out var d) ? d : 7;
         decimal? min = decimal.TryParse(s.GetValueOrDefault(AppSettingKeys.MonitoringMinPressureBarg), NumberStyles.Number, CultureInfo.InvariantCulture, out var m) ? m : null;
-        return new MonitoringSettingsDto(days, min);
+        var target = decimal.TryParse(s.GetValueOrDefault(AppSettingKeys.MonitoringTargetN2Barg), NumberStyles.Number, CultureInfo.InvariantCulture, out var t) ? t : DefaultTargetN2Barg;
+        return new MonitoringSettingsDto(days, min, target);
     }
 
     public async Task<MonitoringSettingsDto> SaveSettingsAsync(MonitoringSettingsDto request, CancellationToken ct)
     {
         if (request.IntervalDays is < 1 or > 365) throw ApiProblem.Invalid("The interval must be between 1 and 365 days.");
         if (request.MinPressureBarg is < 0 or > 100) throw ApiProblem.Invalid("The minimum pressure must be between 0 and 100 barg.");
+        if (request.TargetN2Barg is <= 0 or > 100) throw ApiProblem.Invalid("The N2 blanket target must be more than 0 and at most 100 barg.");
+        await SetAsync(AppSettingKeys.MonitoringTargetN2Barg, request.TargetN2Barg?.ToString(CultureInfo.InvariantCulture), ct);
         await SetAsync(AppSettingKeys.MonitoringIntervalDays, request.IntervalDays.ToString(CultureInfo.InvariantCulture), ct);
         await SetAsync(AppSettingKeys.MonitoringMinPressureBarg, request.MinPressureBarg?.ToString(CultureInfo.InvariantCulture), ct);
         await db.SaveChangesAsync(ct);
