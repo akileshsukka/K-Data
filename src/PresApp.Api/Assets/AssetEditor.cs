@@ -577,7 +577,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
 
     // ------------------------------------------------------------------ readings
 
-    public async Task<AddReadingsResponse> AddReadingsAsync(Guid id, AddReadingsRequest request, ClaimsPrincipal user, CancellationToken ct)
+    public async Task<AddReadingsResponse> AddReadingsAsync(Guid id, AddReadingsRequest request, ClaimsPrincipal user, CancellationToken ct,
+        ChangeSource source = ChangeSource.App)
     {
         var values = request.Values?.Where(v => v is not null).ToList() ?? [];
         if (values.Count == 0) throw ApiProblem.Invalid("Enter and confirm at least one reading.");
@@ -602,7 +603,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             db.Readings.Add(new Reading
             {
                 AssetId = id, MeasurementTypeId = type.Id, Value = v.Value, MeasuredAtUtc = measuredAt, RecordedAtUtc = now,
-                RecordedBy = user.Identity?.Name ?? "", Source = ChangeSource.App, Note = note,
+                RecordedBy = user.Identity?.Name ?? "", Source = source, Note = note,
                 Phase = p.PreservedAtUtc is { } start && measuredAt >= start ? MonitoringPhase.Post : MonitoringPhase.During
             });
 

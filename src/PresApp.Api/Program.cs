@@ -36,6 +36,7 @@ builder.Services.AddScoped<PresApp.Api.Assets.AssetQueries>();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetEditor>();
 builder.Services.AddScoped<PresApp.Api.Assets.ElectricalTestService>();
 builder.Services.AddScoped<PresApp.Api.Excel.ElectricalTestWorkbook>();
+builder.Services.AddScoped<PresApp.Api.Excel.ReadingsWorkbook>();
 builder.Services.AddScoped<PresApp.Api.Assets.RemovedFromSiteAlignment>();
 builder.Services.AddScoped<PresApp.Api.Excel.UnitWorkbookExporter>();
 builder.Services.AddScoped<PresApp.Api.Excel.PipingWorkbookExporter>();

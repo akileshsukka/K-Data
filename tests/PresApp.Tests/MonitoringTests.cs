@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using PresApp.Tests.Support;
 
@@ -30,39 +32,138 @@ public sealed class MonitoringTests : IClassFixture<TestApp>
 
     private static JsonElement Row(JsonElement view, Guid id) => view.GetProperty("rows").EnumerateArray().Single(r => r.GetProperty("id").GetGuid() == id);
 
+    private Task<int> TypeAsync(string key) => app.WithDbAsync(db => db.MeasurementTypes.Where(t => t.Key == key).Select(t => t.Id).FirstAsync());
+
     [Fact]
-    public async Task Preserved_assets_are_due_when_the_last_N2_reading_is_older_than_the_interval()
+    public async Task Preserved_assets_are_monitored_with_the_pressure_readings_taken_since_they_were_preserved()
     {
         var (unitId, a) = await CreateAsync("31-MON-1");
         var (_, b) = await CreateAsync("31-MON-2");
         var (_, c) = await CreateAsync("31-MON-3");
         var n2 = await N2Async();
+        var pressure = await TypeAsync("PressureBarg");
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         foreach (var id in new[] { a, b })
             (await admin.PostAsJsonAsync($"/api/assets/{id}/preserved", new { preservedOn = today.AddDays(-20) })).EnsureSuccessStatusCode();
-        (await admin.PostAsJsonAsync($"/api/assets/{a}/readings", new { measuredAtUtc = DateTime.UtcNow.AddDays(-10), values = new[] { new { measurementTypeId = n2, value = 0.8m } } })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync($"/api/assets/{a}/readings", new { measuredAtUtc = DateTime.UtcNow.AddDays(-10), values = new[] { new { measurementTypeId = pressure, value = 0.8m } } })).EnsureSuccessStatusCode();
+        // An N2 blanket reading does not count for POST monitoring.
+        (await admin.PostAsJsonAsync($"/api/assets/{a}/readings", new { measuredAtUtc = DateTime.UtcNow.AddDays(-1), values = new[] { new { measurementTypeId = n2, value = 0.8m } } })).EnsureSuccessStatusCode();
 
         var view = await admin.GetFromJsonAsync<JsonElement>($"/api/monitoring?unitId={unitId}");
         Assert.Equal("Overdue", Row(view, a).GetProperty("status").GetString());
+        Assert.Equal(10, Row(view, a).GetProperty("daysSincePressure").GetInt32());
         Assert.Equal("Post", Row(view, a).GetProperty("phase").GetString());
         Assert.Equal("No reading since preserved", Row(view, b).GetProperty("status").GetString());
         Assert.Equal("During preservation", Row(view, c).GetProperty("status").GetString());
 
-        // A round saves both at once; with a minimum of 1 barg the 0.5 reading is flagged.
-        (await admin.PutAsJsonAsync("/api/settings/monitoring", new { intervalDays = 7, minN2Barg = 1.0m })).EnsureSuccessStatusCode();
+        // A round with one pressure column: Pressure (barg) for the preserved assets, G4 - N2 Blanket for the one still DURING.
+        // With a minimum of 1 barg only the POST 0.5 reading is low; a DURING asset is never flagged.
+        (await admin.PutAsJsonAsync("/api/settings/monitoring", new { intervalDays = 7, minPressureBarg = 1.0m })).EnsureSuccessStatusCode();
         var round = await admin.PostAsJsonAsync("/api/monitoring/rounds", new
         {
             measuredAtUtc = DateTime.UtcNow.AddMinutes(-5),
-            rows = new[] { new { assetId = a, values = new[] { new { measurementTypeId = n2, value = 1.2m } } }, new { assetId = b, values = new[] { new { measurementTypeId = n2, value = 0.5m } } } }
+            rows = new[] { new { assetId = a, pressure = 1.2m }, new { assetId = b, pressure = 0.5m }, new { assetId = c, pressure = 0.4m } }
         });
-        round.EnsureSuccessStatusCode();
-        Assert.Equal(2, (await round.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("readings").GetInt32());
+        Assert.True(round.IsSuccessStatusCode, await round.Content.ReadAsStringAsync());
+        Assert.Equal(3, (await round.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("readings").GetInt32());
         view = await admin.GetFromJsonAsync<JsonElement>($"/api/monitoring?unitId={unitId}");
         Assert.Equal("OK", Row(view, a).GetProperty("status").GetString());
-        Assert.False(Row(view, a).GetProperty("lowN2").GetBoolean());
-        Assert.True(Row(view, b).GetProperty("lowN2").GetBoolean());
-        (await admin.PutAsJsonAsync("/api/settings/monitoring", new { intervalDays = 7, minN2Barg = (decimal?)null })).EnsureSuccessStatusCode();
+        Assert.Equal(1.2m, Row(view, a).GetProperty("pressureBarg").GetDecimal());
+        Assert.False(Row(view, a).GetProperty("lowPressure").GetBoolean());
+        Assert.True(Row(view, b).GetProperty("lowPressure").GetBoolean());
+        Assert.False(Row(view, c).GetProperty("lowPressure").GetBoolean());
+        Assert.Equal(0.4m, Row(view, c).GetProperty("n2Barg").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, Row(view, c).GetProperty("pressureBarg").ValueKind);
+        Assert.Equal("During preservation", Row(view, c).GetProperty("status").GetString());
+        (await admin.PutAsJsonAsync("/api/settings/monitoring", new { intervalDays = 7, minPressureBarg = (decimal?)null })).EnsureSuccessStatusCode();
     }
+
+    [Fact]
+    public async Task Readings_are_loaded_from_the_template_by_tag_and_date()
+    {
+        var (unitId, post) = await CreateAsync("31-RDG-1");
+        var (_, during) = await CreateAsync("31-RDG-2 A1/A2");
+        var (_, other) = await CreateAsync("31-RDG-3");
+        var today = DateTime.UtcNow.AddHours(4).Date;   // Dubai
+        (await admin.PostAsJsonAsync($"/api/assets/{post}/preserved", new { preservedOn = DateOnly.FromDateTime(today.AddDays(-20)) })).EnsureSuccessStatusCode();
+
+        var response = await admin.GetAsync($"/api/units/{unitId}/monitoring/readings-template");
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var template = await response.Content.ReadAsByteArrayAsync();
+        int o2Column;
+        using (var wb = new XLWorkbook(new MemoryStream(template)))
+        {
+            var header = wb.Worksheet(1).Row(4);
+            Assert.Equal("Tag", header.Cell(1).GetString());
+            Assert.Equal("Measured date", header.Cell(2).GetString());
+            Assert.Equal("Pressure (barg)", header.Cell(3).GetString());
+            Assert.DoesNotContain(header.CellsUsed(), c => c.GetString().Contains("N2 Blanket"));
+            o2Column = header.CellsUsed().Single(c => c.GetString() == "G3 - O2 (%)").Address.ColumnNumber;
+        }
+
+        var file = TestWorkbooks.Edit(template, wb =>
+        {
+            var ws = wb.Worksheet(1);
+            void Row(int r, string tag, object? date, object? pressure, object? o2 = null)
+            {
+                ws.Cell(r, 1).Value = tag;
+                if (date is DateTime d) ws.Cell(r, 2).Value = d; else if (date is string s) ws.Cell(r, 2).Value = s;
+                if (pressure is double p) ws.Cell(r, 3).Value = p; else if (pressure is string ps) ws.Cell(r, 3).Value = ps;
+                if (o2 is double x) ws.Cell(r, o2Column).Value = x;
+            }
+            Row(5, "31-rdg-1", today.AddDays(-1), 0.6, 1.0);                                           // POST: Pressure (barg)
+            Row(6, "31–RDG-2  a1/a2", today.AddDays(-2).ToString("dd-MMM-yy", System.Globalization.CultureInfo.InvariantCulture), 0.45); // DURING: N2; en dash, spaces, case
+            Row(7, "31-RDG-3", today.AddDays(-1), "UNDER MAINTENANCE");                                 // text: not loaded
+            Row(8, "31-RDG-3", today.AddDays(-2), 0.0);                                                 // zero: loaded, warned
+            Row(9, "31-RDG-999", today.AddDays(-1), 1.0);                                               // unknown tag
+            Row(10, "31-RDG-1", null, 1.0);                                                             // no date
+            Row(11, "31-RDG-1", today.AddDays(-1), null);                                               // nothing measured: skipped
+        });
+
+        var preview = await PostFileAsync($"/api/units/{unitId}/monitoring/readings-import", file);
+        var changes = Changes(preview);
+        Assert.Contains(("31-RDG-1", "PressureBarg", "Applied"), changes);
+        Assert.Contains(("31-RDG-1", "G3O2Pct", "Applied"), changes);
+        Assert.Contains(("31-RDG-2 A1/A2", "G4N2BlanketBarg", "Applied"), changes);
+        Assert.Contains(("31-RDG-3", "G4N2BlanketBarg", "Invalid"), changes);
+        Assert.Contains(("31-RDG-3", "G4N2BlanketBarg", "Warning"), changes);
+        Assert.Contains(("31-RDG-999", "(row)", "Rejected"), changes);
+        Assert.Contains(("31-RDG-1", "(row)", "Rejected"), changes);
+        Assert.Equal(7, changes.Count);
+        Assert.False(await app.WithDbAsync(db => db.Readings.AnyAsync(r => r.AssetId == post)));   // a preview saves nothing
+
+        var applied = await admin.PostAsync($"/api/imports/{preview.GetProperty("run").GetProperty("id").GetInt64()}/apply", null);
+        Assert.True(applied.IsSuccessStatusCode, await applied.Content.ReadAsStringAsync());
+        var saved = await app.WithDbAsync(db => db.Readings.Where(r => r.AssetId == post || r.AssetId == during || r.AssetId == other)
+            .Select(r => new { r.AssetId, r.MeasurementType.Key, r.Value, r.MeasuredAtUtc, r.Phase, r.Source }).ToListAsync());
+        Assert.Equal(4, saved.Count);
+        var pressure = saved.Single(r => r.AssetId == post && r.Key == "PressureBarg");
+        Assert.Equal(0.6m, pressure.Value);
+        Assert.Equal(today.AddDays(-1).AddHours(8), pressure.MeasuredAtUtc);   // 12:00 Dubai
+        Assert.Equal("Post", pressure.Phase.ToString());
+        Assert.Equal("Excel", pressure.Source.ToString());
+        Assert.Equal(0.45m, saved.Single(r => r.AssetId == during).Value);
+        Assert.Equal("During", saved.Single(r => r.AssetId == during).Phase.ToString());
+        Assert.Equal(0m, saved.Single(r => r.AssetId == other).Value);
+
+        // The same file again: what is already in the app is not loaded twice.
+        var again = Changes(await PostFileAsync($"/api/units/{unitId}/monitoring/readings-import", file));
+        Assert.Contains(("31-RDG-1", "PressureBarg", "No change"), again);
+        Assert.Contains(("31-RDG-3", "G4N2BlanketBarg", "No change"), again);
+    }
+
+    private async Task<JsonElement> PostFileAsync(string url, byte[] bytes)
+    {
+        var content = new ByteArrayContent(bytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        var response = await admin.PostAsync(url, new MultipartFormDataContent { { content, "file", "readings.xlsx" } });
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    private static List<(string? Tag, string? Field, string? Outcome)> Changes(JsonElement detail) =>
+        detail.GetProperty("changes").EnumerateArray()
+            .Select(x => (x.GetProperty("assetTag").GetString(), x.GetProperty("field").GetString(), x.GetProperty("outcome").GetString())).ToList();
 
     [Fact]
     public async Task A_round_with_one_bad_value_saves_nothing()

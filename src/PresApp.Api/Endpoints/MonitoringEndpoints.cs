@@ -1,5 +1,8 @@
 using System.Security.Claims;
+using PresApp.Api.Assets;
 using PresApp.Api.Auth;
+using PresApp.Api.Excel;
+using PresApp.Api.Hosting;
 using PresApp.Api.Groups;
 using PresApp.Api.Monitoring;
 using PresApp.Domain.Security;
@@ -20,6 +23,19 @@ public static class MonitoringEndpoints
             .RequirePermission(Permissions.CatalogManage);
         app.MapPost("/api/monitoring/rounds", (RoundRequest r, ClaimsPrincipal user, MonitoringService s, CancellationToken ct) => s.SaveRoundAsync(r, user, ct))
             .RequirePermission(Permissions.ReadingsWrite);
+
+        // Readings in bulk from Excel: the empty template (downloaded once, reused) and the upload (preview, then apply in /api/imports).
+        app.MapGet("/api/units/{unitId:int}/monitoring/readings-template", async (int unitId, ReadingsWorkbook workbook, CancellationToken ct) =>
+        {
+            var result = await workbook.TemplateAsync(unitId, ct);
+            return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+        }).RequirePermission(Permissions.ReadingsWrite);
+        app.MapPost("/api/units/{unitId:int}/monitoring/readings-import", async (int unitId, IFormFile file, ClaimsPrincipal user, ReadingsWorkbook workbook, CancellationToken ct) =>
+        {
+            if (!user.HasPermission(Permissions.ExcelImport)) throw ApiProblem.Forbidden("Your role cannot upload Excel files.");
+            await using var stream = file.OpenReadStream();
+            return await workbook.PreviewAsync(stream, file.FileName, unitId, user, ct);
+        }).RequirePermission(Permissions.ReadingsWrite).DisableAntiforgery();
 
         // ---------------------------------------------------------------- groups
         // The list stays on assets.view: Monitoring uses it for its group filter. The workpack pages need groups.view.

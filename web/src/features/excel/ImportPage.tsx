@@ -34,6 +34,7 @@ export function ImportPage() {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["register"] });
       queryClient.invalidateQueries({ queryKey: ["issues"] });
+      queryClient.invalidateQueries({ queryKey: ["monitoring"] });
       if (action === "cancel") toast("Preview cancelled", "info");
       else if (d.run.status === "Rejected") toast(d.run.message ?? "The file was rejected.", "error");
       else toast(`Applied: ${d.run.counts.applied + d.run.counts.derived + d.run.counts.created} changes saved`);
@@ -67,11 +68,11 @@ export function ImportPage() {
   return (
     <div>
       <PageHeader
-        title={run.kind === "Onboarding" ? "Client list" : run.kind === "ElectricalTest" ? "E7 electrical test sheet" : "Excel upload"}
+        title={run.kind === "Onboarding" ? "Client list" : run.kind === "ElectricalTest" ? "E7 electrical test sheet" : run.kind === "Readings" ? "Monitoring readings" : "Excel upload"}
         description={`${run.fileName} · ${run.unitName ?? ""} · uploaded ${formatDateTime(run.uploadedAtUtc)} by ${run.uploadedBy}`}
         actions={
           <>
-            {run.unitId && <Link to={`/u/${run.unitId}/excel`} className="inline-flex min-h-10 items-center rounded-md border border-line bg-panel px-4 font-semibold text-ink hover:border-violet hover:text-violet">Back to Excel</Link>}
+            {run.unitId && <Link to={`/u/${run.unitId}/${run.kind === "Readings" ? "monitoring" : "excel"}`} className="inline-flex min-h-10 items-center rounded-md border border-line bg-panel px-4 font-semibold text-ink hover:border-violet hover:text-violet">{run.kind === "Readings" ? "Back to Monitoring" : "Back to Excel"}</Link>}
             {run.status !== "Rejected" && <Button variant="secondary" onClick={() => download(`/api/imports/${id}/file`).catch((e) => toast(e.message, "error"))}>Download uploaded file</Button>}
           </>
         }

@@ -11,7 +11,10 @@ public enum ImportKind
     Onboarding = 1,
 
     /// <summary>The E7 electrical test sheet of a unit (one row per motor), matched by ITEM TAG.</summary>
-    ElectricalTest = 2
+    ElectricalTest = 2,
+
+    /// <summary>Monitoring readings of a unit (Tag, Measured date, Pressure and the other readings), matched by tag.</summary>
+    Readings = 3
 }
 
 public enum ImportStatus

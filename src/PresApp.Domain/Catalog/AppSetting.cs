@@ -14,5 +14,6 @@ public static class AppSettingKeys
     public const string SimproScheduleEnabled = "Simpro.Schedule.Enabled";
     public const string SimproScheduleTime = "Simpro.Schedule.TimeLocal";
     public const string MonitoringIntervalDays = "Monitoring.IntervalDays";
-    public const string MonitoringMinN2Barg = "Monitoring.MinN2Barg";
+    /// <summary>Minimum Pressure (barg) of a POST asset; below it the asset is flagged as low. Empty = off.</summary>
+    public const string MonitoringMinPressureBarg = "Monitoring.MinPressureBarg";
 }

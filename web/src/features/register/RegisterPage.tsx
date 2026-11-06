@@ -9,6 +9,7 @@ import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
 import { CurrentGateChip, GateStatus, gatePrefix, gateText } from "../../components/GateStatus";
 import { PageHeader } from "../../components/PageHeader";
+import { TagListFilter, tagKey, tagList } from "../../components/TagListFilter";
 import { useDebounced } from "../../components/useDebounced";
 import { formatDate } from "../../components/dates";
 import { formatSize } from "../lines/lineNumber";
@@ -181,8 +182,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const step = gatePrefix(type);
 
   const lines = type === "Pipeline";
-  const tagSet = useMemo(() => new Set(f.tags.split(",").filter(Boolean)), [f.tags]);
-  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => (r.tag ?? "").toLowerCase() === t || r.code.toLowerCase() === t));
+  const tagSet = useMemo(() => new Set(tagList(f.tags)), [f.tags]);
+  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => tagKey(r.tag ?? "") === t || tagKey(r.code) === t));
   const filtered = useMemo(
     () =>
       all.filter(
@@ -201,7 +202,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
           (!f.docsPending || r.documentsPending > 0) &&
           (!f.card || !!cardIds?.has(r.id)) &&
-          (tagSet.size === 0 || tagSet.has((r.tag ?? "").toLowerCase()) || tagSet.has(r.code.toLowerCase())) &&
+          (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
     [all, text, f, gateCount, codes, cardIds, tagSet],
@@ -565,41 +566,4 @@ export function gateMatch(r: RegisterRow, gates: number[], status: string, gateC
   const test = (v: string | null | undefined) => (!status ? !!v : status === "(empty)" ? !v : v === status);
   if (chosen.length === 0) return r.gates.slice(0, gateCount).some(test);
   return chosen.every((g) => test(r.gates[g - 1]));
-}
-
-/**
- * Filter by a list of tags pasted from Excel (one per line, or separated by commas / semicolons), like the bulk edit.
- * Matches the tag or the Equipment ID, case ignored. Then "select all" takes exactly those rows.
- */
-function TagListFilter({ value, onChange }: { value: string; onChange: (tags: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const count = value ? value.split(",").length : 0;
-  function apply() {
-    const tags = [...new Set(text.split(/[\n\r,;\t]+/).map((t) => t.trim().toLowerCase()).filter(Boolean))];
-    onChange(tags.join(","));
-    setOpen(false);
-    setText("");
-  }
-  if (!open) {
-    return (
-      <Button variant="secondary" onClick={() => setOpen(true)} className="min-h-10">
-        {count > 0 ? `Pasted tags (${count})` : "Paste tags"}
-      </Button>
-    );
-  }
-  return (
-    <div className="w-full rounded-lg border border-line bg-panel p-3">
-      <label className="block">
-        <span className="text-sm font-semibold text-ink">Tags to show, one per line (paste a column from Excel)</span>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} autoFocus placeholder={"39-EM-102-01A\n39-EM-102-01B"}
-          className="mt-1 block w-full rounded-md border border-line bg-panel px-3 py-2 text-[15px] focus:border-violet focus:outline-none" />
-      </label>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <Button disabled={!text.trim()} onClick={apply}>Filter by these tags</Button>
-        {count > 0 && <Button variant="secondary" onClick={() => { onChange(""); setOpen(false); }}>Remove tag filter</Button>}
-        <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
-      </div>
-    </div>
-  );
 }

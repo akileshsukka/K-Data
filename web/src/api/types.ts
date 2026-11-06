@@ -432,7 +432,7 @@ export type ImportOutcome = "Applied" | "Derived" | "No change" | "Invalid" | "C
 
 export interface ImportRun {
   id: number;
-  kind: "Update" | "Onboarding" | "ElectricalTest";
+  kind: "Update" | "Onboarding" | "ElectricalTest" | "Readings";
   fileName: string;
   unitId: number | null;
   unitName: string | null;
@@ -662,26 +662,30 @@ export interface MonitoringRow {
   currentGate: string;
   phase: "During" | "Post";
   preservedAtUtc: string | null;
+  /** Latest G4 - N2 Blanket (the pressure measured while DURING). */
   n2Barg: number | null;
   n2AtUtc: string | null;
-  daysSinceN2: number | null;
+  /** Latest Pressure (barg) (the pressure measured once POST). */
   pressureBarg: number | null;
+  pressureAtUtc: string | null;
+  /** Days since the last Pressure reading taken since the asset was preserved (POST only). */
+  daysSincePressure: number | null;
   o2Pct: number | null;
   dewPointC: number | null;
   lastReadingAtUtc: string | null;
   status: MonitoringStatus;
-  lowN2: boolean;
+  lowPressure: boolean;
   groups: string[];
 }
 
 export interface MonitoringSettings {
   intervalDays: number;
-  minN2Barg: number | null;
+  minPressureBarg: number | null;
 }
 
 export interface MonitoringView {
   settings: MonitoringSettings;
-  summary: { post: number; during: number; overdue: number; noReading: number; lowN2: number; ok: number };
+  summary: { post: number; during: number; overdue: number; noReading: number; lowPressure: number; ok: number };
   rows: MonitoringRow[];
 }
 

@@ -96,7 +96,7 @@ export function ExcelPage() {
               <li key={r.id} className="border-t border-line">
                 <Link to={`/imports/${r.id}`} className="grid gap-1 px-5 py-3 hover:bg-surface sm:grid-cols-[1fr_auto] sm:items-center">
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold text-ink">{r.kind === "Onboarding" && "Client list · "}{r.fileName}</span>
+                    <span className="block truncate font-semibold text-ink">{r.kind === "Onboarding" && "Client list · "}{r.kind === "Readings" && "Readings · "}{r.fileName}</span>
                     <span className="block text-sm text-muted">
                       {formatDateTime(r.uploadedAtUtc)}{r.uploadedBy && ` by ${r.uploadedBy}`}
                       {r.status !== "Rejected" && ` · ${r.counts.applied + r.counts.derived + r.counts.created} changes, ${r.counts.issues} issues`}

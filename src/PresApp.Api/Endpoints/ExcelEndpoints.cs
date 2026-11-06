@@ -98,7 +98,8 @@ public static class ExcelEndpoints
 
         imports.MapGet("/{id:long}", (long id, PresAppDbContext db, CancellationToken ct) => ImportQueries.DetailAsync(db, id, ct));
 
-        imports.MapPost("/{id:long}/apply", async (long id, HttpRequest http, ClaimsPrincipal user, PresAppDbContext db, ExcelImportService excel, OnboardingService onboarding, ElectricalTestWorkbook electrical, CancellationToken ct) =>
+        imports.MapPost("/{id:long}/apply", async (long id, HttpRequest http, ClaimsPrincipal user, PresAppDbContext db, ExcelImportService excel, OnboardingService onboarding,
+            ElectricalTestWorkbook electrical, ReadingsWorkbook readings, CancellationToken ct) =>
         {
             // Optional body: the choices made in the preview for lines that look like existing ones.
             var request = http.ContentLength > 0 ? await http.ReadFromJsonAsync<ApplyImportRequest>(ct) : null;
@@ -116,6 +117,11 @@ public static class ExcelEndpoints
             {
                 if (!user.HasPermission(Permissions.GatesEdit)) throw ApiProblem.Forbidden("Your role cannot load electrical tests.");
                 return await electrical.ApplyAsync(id, by, ct);
+            }
+            if (kind == ImportKind.Readings)
+            {
+                if (!user.HasPermission(Permissions.ReadingsWrite)) throw ApiProblem.Forbidden("Your role cannot record monitoring readings.");
+                return await readings.ApplyAsync(id, user, ct);
             }
             return await excel.ApplyAsync(id, by, ct);
         });
