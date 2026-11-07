@@ -63,7 +63,13 @@ export function ImportPage() {
   const { run } = detail.data;
   const c = run.counts;
   const preview = run.status === "Previewed";
-  const changeCount = c.applied + c.derived + c.created;
+  // E7: motors with a complete (locked) test whose values the file changes. Each one needs a Yes / No before applying.
+  const replaceQuestions = preview ? changes.filter((x) => x.field === ReplaceTestField && x.outcome === "Conflict" && x.rowNumber != null) : [];
+  const unanswered = replaceQuestions.filter((x) => !["replace", "keep"].includes(decisions[x.rowNumber!] ?? "")).length;
+  // Rows answered No load none of their test values: they leave the count.
+  const keptRows = new Set(replaceQuestions.filter((x) => decisions[x.rowNumber!] === "keep").map((x) => x.rowNumber));
+  const notLoaded = changes.filter((x) => x.outcome === "Applied" && keptRows.has(x.rowNumber) && !["NameplateData", "Required"].includes(x.field)).length;
+  const changeCount = c.applied + c.derived + c.created - notLoaded;
 
   return (
     <div>
@@ -110,9 +116,30 @@ export function ImportPage() {
                 and records the issues for review. The file cannot be uploaded again afterwards.
               </p>
               <Button variant="secondary" busy={act.isPending && act.variables === "cancel"} onClick={() => act.mutate("cancel")}>Cancel</Button>
-              <Button busy={act.isPending && act.variables === "apply"} disabled={changeCount === 0 && c.issues === 0} onClick={() => act.mutate("apply")}>
+              <Button busy={act.isPending && act.variables === "apply"} disabled={(changeCount === 0 && c.issues === 0) || unanswered > 0} onClick={() => act.mutate("apply")}>
                 Apply {changeCount} changes
               </Button>
+              {unanswered > 0 && <p className="w-full text-right text-sm font-semibold text-ongoing">Answer the {unanswered} E7 question{unanswered === 1 ? "" : "s"} first.</p>}
+            </div>
+          )}
+
+          {replaceQuestions.length > 0 && (
+            <div role="alert" className="mt-4 max-w-3xl rounded-lg border border-ongoing/40 bg-ongoing/10 p-4">
+              <p className="font-semibold text-ink">
+                {replaceQuestions.length === 1 ? "1 motor already has" : `${replaceQuestions.length} motors already have`} a complete E7 test and the file changes its values.
+              </p>
+              <p className="mt-1 text-sm text-ink">
+                For each one choose <strong>Yes</strong> to replace the test values with those of the file, or <strong>No</strong> to keep the current test (none of the
+                test values of that row are loaded). Values the test does not have yet, like the optional PI, load without asking.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {replaceQuestions.map((q) => (
+                  <li key={q.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="mr-auto font-display font-semibold text-ink">{q.assetTag ?? q.assetCode} <span className="text-sm font-normal text-muted">· {q.excelValue}</span></span>
+                    <ReplaceChoice row={q.rowNumber!} value={decisions[q.rowNumber!]} onDecide={(row, d) => setDecisions({ ...decisions, [row]: d })} />
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -152,7 +179,26 @@ function Count({ label, value, detail, tone }: { label: string; value: number; d
   );
 }
 
-type Decision = "review" | "update" | "rename" | "create";
+type Decision = "review" | "update" | "rename" | "create" | "replace" | "keep";
+
+/** Field of the E7 question "replace the complete test with the file values?" (server: ElectricalTestWorkbook.ReplaceTestField). */
+const ReplaceTestField = "(replace test)";
+
+/** Yes / No of the E7 question; nothing chosen until the user answers. */
+function ReplaceChoice({ row, value, onDecide }: { row: number; value: Decision | undefined; onDecide: (row: number, d: Decision) => void }) {
+  const option = (d: "replace" | "keep", label: string, on: string) => (
+    <button type="button" aria-pressed={value === d} onClick={() => onDecide(row, d)}
+      className={`min-h-9 rounded-md border px-3 text-sm font-semibold ${value === d ? on : "border-line bg-panel text-ink hover:border-violet"}`}>
+      {label}
+    </button>
+  );
+  return (
+    <span className="flex gap-2" role="group" aria-label="Replace the E7 test?">
+      {option("replace", "Yes, replace", "border-hold bg-hold text-white")}
+      {option("keep", "No, keep current", "border-violet bg-violet text-white")}
+    </span>
+  );
+}
 
 function AssetChanges({ rows, preview, decision, onDecide }: { rows: ImportChange[]; preview: boolean; decision: (row: number) => Decision; onDecide: (row: number, d: Decision) => void }) {
   const first = rows[0];
@@ -187,6 +233,12 @@ function AssetChanges({ rows, preview, decision, onDecide }: { rows: ImportChang
                   </select>
                 </span>
               )}
+              {preview && c.field === ReplaceTestField && c.outcome === "Conflict" && c.rowNumber != null && (
+                <span className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-ink">Replace it with the file values?</span>
+                  <ReplaceChoice row={c.rowNumber} value={decision(c.rowNumber)} onDecide={onDecide} />
+                </span>
+              )}
             </span>
             <span><OutcomeChip outcome={c.outcome} /></span>
           </li>
@@ -198,6 +250,7 @@ function AssetChanges({ rows, preview, decision, onDecide }: { rows: ImportChang
 
 function ValueChange({ c }: { c: ImportChange }) {
   const empty = <span className="text-muted italic">empty</span>;
+  if (c.field === ReplaceTestField) return <span className="block break-words">{c.currentValue} · file: <strong>{c.excelValue}</strong>{c.newValue && <> → <strong>{c.newValue}</strong></>}</span>;
   if (c.field === "(possible match)") return <span className="block break-words">File: <strong>{c.excelValue}</strong> · in K Data: <strong>{c.currentValue}</strong></span>;
   if (c.outcome === "Conflict") {
     return (

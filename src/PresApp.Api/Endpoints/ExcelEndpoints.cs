@@ -116,7 +116,7 @@ public static class ExcelEndpoints
             if (kind == ImportKind.ElectricalTest)
             {
                 if (!user.HasPermission(Permissions.GatesEdit)) throw ApiProblem.Forbidden("Your role cannot load electrical tests.");
-                return await electrical.ApplyAsync(id, by, ct);
+                return await electrical.ApplyAsync(id, by, ct, request?.Decisions);
             }
             if (kind == ImportKind.Readings)
             {

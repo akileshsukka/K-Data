@@ -205,6 +205,47 @@ public sealed class ElectricalTestTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Changing_a_complete_test_from_the_sheet_needs_a_yes_or_no_per_motor()
+    {
+        var unitId = await UnitAsync("Unit 32");
+        var replaced = await CreateAsync(unitId, "32-EM-601");
+        var kept = await CreateAsync(unitId, "32-EM-602");
+        var unanswered = await CreateAsync(unitId, "32-EM-603");
+        var piAdded = await CreateAsync(unitId, "32-EM-604");
+        foreach (var id in new[] { replaced, kept, unanswered, piAdded }) await SaveAsync(id, true, FullTest, expected: null);
+
+        var export = await admin.PostAsJsonAsync($"/api/units/{unitId}/electrical-tests/export", new { assetIds = new[] { replaced, kept, unanswered, piAdded } });
+        var edited = TestWorkbooks.Edit(await export.Content.ReadAsByteArrayAsync(), wb =>
+        {
+            var ws = wb.Worksheet(1);
+            ws.Cell("C4").Value = 0.5; ws.Cell("C5").Value = 0.5; ws.Cell("C6").Value = 0.5;   // winding U1-U2 changed on rows 1–3
+            ws.Cell("X7").Value = 1.2; ws.Cell("Y7").Value = 3.6;                                // only PI added (empty before) on row 4
+        });
+        var preview = await PostFileAsync($"/api/units/{unitId}/electrical-tests/import", edited);
+        var changes = Changes(preview);
+        Assert.Contains(("32-EM-601", "(replace test)", "Conflict"), changes);
+        Assert.Contains(("32-EM-602", "(replace test)", "Conflict"), changes);
+        Assert.Contains(("32-EM-603", "(replace test)", "Conflict"), changes);
+        Assert.DoesNotContain(changes, c => c is ("32-EM-604", "(replace test)", _));
+        Assert.Contains(("32-EM-604", "PiUV1", "Applied"), changes);
+
+        var runId = preview.GetProperty("run").GetProperty("id").GetInt64();
+        var applied = await admin.PostAsJsonAsync($"/api/imports/{runId}/apply", new { decisions = new Dictionary<int, string> { [1] = "replace", [2] = "keep" } });
+        Assert.True(applied.IsSuccessStatusCode, await applied.Content.ReadAsStringAsync());
+        var result = Changes(await applied.Content.ReadFromJsonAsync<JsonElement>());
+        Assert.Contains(("32-EM-601", "(replace test)", "Applied"), result);
+        Assert.Contains(("32-EM-602", "(replace test)", "No change"), result);
+        Assert.Contains(("32-EM-603", "(replace test)", "Conflict"), result);
+
+        async Task<decimal> Winding(Guid id) => (await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{id}")).GetProperty("electricalTest").GetProperty("values").GetProperty("WrU1U2").GetDecimal();
+        Assert.Equal(0.5m, await Winding(replaced));
+        Assert.Equal(0.21m, await Winding(kept));
+        Assert.Equal(0.21m, await Winding(unanswered));
+        var pi = (await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{piAdded}")).GetProperty("electricalTest");
+        Assert.Equal(3m, pi.GetProperty("ratios").GetProperty("PiUV").GetDecimal());
+    }
+
+    [Fact]
     public async Task E7_completed_in_the_unit_file_without_a_complete_test_is_a_warning()
     {
         var unitId = await UnitAsync("Unit 42");

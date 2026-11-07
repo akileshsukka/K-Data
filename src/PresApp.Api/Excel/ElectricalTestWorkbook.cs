@@ -31,6 +31,13 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
     private const string RowField = "(row)";
 
     /// <summary>
+    /// Question of the preview for a motor whose E7 test is complete (locked in the app) and the file changes values it
+    /// already has. Decision by row: "replace" (yes, load the file values) or "keep" (no, the row's test values are not loaded).
+    /// Filling values the test does not have yet (e.g. the optional PI) asks nothing.
+    /// </summary>
+    public const string ReplaceTestField = "(replace test)";
+
+    /// <summary>
     /// Columns of the sheet from ITEM TAG (offset 0): DESCRIPTION, then each block's values and, after DAR / PI blocks, the ratio.
     /// Built from <see cref="ElectricalTestSpec.Blocks"/>, which follows the order of the sheet.
     /// </summary>
@@ -173,7 +180,7 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         return await ImportQueries.DetailAsync(db, run.Id, ct);
     }
 
-    public async Task<ImportRunDetail> ApplyAsync(long runId, string appliedBy, CancellationToken ct)
+    public async Task<ImportRunDetail> ApplyAsync(long runId, string appliedBy, CancellationToken ct, IReadOnlyDictionary<int, string>? decisions = null)
     {
         var run = await db.ImportRuns.Include(r => r.Changes).FirstOrDefaultAsync(r => r.Id == runId, ct) ?? throw ApiProblem.NotFound("Import not found.");
         if (run.Status != ImportStatus.Previewed) throw ApiProblem.Invalid($"This import is {ExcelImportService.Text(run.Status)}; it cannot be applied.");
@@ -185,7 +192,7 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         audit.UserName = appliedBy;
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var rows = Read(file.Content);
-        var changes = await AnalyseAsync(rows, run.UnitId ?? 0, apply: true, ct);
+        var changes = await AnalyseAsync(rows, run.UnitId ?? 0, apply: true, ct, decisions);
         db.ImportChanges.RemoveRange(run.Changes);
         run.Changes = [];
         Fill(run, rows.Count, changes);
@@ -243,7 +250,7 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         throw new Rejected("No E7 electrical test sheet was found (a visible sheet with an \"ITEM TAG\" header in its first rows).");
     }
 
-    private async Task<List<ImportChange>> AnalyseAsync(List<SourceRow> rows, int unitId, bool apply, CancellationToken ct)
+    private async Task<List<ImportChange>> AnalyseAsync(List<SourceRow> rows, int unitId, bool apply, CancellationToken ct, IReadOnlyDictionary<int, string>? decisions = null)
     {
         var query = db.Assets.Include(a => a.ElectricalTest).Where(a => a.UnitId == unitId && a.IsActive && a.Tag != null);
         var assets = await (apply ? query : query.AsNoTracking()).ToListAsync(ct);
@@ -276,19 +283,54 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
 
             var test = asset.ElectricalTest;
             var proposed = new Dictionary<ElectricalMeasure, decimal>();
+            var testChanges = new List<ImportChange>();
+            var overwritten = 0;
             foreach (var (measure, text) in row.Values)
             {
                 var current = test is null ? null : ElectricalTestSpec.Get(test, measure.Key);
                 var currentText = current?.ToString(CultureInfo.InvariantCulture);
                 if (!ValueNormalizer.TryParseDecimal(text, out var value) || value < 0)
                 {
-                    changes.Add(Change(asset, measure.Key, ImportOutcome.Invalid, $"{measure.Label} must be a number (0 or more).", text, currentText));
+                    testChanges.Add(Change(asset, measure.Key, ImportOutcome.Invalid, $"{measure.Label} must be a number (0 or more).", text, currentText));
                     continue;
                 }
-                if (current == value) { changes.Add(Change(asset, measure.Key, ImportOutcome.NoChange, "The app already has this value.", text, currentText, currentText)); continue; }
+                if (current == value) { testChanges.Add(Change(asset, measure.Key, ImportOutcome.NoChange, "The app already has this value.", text, currentText, currentText)); continue; }
                 proposed[measure] = value;
-                changes.Add(Change(asset, measure.Key, ImportOutcome.Applied, null, text, currentText, value.ToString(CultureInfo.InvariantCulture)));
+                if (current is not null) overwritten++;
+                testChanges.Add(Change(asset, measure.Key, ImportOutcome.Applied, null, text, currentText, value.ToString(CultureInfo.InvariantCulture)));
             }
+
+            // A complete test is locked in the app: changing its values from the file needs a yes / no in the preview.
+            if (overwritten > 0 && ElectricalTestSpec.IsComplete(test))
+            {
+                var about = $"This motor already has a complete E7 test{(test!.TestedOn is { } on ? $" of {on:dd MMM yyyy}" : "")}, saved by {test.UpdatedBy}. "
+                            + $"The file changes {overwritten} of its value{(overwritten == 1 ? "" : "s")}.";
+                var current = $"Test saved by {test.UpdatedBy}";
+                var excel = $"{overwritten} value{(overwritten == 1 ? "" : "s")} changed";
+                switch (decisions?.GetValueOrDefault(row.Number))
+                {
+                    case "replace":
+                        changes.Add(Change(asset, ReplaceTestField, ImportOutcome.Applied, about + " Yes, chosen in the preview: the file values replace those of the current test.", excel, current, "Replaced"));
+                        break;
+                    case "keep":
+                        changes.Add(Change(asset, ReplaceTestField, ImportOutcome.NoChange, about + " No, chosen in the preview: the current test was kept and the test values of this row were not loaded.", excel, current, "Kept"));
+                        testChanges.Clear();
+                        proposed.Clear();
+                        break;
+                    default:
+                        changes.Add(Change(asset, ReplaceTestField, ImportOutcome.Conflict, about + (apply
+                            ? " Not loaded: no choice was made in the preview. Check the values and upload the file again."
+                            : " Choose whether the file replaces it."), excel, current));
+                        if (apply)
+                        {
+                            testChanges.RemoveAll(c => c.Outcome == ImportOutcome.Applied);
+                            proposed.Clear();
+                        }
+                        else foreach (var c in testChanges.Where(c => c.Outcome == ImportOutcome.Applied)) c.Reason = "Loaded only if you answer Yes.";
+                        break;
+                }
+            }
+            changes.AddRange(testChanges);
 
             string? nameplate = null;
             if (row.Nameplate is { } np)

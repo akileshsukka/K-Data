@@ -103,6 +103,7 @@ public static class ImportQueries
         "(row)" => "Row",
         "(asset)" => "Equipment",
         "(possible match)" => "Same line?",
+        "(replace test)" => "Replace the E7 test?",
         "Tag" => "Equip No",
         "Discipline" => "Discipline",
         _ => PreservationFields.LabelOf(field)

@@ -4,6 +4,7 @@ import { Perm, type AssetProfile, type ElectricalBlock } from "../../api/types";
 import { useSession } from "../../app/session";
 import { useElectricalTestSpec } from "../../app/useCatalog";
 import { Button } from "../../components/Button";
+import { Dialog } from "../../components/Dialog";
 import { TextInput } from "../../components/Field";
 import { gatePrefix } from "../../components/GateStatus";
 import { useToast } from "../../components/Toast";
@@ -39,6 +40,8 @@ function ratio(block: ElectricalBlock, values: Record<string, string>) {
 /**
  * Step 7 electrical test (motors): the values of the client sheet in the same blocks and colours, ratios calculated.
  * The test is optional per asset: it is activated where needed. Partial tests can be saved; the PI block is optional.
+ * Once the test is complete its values are locked: a retest goes through "Register a new test", which starts from an
+ * empty form and replaces the current test when saved (one test per asset).
  */
 export function ElectricalTestTab({ asset }: { asset: AssetProfile }) {
   const test = asset.electricalTest ?? null;
@@ -61,6 +64,9 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
   };
   const [form, setForm] = useState<Form>(initial);
   const [error, setError] = useState<string | null>(null);
+  // "Register a new test": empty form that replaces the stored test on save. Cancel brings the stored test back.
+  const [replacing, setReplacing] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
 
   if (spec.isPending) return <p className="text-muted">Loading…</p>;
   if (spec.error) return <p className="text-hold">{spec.error.message}</p>;
@@ -69,6 +75,10 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
   const bad = measures.filter((m) => { const n = toNumber(form.values[m.key] ?? ""); return n !== null && (Number.isNaN(n) || n < 0); });
   const missing = measures.filter((m) => m.required && toNumber(form.values[m.key] ?? "") === null);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const filledCount = measures.filter((m) => toNumber(form.values[m.key] ?? "") !== null).length;
+  // A complete test is locked; an incomplete one stays editable so it can be finished.
+  const locked = !!test?.complete && !replacing;
+  const editable = canEdit && !locked;
 
   // Plain functions, not components: a component defined here would remount (and lose the focus) on every keystroke.
   const blockLegend = (b: ElectricalBlock) => (
@@ -84,7 +94,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
         {b.measures.map((m) => (
           <label key={m.key} className="block w-28">
             <span className="text-sm text-ink">{m.label.replace(`${b.title} `, "").replace(/^(Winding|IR|PI) /, "")}</span>
-            <TextInput inputMode="decimal" value={form.values[m.key] ?? ""} disabled={!canEdit} aria-invalid={bad.includes(m)}
+            <TextInput inputMode="decimal" value={form.values[m.key] ?? ""} disabled={!editable} aria-invalid={bad.includes(m)}
               aria-label={m.label} onChange={(e) => setForm({ ...form, values: { ...form.values, [m.key]: e.target.value } })} />
           </label>
         ))}
@@ -133,19 +143,25 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
 
   return (
     <div className="space-y-4">
+      {replacing && test && (
+        <p className="rounded-lg border border-ongoing/30 bg-ongoing/10 px-4 py-3 text-ink">
+          New test. The current test{test.testedOn ? ` of ${test.testedOn}` : ""} (saved by {test.updatedBy}, {formatDateTime(test.updatedAtUtc)}) will be deleted when you save this one.
+        </p>
+      )}
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-line bg-panel px-4 py-3">
         <div>
-          <h2 className="text-lg font-semibold">{step} electrical test</h2>
+          <h2 className="text-lg font-semibold">{step} electrical test{replacing && " · new test"}</h2>
           <p className={missing.length === 0 ? "text-done" : "text-ongoing"}>
             {missing.length === 0 ? "Complete: every required value is recorded." : `${missing.length} required value${missing.length === 1 ? "" : "s"} missing.`}
             {!form.required && <span className="ml-1 text-muted">Not required any more (the values are kept).</span>}
           </p>
-          {test && <p className="text-sm text-muted">Last saved by {test.updatedBy}, {formatDateTime(test.updatedAtUtc)}</p>}
+          {locked && <p className="text-sm text-muted">Test recorded: the values are locked. To repeat the test, register a new one.</p>}
+          {test && !replacing && <p className="text-sm text-muted">Last saved by {test.updatedBy}, {formatDateTime(test.updatedAtUtc)}</p>}
         </div>
         <div className="flex flex-wrap items-end gap-4">
           <label className="block">
             <span className="text-sm font-semibold text-ink">Test date</span>
-            <TextInput type="date" value={form.testedOn} disabled={!canEdit} onChange={(e) => setForm({ ...form, testedOn: e.target.value })} className="w-44" />
+            <TextInput type="date" value={form.testedOn} disabled={!editable} onChange={(e) => setForm({ ...form, testedOn: e.target.value })} className="w-44" />
           </label>
           <label className="flex min-h-10 items-center gap-2">
             <input type="checkbox" className="size-4 accent-violet" checked={form.required} disabled={!canEdit}
@@ -187,10 +203,40 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
       {canEdit && (
         <div className="flex flex-wrap items-center justify-end gap-3">
           {error && <p className="mr-auto text-hold">{error}</p>}
-          <Button variant="secondary" disabled={!dirty || save.isPending} onClick={() => { setForm(initial); setError(null); }}>Undo changes</Button>
-          <Button busy={save.isPending} disabled={!dirty} onClick={() => void submit()}>Save test</Button>
+          {locked && (
+            <Button variant="secondary" disabled={save.isPending} onClick={() => setConfirmNew(true)}>Register a new test</Button>
+          )}
+          {replacing ? (
+            <Button variant="secondary" disabled={save.isPending} onClick={() => { setForm(initial); setReplacing(false); setError(null); }}>Cancel new test</Button>
+          ) : (
+            (!locked || dirty) && (
+              <Button variant="secondary" disabled={!dirty || save.isPending} onClick={() => { setForm(initial); setError(null); }}>Undo changes</Button>
+            )
+          )}
+          {(!locked || dirty) && (
+            <Button busy={save.isPending} disabled={replacing ? filledCount === 0 : !dirty} onClick={() => void submit()}>
+              {replacing ? "Save new test" : "Save test"}
+            </Button>
+          )}
         </div>
       )}
+
+      <Dialog open={confirmNew} title="Register a new test?" onClose={() => setConfirmNew(false)}>
+        <p>
+          Only one {step} test is kept per asset. The current test{test?.testedOn ? ` of ${test.testedOn}` : ""} and all its values will be
+          deleted and replaced by the new one when you save it.
+        </p>
+        <p className="mt-2 text-sm text-muted">Nothing is deleted until you save. You can still cancel the new test before that.</p>
+        <div className="mt-5 flex justify-end gap-3">
+          <Button variant="secondary" onClick={() => setConfirmNew(false)}>Cancel</Button>
+          <Button variant="danger" onClick={() => {
+            setForm({ required: form.required, testedOn: "", values: {} });
+            setReplacing(true);
+            setError(null);
+            setConfirmNew(false);
+          }}>Start new test</Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
