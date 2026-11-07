@@ -7,13 +7,15 @@ namespace PresApp.Api.Piping;
 
 public sealed record PipingCount(int Done, int Total);
 public sealed record CleaningScopeRow(string Value, int Lines, bool InScope);
-public sealed record PipingServiceRow(string Code, string? Description, int Lines, int Walkdown, int Drained, int Inspected, int Scope, int Cleaned);
+/// <summary>InspectionTotal: the lines of the service without Inspection Done = N/A (what Inspected is counted against).</summary>
+public sealed record PipingServiceRow(string Code, string? Description, int Lines, int Walkdown, int Drained, int Inspected, int Scope, int Cleaned,
+    int InspectionTotal);
 public sealed record PipingSummary(int Lines, decimal LengthM, PipingCount Walkdown, PipingCount Drained, PipingCount Inspected,
     PipingCount Cleaned, int NoCleaningSet, List<CleaningScopeRow> Cleaning, List<PipingServiceRow> ByService);
 
 /// <summary>
 /// The figures of the piping Summary for the app (same rules as the Excel): walkdown Completed, bulk liquid drained
-/// (Completed), inspection done (Yes), cleaning scope per Cleaning Required value (TBC and similar are not scope)
+/// (Completed), inspection done (Yes; lines with N/A are left out of the total), cleaning scope per Cleaning Required value (TBC and similar are not scope)
 /// and lines cleaned (Cleaned = Yes) against the scope.
 /// </summary>
 public sealed class PipingSummaryService(PresAppDbContext db)
@@ -44,6 +46,7 @@ public sealed class PipingSummaryService(PresAppDbContext db)
                 Walkdown = AssetPreservation.IsCompleted(l.Walkdown),
                 Drained = AssetPreservation.IsCompleted(l.Drained),
                 Inspected = string.Equals(Value(l.Id, PipingFieldKeys.InspectionDone), "Yes", StringComparison.OrdinalIgnoreCase),
+                InspectionNa = PipingFieldKeys.IsNotApplicable(Value(l.Id, PipingFieldKeys.InspectionDone)),
                 Cleaning = cleaning,
                 InScope = cleaning is not null && !Excel.PipingTemplate.NotScope(cleaning),
                 Cleaned = string.Equals(Value(l.Id, PipingFieldKeys.Cleaned), "Yes", StringComparison.OrdinalIgnoreCase)
@@ -65,13 +68,13 @@ public sealed class PipingSummaryService(PresAppDbContext db)
             rows.Count, rows.Sum(r => r.Length ?? 0),
             new PipingCount(rows.Count(r => r.Walkdown), rows.Count),
             new PipingCount(rows.Count(r => r.Drained), rows.Count),
-            new PipingCount(rows.Count(r => r.Inspected), rows.Count),
+            new PipingCount(rows.Count(r => r.Inspected), rows.Count(r => !r.InspectionNa)),
             new PipingCount(rows.Count(r => r.Cleaned && r.InScope), scope),
             rows.Count(r => r.Cleaning is null),
             cleaningRows,
             rows.GroupBy(r => r.Service).OrderBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => new PipingServiceRow(g.Key, codes.Service(g.Key, unitId), g.Count(), g.Count(r => r.Walkdown), g.Count(r => r.Drained),
-                    g.Count(r => r.Inspected), g.Count(r => r.InScope), g.Count(r => r.Cleaned && r.InScope)))
+                    g.Count(r => r.Inspected), g.Count(r => r.InScope), g.Count(r => r.Cleaned && r.InScope), g.Count(r => !r.InspectionNa)))
                 .ToList());
     }
 }

@@ -227,9 +227,14 @@ public static class PipingTemplate
                 var countLetter = XLHelper.GetColumnLetterFromNumber(col - 1);
                 // The criteria is the header cell (e.g. K$4 = "Hydromilling"): renaming the header changes what is counted.
                 var criteria = $"{letter}${headerRow}";
+                // Inspection: lines with N/A are left out of the total ("Complete %" = Yes / (lines − N/A)).
+                string NotApplicable(int row) =>
+                    $"COUNTIFS({T(PipingLayout.TagHeader)},\"<>\",{(row == totalRow ? "" : $"{T(PipingLayout.ProcessCodeHeader)},$B{row},")}{T(PipingLayout.InspectionHeader)},\"{Domain.Catalog.PipingFieldKeys.InspectionNotApplicable}\")";
                 string Percent(int row) => head == ScopeHeader && scopeColumns.Count > 0
                     ? $"IF(SUM({string.Join(",", scopeColumns.Select(c => $"{c}{row}"))})>0,{countLetter}{row}/SUM({string.Join(",", scopeColumns.Select(c => $"{c}{row}"))}),\"\")"
-                    : $"IF(AND(ISNUMBER(D{row}),D{row}>0),{countLetter}{row}/D{row},\"\")";
+                    : group == "Inspection"
+                        ? $"IF(AND(ISNUMBER(D{row}),D{row}-{NotApplicable(row)}>0),{countLetter}{row}/(D{row}-{NotApplicable(row)}),\"\")"
+                        : $"IF(AND(ISNUMBER(D{row}),D{row}>0),{countLetter}{row}/D{row},\"\")";
                 s.Cell(totalRow, col).FormulaA1 = percent ? Percent(totalRow) : $"COUNTIFS({T(PipingLayout.TagHeader)},\"<>\",{T(column!)},{criteria})";
                 s.Cell(codeRow, col).FormulaA1 = percent ? Percent(codeRow) : CodeFormula(codeRow, codeRow, $"{T(column!)},{criteria}");
                 var cells = s.Range(totalRow, col, codeRow, col);

@@ -30,7 +30,8 @@ export function drainedTick(v: string | null | undefined): Tick {
   return k === "completed" ? "done" : k === "not applicable" ? "na" : k ? "ongoing" : "missing";
 }
 
-/** Inspection Done: Yes or No (empty counts as No). */
+/** Inspection Done: Yes, No or N/A (empty counts as No). */
 export function yesTick(v: string | null | undefined): Tick {
-  return (v ?? "").trim().toLowerCase() === "yes" ? "done" : "missing";
+  const k = (v ?? "").replace(/\s+/g, "").toLowerCase();
+  return k === "yes" ? "done" : k === "n/a" || k === "na" || k === "notapplicable" ? "na" : "missing";
 }

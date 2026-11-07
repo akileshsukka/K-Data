@@ -82,7 +82,7 @@ export function PipingServiceTable({ rows, className = "" }: { rows: PipingSumma
             <td className="px-4 py-2 text-right tabular-nums">{r.lines}</td>
             <Cell done={r.walkdown} total={r.lines} />
             <Cell done={r.drained} total={r.lines} />
-            <Cell done={r.inspected} total={r.lines} />
+            <Cell done={r.inspected} total={r.inspectionTotal} />
             <td className="px-4 py-2 text-right tabular-nums">{r.scope || "—"}</td>
             <Cell done={r.cleaned} total={r.scope} />
           </tr>

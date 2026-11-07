@@ -797,7 +797,7 @@ export interface PipingSummary {
   cleaned: PipingCount;
   noCleaningSet: number;
   cleaning: { value: string; lines: number; inScope: boolean }[];
-  byService: { code: string; description: string | null; lines: number; walkdown: number; drained: number; inspected: number; scope: number; cleaned: number }[];
+  byService: { code: string; description: string | null; lines: number; walkdown: number; drained: number; inspected: number; scope: number; cleaned: number; /** Lines without Inspection Done = N/A. */ inspectionTotal: number }[];
 }
 
 export interface PipingTemplateInfo {

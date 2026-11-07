@@ -18,7 +18,8 @@ public sealed class DataTests : IClassFixture<TestApp>
     [Fact]
     public async Task Seed_has_no_NA_and_no_documentation_pending_option()
     {
-        var values = await app.WithDbAsync(db => db.OptionValues.Select(v => v.Value).ToListAsync());
+        // Inspection Done of the Pipeline Register writes "N/A" like the engineers' line list (its only exception).
+        var values = await app.WithDbAsync(db => db.OptionValues.Where(v => v.OptionSet.Key != "CF.Pipeline.InspectionDone").Select(v => v.Value).ToListAsync());
 
         Assert.DoesNotContain(values, v => v == "N/A");
         Assert.DoesNotContain(values, v => v.Contains("Documentation Pending", StringComparison.OrdinalIgnoreCase));

@@ -48,8 +48,14 @@ public static class OptionSetKeys
 /// </summary>
 public static class PipingFieldKeys
 {
-    /// <summary>Yes / No.</summary>
+    /// <summary>List Yes / No / N/A (empty counts as No). N/A lines are left out of the inspection total.</summary>
     public const string InspectionDone = "InspectionDone";
+    /// <summary>The "not applicable" value of Inspection Done.</summary>
+    public const string InspectionNotApplicable = "N/A";
+
+    /// <summary>"N/A", "NA" or "Not Applicable" (spaces and case do not count).</summary>
+    public static bool IsNotApplicable(string? value) =>
+        value is not null && new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray()).ToLowerInvariant() is "n/a" or "na" or "notapplicable";
     /// <summary>List (Hydromilling, TBC…): one Summary column per value.</summary>
     public const string CleaningRequired = "CleaningRequired";
     /// <summary>List (Yes; Not Applicable can be added later). Empty = not cleaned or not required.</summary>

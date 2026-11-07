@@ -199,7 +199,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.emWalkdown || (f.emWalkdown === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === f.emWalkdown.toLowerCase())) &&
           (!f.ready || (f.ready === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === f.ready.toLowerCase())) &&
           (!f.drained || (f.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
-          (!f.inspection || (f.inspection === "Yes") === (yesTick(r.custom?.[PipingFieldKeys.inspectionDone]) === "done")) &&
+          (!f.inspection || ({ Yes: "done", No: "missing", NA: "na" } as Record<string, string>)[f.inspection] === yesTick(r.custom?.[PipingFieldKeys.inspectionDone])) &&
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
@@ -356,6 +356,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 <option value="">Any inspection</option>
                 <option value="Yes">Inspection done</option>
                 <option value="No">Inspection not done</option>
+                <option value="NA">Inspection N/A</option>
               </SelectInput>
             </div>
             <div className="w-full sm:w-52">

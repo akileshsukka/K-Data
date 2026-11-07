@@ -124,7 +124,8 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             "Pick one activity, or write several, one per line (Alt+Enter). Each one must be in the K Data list.");
         Dropdown(PipingLayout.WalkdownHeader, "EMWalkdown", Options(OptionSetKeys.EmWalkdown), true, "Select a value from the list.");
         Dropdown(PipingLayout.DrainedHeader, "BulkLiquidDrained", ["Yes"], true, "Write Yes, or leave it empty.");
-        Dropdown(PipingLayout.InspectionHeader, "InspectionDone", ["Yes", "No"], true, "Inspection Done is Yes or No.");
+        Dropdown(PipingLayout.InspectionHeader, "InspectionDone", CustomOptions(defs, PipingFieldKeys.InspectionDone), true,
+            "Select a value from the list (Yes, No or N/A).");
         Dropdown(PipingLayout.CleaningRequiredHeader, "CleaningRequired", CustomOptions(defs, PipingFieldKeys.CleaningRequired), true,
             "Select a value from the list. New values are added in K Data.");
         Dropdown(PipingLayout.CleanedHeader, "Cleaned", CustomOptions(defs, PipingFieldKeys.Cleaned), true, "Select a value from the list, or leave it empty.");

@@ -243,7 +243,8 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
 
     /// <summary>
     /// Custom fields of the Pipeline Register with a fixed key (Inspection Done, Cleaning Required, Cleaned).
-    /// A field an admin already created with the same name is adopted (its key is fixed); existing ones are never changed.
+    /// A field an admin already created with the same name is adopted (its key is fixed); existing ones are never changed,
+    /// except Inspection Done created as Yes/No: it becomes the list Yes / No / N/A, keeping its values (both kinds store the text).
     /// </summary>
     private async Task SeedPipingFieldsAsync(CancellationToken ct)
     {
@@ -253,10 +254,19 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         foreach (var (key, label, kind, options, sort) in SeedData.PipingFields)
         {
             var def = defs.FirstOrDefault(d => d.Key == key)
-                      ?? defs.FirstOrDefault(d => Norm(d.Label) == Norm(label) && d.DataType == kind);
+                      ?? defs.FirstOrDefault(d => Norm(d.Label) == Norm(label)
+                          && (d.DataType == kind || (key == PipingFieldKeys.InspectionDone && d.DataType == FieldDataType.YesNo)));
             if (def is not null)
             {
                 if (def.Key != key && !defs.Any(d => d.Key == key)) def.Key = key;
+                if (def.Key == PipingFieldKeys.InspectionDone && def.DataType == FieldDataType.YesNo)
+                {
+                    def.DataType = FieldDataType.List;
+                    def.OptionSet ??= new OptionSet { Key = $"CF.{AssetType.Pipeline}.{key}", Label = def.Label };
+                    for (var i = 0; i < options.Length; i++)
+                        if (!def.OptionSet.Values.Any(v => string.Equals(v.Value, options[i], StringComparison.OrdinalIgnoreCase)))
+                            def.OptionSet.Values.Add(new OptionValue { Value = options[i], SortOrder = i, IsActive = true });
+                }
                 continue;
             }
             def = new FieldDefinition

@@ -414,4 +414,34 @@ public sealed class PipingListTests : IClassFixture<TestApp>
             await admin.DeleteAsync("/api/excel-templates/piping");   // back to the default for the other tests
         }
     }
+
+    [Fact]
+    public async Task Inspection_done_accepts_NA_and_NA_lines_are_left_out_of_the_inspection_total()
+    {
+        var field = (await admin.GetFromJsonAsync<JsonElement>("/api/catalog/custom-fields?type=Pipeline")).EnumerateArray()
+            .Single(f => f.GetProperty("key").GetString() == "InspectionDone");
+        Assert.Equal("List", field.GetProperty("dataType").GetString());
+        Assert.Equal(["Yes", "No", "N/A"], field.GetProperty("options").EnumerateArray().Select(o => o.GetString()));
+
+        var unitId = await UnitIdAsync("Unit 42");
+        var before = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("inspected");
+        await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/onboarding", EngineerList(
+            [1, "42-0901-HC-2\"-61055-N", null, "HC", "", null, null, null, "Yes", null, null],
+            [2, "42-0902-HC-2\"-61055-N", null, "HC", "", null, null, null, "No", null, null],
+            [3, "42-0903-HC-2\"-61055-N", null, "HC", "", null, null, null, "n/a", null, null])));
+        Assert.Equal("N/A", (await RowAsync(unitId, "42-0903-HC-2\"-61055-N")).GetProperty("custom").GetProperty("InspectionDone").GetString());
+
+        var after = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("inspected");
+        Assert.Equal(before.GetProperty("done").GetInt32() + 1, after.GetProperty("done").GetInt32());
+        Assert.Equal(before.GetProperty("total").GetInt32() + 2, after.GetProperty("total").GetInt32());   // the N/A line is not counted
+
+        var bytes = await admin.GetByteArrayAsync($"/api/units/{unitId}/excel/piping/export");
+        using var wb = new XLWorkbook(new MemoryStream(bytes));
+        var lists = wb.Worksheet("_lists");
+        var column = lists.Row(1).CellsUsed().Single(c => c.GetString() == "InspectionDone").Address.ColumnNumber;
+        Assert.Equal(["Yes", "No", "N/A"], Enumerable.Range(2, 3).Select(r => lists.Cell(r, column).GetString()));
+        var summary = wb.Worksheet("Summary");
+        Assert.Equal("Inspection", summary.Cell("I3").GetString());
+        Assert.Contains("Table1[Inspection Done ?],\"N/A\"", summary.Cell("J5").FormulaA1);
+    }
 }
