@@ -148,8 +148,9 @@ export function MonitoringPage() {
 }
 
 /**
- * The monitoring report to read and share: until preservation (N2 by ISO week), post-preservation (Pressure by ISO week)
- * and every reading. Optional date range; the workpack or group chosen on the page applies.
+ * The monitoring report to read and share (E&I assets are not included): until preservation (every reading by day),
+ * post-preservation (week 1 with up to 5 readings, then one reading per week) and every reading.
+ * Optional date range; the workpack or group chosen on the page applies.
  */
 function ReportButton({ unitId, group }: { unitId: number; group?: Group }) {
   const toast = useToast();
@@ -179,8 +180,9 @@ function ReportButton({ unitId, group }: { unitId: number; group?: Group }) {
       <Button variant="secondary" onClick={() => setOpen(true)}>Monitoring report</Button>
       <Dialog open={open} title="Monitoring report" onClose={() => setOpen(false)}>
         <p className="text-[15px]">
-          Three sheets: <strong>Until preservation</strong> (N2 blanket by ISO week), <strong>Post-preservation</strong> (Pressure by ISO week,
-          with the status of each asset) and <strong>Readings</strong> (every reading). Each week shows its last reading.
+          Three sheets, one row per asset and measurement (N2, dew point, O2, pressure...): <strong>Until preservation</strong> (one
+          column per day), <strong>Post-preservation</strong> (week 1 with up to 5 readings from the first one after preservation, then
+          one reading per week, with the status of each asset) and <strong>Readings</strong> (every reading). E&amp;I assets are not included.
         </p>
         {group && <p className="mt-2 text-sm text-muted">Only {group.code} — {group.name}, as filtered on the page.</p>}
         <div className="mt-4 flex flex-wrap gap-3">
@@ -193,7 +195,7 @@ function ReportButton({ unitId, group }: { unitId: number; group?: Group }) {
             <TextInput type="date" value={to} min={from || undefined} max={todayDubai()} onChange={(e) => setTo(e.target.value)} className="mt-1" />
           </label>
         </div>
-        <p className="mt-2 text-sm text-muted">Empty: from the first reading to this week.</p>
+        <p className="mt-2 text-sm text-muted">Empty: from the first reading to today.</p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
           <Button busy={busy} onClick={run}>{busy ? "Preparing file…" : "Download"}</Button>

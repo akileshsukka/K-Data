@@ -153,58 +153,88 @@ public sealed class MonitoringTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task The_monitoring_report_shows_the_last_reading_of_each_ISO_week_until_and_after_preservation()
+    public async Task The_monitoring_report_shows_daily_readings_until_preservation_and_week_1_then_weekly_readings_after()
     {
         var (unitId, building) = await CreateAsync("31-RPT-1");
         var (_, preserved) = await CreateAsync("31-RPT-2");
+        var ei = await app.WithDbAsync(db => db.Disciplines.Where(d => d.Name == "Electrical").Select(d => d.Id).FirstAsync());
+        var eiResponse = await admin.PostAsJsonAsync("/api/assets", new { type = "ElectricalInstrument", unitId, disciplineId = ei, tag = "31-RPT-EI" });
+        Assert.Equal(HttpStatusCode.Created, eiResponse.StatusCode);
+        var eiId = Guid.Parse((await eiResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!);
+
         var n2 = await N2Async();
         var pressure = await TypeAsync("PressureBarg");
+        var dewPoint = await TypeAsync("G2DewPointC");
         var today = DateTime.UtcNow.AddHours(4).Date;   // Dubai
         DateTime Noon(DateTime day) => day.AddHours(8);  // 12:00 Dubai in UTC
-        DateTime Monday(DateTime day) => day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
-        async Task Add(Guid id, int type, DateTime day, decimal value) =>
-            Assert.True((await admin.PostAsJsonAsync($"/api/assets/{id}/readings", new { measuredAtUtc = Noon(day), values = new[] { new { measurementTypeId = type, value } } })).IsSuccessStatusCode);
+        async Task Add(Guid id, int type, DateTime at, decimal value) =>
+            Assert.True((await admin.PostAsJsonAsync($"/api/assets/{id}/readings", new { measuredAtUtc = at, values = new[] { new { measurementTypeId = type, value } } })).IsSuccessStatusCode);
 
-        var twoWeeksAgo = Monday(today.AddDays(-14));
-        await Add(building, n2, today.AddDays(-21), 0.2m);
-        await Add(building, n2, twoWeeksAgo, 0.4m);
-        await Add(building, n2, twoWeeksAgo.AddDays(2), 0.5m);            // same week: the last one is shown, target reached
-        await Add(preserved, n2, today.AddDays(-35), 0.3m);               // before it was preserved
-        (await admin.PostAsJsonAsync($"/api/assets/{preserved}/preserved", new { preservedOn = DateOnly.FromDateTime(today.AddDays(-30)) })).EnsureSuccessStatusCode();
-        await Add(preserved, pressure, today.AddDays(-10), 0.8m);
+        // Still being preserved: N2 and dew point, two N2 readings on the same day.
+        await Add(building, n2, Noon(today.AddDays(-5)), 0.2m);
+        await Add(building, n2, Noon(today.AddDays(-3)), 0.4m);
+        await Add(building, n2, Noon(today.AddDays(-3)).AddHours(2), 1m);    // same day: the last one is shown, target reached
+        await Add(building, dewPoint, Noon(today.AddDays(-4)), -40m);
+        await Add(eiId, n2, Noon(today.AddDays(-2)), 0.5m);                    // E&I: not in this report
+
+        // Preserved 40 days ago: first reading 30 days ago, 6 readings in its first 7 days, then 2 more.
+        await Add(preserved, n2, Noon(today.AddDays(-45)), 0.3m);               // before it was preserved
+        (await admin.PostAsJsonAsync($"/api/assets/{preserved}/preserved", new { preservedOn = DateOnly.FromDateTime(today.AddDays(-40)) })).EnsureSuccessStatusCode();
+        decimal[] firstWeek = [1m, 1.5m, 2m, 2.25m, 3m, 3.5m];
+        for (var n = 0; n < firstWeek.Length; n++) await Add(preserved, pressure, Noon(today.AddDays(-30 + n)), firstWeek[n]);
+        await Add(preserved, pressure, Noon(today.AddDays(-15)), 0.8m);
+        await Add(preserved, pressure, Noon(today.AddDays(-10)), 7m);
+        await Add(preserved, dewPoint, Noon(today.AddDays(-10)), -35m);
 
         var response = await admin.GetAsync($"/api/units/{unitId}/monitoring/report");
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         using var wb = new XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
         Assert.Equal(["Until preservation", "Post-preservation", "Readings"], wb.Worksheets.Select(w => w.Name));
 
-        static IXLRow Row(IXLWorksheet ws, string tag) => ws.RowsUsed().Single(r => r.Cell(1).GetString() == tag);
-        static int Week(IXLWorksheet ws, DateTime day)
-        {
-            var label = $"W{System.Globalization.ISOWeek.GetWeekOfYear(day):00} {System.Globalization.ISOWeek.GetYear(day)}";
-            return ws.Row(4).CellsUsed().Single(c => c.GetString().StartsWith(label, StringComparison.Ordinal)).Address.ColumnNumber;
-        }
+        static IXLRow Row(IXLWorksheet ws, string tag, string measurement) =>
+            ws.RowsUsed().Single(r => r.Cell(1).GetString() == tag && r.Cell(5).GetString().Contains(measurement, StringComparison.Ordinal));
+        static int Column(IXLWorksheet ws, string header) =>
+            ws.Row(4).CellsUsed().Single(c => c.GetString() == header).Address.ColumnNumber;
+        static string DayHeader(DateTime day) => day.ToString("ddd\ndd-MMM-yy", System.Globalization.CultureInfo.InvariantCulture);
 
+        // Until preservation: no Workpack / Target / Reached columns, one column per day up to today.
         var until = wb.Worksheet("Until preservation");
-        var b = Row(until, "31-RPT-1");
-        Assert.Equal("Yes", b.Cell(7).GetString());
-        Assert.Equal(0.2, b.Cell(Week(until, today.AddDays(-21))).GetDouble());
-        var week = b.Cell(Week(until, twoWeeksAgo));
-        Assert.Equal(0.5, week.GetDouble());
-        Assert.True(week.HasComment);
-        Assert.Equal("No", Row(until, "31-RPT-2").Cell(7).GetString());   // 0.3 never reached 0.5 before it was preserved
+        var headers = until.Row(4).CellsUsed().Select(c => c.GetString()).ToList();
+        Assert.Equal(["Tag", "Equipment ID", "Description", "Type", "Measurement", "Preserved on"], headers.Take(6));
+        Assert.Equal(DayHeader(today), headers[^1]);
+        Assert.DoesNotContain(until.RowsUsed(), r => r.Cell(1).GetString() == "31-RPT-EI");
+        var bN2 = Row(until, "31-RPT-1", "N2");
+        Assert.Equal(0.2, bN2.Cell(Column(until, DayHeader(today.AddDays(-5)))).GetDouble());
+        Assert.Empty(bN2.Cell(Column(until, DayHeader(today.AddDays(-4)))).GetString());
+        var sameDay = bN2.Cell(Column(until, DayHeader(today.AddDays(-3))));
+        Assert.Equal(1, sameDay.GetDouble());
+        Assert.Equal("0", sameDay.Style.NumberFormat.Format);                  // 1, not "1."
+        Assert.True(sameDay.HasComment);
+        Assert.Equal(-40, Row(until, "31-RPT-1", "Dew Point").Cell(Column(until, DayHeader(today.AddDays(-4)))).GetDouble());
+        Assert.Equal(0.3, Row(until, "31-RPT-2", "N2").Cell(Column(until, DayHeader(today.AddDays(-45)))).GetDouble());
 
+        // Post-preservation: Week 1 #1..#5 from the first reading after preservation, then one reading per week.
         var post = wb.Worksheet("Post-preservation");
         Assert.DoesNotContain(post.RowsUsed(), r => r.Cell(1).GetString() == "31-RPT-1");
-        var p = Row(post, "31-RPT-2");
-        Assert.Equal("Overdue", p.Cell(10).GetString());
-        Assert.Equal(0.8, p.Cell(Week(post, today.AddDays(-10))).GetDouble());
-        Assert.Contains(p.CellsUsed(), c => c.GetString() == "MISSING");
-        Assert.Empty(p.Cell(Week(post, today)).GetString());              // the current week is not over
+        var p = Row(post, "31-RPT-2", "Pressure");
+        Assert.Equal(1, p.Cell(Column(post, "Week 1\n#1")).GetDouble());
+        Assert.Equal(2.25, p.Cell(Column(post, "Week 1\n#4")).GetDouble());
+        Assert.Equal("0.###", p.Cell(Column(post, "Week 1\n#4")).Style.NumberFormat.Format);
+        var fifth = p.Cell(Column(post, "Week 1\n#5"));
+        Assert.Equal(3, fifth.GetDouble());
+        Assert.Contains("3.5", fifth.GetComment().Text);                        // the 6th reading of week 1 is in the note
+        Assert.Equal(0.8, p.Cell(Column(post, "Week 2")).GetDouble());
+        Assert.Equal(7, p.Cell(Column(post, "Week 3")).GetDouble());
+        var dew = Row(post, "31-RPT-2", "Dew Point");                           // after the first 7 days of the asset: week 2
+        Assert.Empty(dew.Cell(Column(post, "Week 1\n#1")).GetString());
+        Assert.Equal(-35, dew.Cell(Column(post, "Week 2")).GetDouble());
+        Assert.Equal("Overdue", p.Cell(8).GetString());
 
+        // Readings: every reading of every type, without E&I.
         var readings = wb.Worksheet("Readings");
-        Assert.Equal(3, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-1"));
-        Assert.Equal(2, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-2"));
+        Assert.Equal(4, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-1"));
+        Assert.Equal(10, readings.RowsUsed().Count(r => r.Cell(1).GetString() == "31-RPT-2"));
+        Assert.DoesNotContain(readings.RowsUsed(), r => r.Cell(1).GetString() == "31-RPT-EI");
     }
 
     private async Task<JsonElement> PostFileAsync(string url, byte[] bytes)
