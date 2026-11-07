@@ -3,14 +3,16 @@ namespace PresApp.Api.Assets;
 public sealed record NamedRef(int Id, string Name);
 public sealed record UnitRef(int Id, string Name, int Number, string Plant);
 
-/// <summary>One row of a register table (light: only what the table shows and filters on).</summary>
+/// <summary>One row of a register table (light: only what the table shows and filters on).
+/// DocumentsPending / DocumentsDone: gate documents still pending / received or not applicable.</summary>
 public sealed record RegisterRow(
     Guid Id, string Code, string? Tag, string? Description, string Discipline, string? Priority,
     string CurrentGate, IReadOnlyList<string?> Gates, string? AssetAvailability, string? PreservationStatus,
     string? ThirdPartyInspection, string? EmWalkdown, string? PreservedByEu, string? ActionBy, string? N2BlanketStatus,
     string? CurrentActivity, string? PreservationRemarks, DateOnly? LastFieldActionDate, DateTime? PreservedAtUtc,
     int DocumentsPending, bool IsActive, DateTime UpdatedAtUtc, LineInfo? Line, IReadOnlyList<string>? Groups = null, string? Circuit = null,
-    IReadOnlyDictionary<string, string?>? Custom = null, string? BulkLiquidDrained = null, string? ReadyForPreservation = null);
+    IReadOnlyDictionary<string, string?>? Custom = null, string? BulkLiquidDrained = null, string? ReadyForPreservation = null,
+    int DocumentsDone = 0);
 
 /// <summary>Pipeline columns of the register.</summary>
 public sealed record LineInfo(decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Gasket, string? Service, string? PidNumber, decimal? LengthM,

@@ -42,7 +42,8 @@ interface Filters {
   inspection: string;
   cleaning: string;
   activity: string;
-  docsPending: boolean;
+  /** Gate documentation: "pending" (some still pending) or "ready" (has documents, none pending). */
+  docs: string;
   inactive: boolean;
   group: string;
   /** Internal control of lines (lines.nonStandard): "nonstandard" or "standard" line numbers. */
@@ -53,13 +54,13 @@ interface Filters {
   tags: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docsPending: false, inactive: false, group: "", card: "", tags: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docs: "", inactive: false, group: "", card: "", tags: "" };
 
 /** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  numberCheck: "number", docsPending: "docs", inactive: "inactive", group: "group", card: "card", tags: "tags",
+  numberCheck: "number", docs: "docs", inactive: "inactive", group: "group", card: "card", tags: "tags",
 };
 
 /** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
@@ -69,7 +70,9 @@ function readFilters(sp: URLSearchParams): Filters {
     const v = sp.get(param[key]);
     if (v === null) continue;
     if (key === "gates") f.gates = v.split(",").map(Number).filter((g) => g >= 1 && g <= 8);
-    else if (key === "docsPending" || key === "inactive") f[key] = v === "1";
+    else if (key === "inactive") f[key] = v === "1";
+    // "docs=1" was the old "Documentation pending" checkbox: older links keep working.
+    else if (key === "docs") f.docs = v === "1" ? "pending" : v === "pending" || v === "ready" ? v : "";
     else f[key] = v;
   }
   return f;
@@ -200,7 +203,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
-          (!f.docsPending || r.documentsPending > 0) &&
+          (!f.docs || (f.docs === "pending" ? r.documentsPending > 0 : r.documentsPending === 0 && (r.documentsDone ?? 0) > 0)) &&
           (!f.card || !!cardIds?.has(r.id)) &&
           (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
@@ -381,10 +384,14 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           </>
         )}
         <TagListFilter value={f.tags} onChange={(v) => set("tags", v)} />
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" className="size-4 accent-violet" checked={f.docsPending} onChange={(e) => set("docsPending", e.target.checked)} />
-          Documentation pending
-        </label>
+        <div className="w-full sm:w-60">
+          <SelectInput value={f.docs} onChange={(e) => set("docs", e.target.value)} aria-label="Documentation" className="mt-0"
+            title="Gate documentation. Ready: has gate documents and none is pending (received or N/A).">
+            <option value="">Any documentation</option>
+            <option value="pending">Documentation pending</option>
+            <option value="ready">Documentation ready</option>
+          </SelectInput>
+        </div>
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => set("inactive", e.target.checked)} />
           Show inactive
@@ -509,6 +516,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     <td className="border-b border-line px-3 py-2">
                       <CurrentGateChip value={r.currentGate} type={type} />
                       {r.documentsPending > 0 && <span className="mt-1 block text-sm text-ongoing">{r.documentsPending} doc. pending</span>}
+                      {r.documentsPending === 0 && (r.documentsDone ?? 0) > 0 && <span className="mt-1 block text-sm text-done">Docs ready</span>}
                     </td>
                     {r.gates.slice(0, gateCount).map((g, i) => (
                       <td key={i} className="border-b border-line px-2 py-2"><GateStatus value={g} compact /></td>

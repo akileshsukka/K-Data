@@ -159,6 +159,8 @@ export interface RegisterRow {
   custom: Record<string, string | null> | null;
   bulkLiquidDrained?: string | null;
   readyForPreservation?: string | null;
+  /** Gate documents already received or marked not applicable. */
+  documentsDone?: number;
 }
 
 export type CustomFieldType = "Text" | "Number" | "Date" | "List" | "YesNo";
