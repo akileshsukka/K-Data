@@ -64,7 +64,7 @@ internal static class SeedData
     /// <summary>Custom fields of the Pipeline Register with a fixed key: (key, label, kind, list values, sort).</summary>
     public static readonly (string Key, string Label, FieldDataType Kind, string[] Options, int Sort)[] PipingFields =
     [
-        (PipingFieldKeys.InspectionDone, "Inspection Done", FieldDataType.List, ["Yes", "No", PipingFieldKeys.InspectionNotApplicable], 10),
+        (PipingFieldKeys.InspectionDone, "Inspection Done", FieldDataType.List, ["Yes", "No", NotApplicable], 10),
         (PipingFieldKeys.CleaningRequired, "Cleaning Required", FieldDataType.List, ["Hydromilling", "TBC"], 20),
         (PipingFieldKeys.Cleaned, "Cleaned", FieldDataType.List, ["Yes"], 30),
     ];

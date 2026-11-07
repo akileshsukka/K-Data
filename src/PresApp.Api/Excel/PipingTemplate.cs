@@ -229,7 +229,7 @@ public static class PipingTemplate
                 var criteria = $"{letter}${headerRow}";
                 // Inspection: lines with N/A are left out of the total ("Complete %" = Yes / (lines − N/A)).
                 string NotApplicable(int row) =>
-                    $"COUNTIFS({T(PipingLayout.TagHeader)},\"<>\",{(row == totalRow ? "" : $"{T(PipingLayout.ProcessCodeHeader)},$B{row},")}{T(PipingLayout.InspectionHeader)},\"{Domain.Catalog.PipingFieldKeys.InspectionNotApplicable}\")";
+                    $"COUNTIFS({T(PipingLayout.TagHeader)},\"<>\",{(row == totalRow ? "" : $"{T(PipingLayout.ProcessCodeHeader)},$B{row},")}{T(PipingLayout.InspectionHeader)},\"{Domain.Catalog.PipingFieldKeys.InspectionNotApplicableInExcel}\")";
                 string Percent(int row) => head == ScopeHeader && scopeColumns.Count > 0
                     ? $"IF(SUM({string.Join(",", scopeColumns.Select(c => $"{c}{row}"))})>0,{countLetter}{row}/SUM({string.Join(",", scopeColumns.Select(c => $"{c}{row}"))}),\"\")"
                     : group == "Inspection"

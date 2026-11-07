@@ -77,7 +77,7 @@ public static class PipingLayout
 
     /// <summary>
     /// What the engineer sees in the cell. Bulk liquid drained: Completed → "Yes", anything else → empty.
-    /// Inspection Done: empty → "No" (it is always Yes or No).
+    /// Inspection Done: empty → "No", Not Applicable → "N/A".
     /// </summary>
     public static string? Display(PipingColumn c, Asset a, IReadOnlyDictionary<string, FieldDefinition> defs)
     {
@@ -91,11 +91,17 @@ public static class PipingLayout
                 if (!defs.TryGetValue(c.Key!, out var def)) return null;
                 var row = a.FieldValues.FirstOrDefault(v => v.FieldDefinitionId == def.Id);
                 var text = row is null ? null : CustomFields.CustomFieldService.Format(def, row);
-                return c.Key == PipingFieldKeys.InspectionDone ? text ?? "No" : text;
+                return c.Key == PipingFieldKeys.InspectionDone ? CellText(c.Key, text) ?? "No" : text;
             default:
                 return null;
         }
     }
+
+    /// <summary>A value of a fixed custom field as written in the cell: Inspection Done Not Applicable → "N/A".</summary>
+    public static string? CellText(string key, string? value) =>
+        key == PipingFieldKeys.InspectionDone && value is not null && ValueNormalizer.IsNotApplicable(value)
+            ? PipingFieldKeys.InspectionNotApplicableInExcel
+            : value;
 
     /// <summary>Same cell for the engineer: spaces and case do not count.</summary>
     public static bool Same(string? a, string? b) => Comparable(a) == Comparable(b);

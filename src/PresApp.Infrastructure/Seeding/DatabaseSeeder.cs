@@ -244,7 +244,8 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
     /// <summary>
     /// Custom fields of the Pipeline Register with a fixed key (Inspection Done, Cleaning Required, Cleaned).
     /// A field an admin already created with the same name is adopted (its key is fixed); existing ones are never changed,
-    /// except Inspection Done created as Yes/No: it becomes the list Yes / No / N/A, keeping its values (both kinds store the text).
+    /// except Inspection Done: created as Yes/No it becomes the list Yes / No / Not Applicable, keeping its values (both kinds
+    /// store the text), and an "N/A" option (first version of the list) becomes Not Applicable, with the lines that have it.
     /// </summary>
     private async Task SeedPipingFieldsAsync(CancellationToken ct)
     {
@@ -266,6 +267,14 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                     for (var i = 0; i < options.Length; i++)
                         if (!def.OptionSet.Values.Any(v => string.Equals(v.Value, options[i], StringComparison.OrdinalIgnoreCase)))
                             def.OptionSet.Values.Add(new OptionValue { Value = options[i], SortOrder = i, IsActive = true });
+                }
+                if (def.Key == PipingFieldKeys.InspectionDone && def.Id != 0
+                    && def.OptionSet?.Values.FirstOrDefault(v => v.Value == PipingFieldKeys.InspectionNotApplicableInExcel) is { } na
+                    && !def.OptionSet.Values.Any(v => v.Value == SeedData.NotApplicable))
+                {
+                    na.Value = SeedData.NotApplicable;
+                    await db.FieldValues.Where(v => v.FieldDefinitionId == def.Id && v.ValueText == PipingFieldKeys.InspectionNotApplicableInExcel)
+                        .ExecuteUpdateAsync(s => s.SetProperty(v => v.ValueText, SeedData.NotApplicable), ct);
                 }
                 continue;
             }

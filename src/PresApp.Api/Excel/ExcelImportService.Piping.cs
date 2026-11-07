@@ -115,7 +115,7 @@ public sealed partial class ExcelImportService
                     if (col.Key == PipingFieldKeys.InspectionDone) raw ??= "No";
                     var probe = new Asset { Id = asset.Id, FieldValues = [] };
                     error = customFields.Write(def, probe, null, raw);
-                    newText = probe.FieldValues.FirstOrDefault() is { } fv ? CustomFields.CustomFieldService.Format(def, fv) : null;
+                    newText = PipingLayout.CellText(def.Key, probe.FieldValues.FirstOrDefault() is { } fv ? CustomFields.CustomFieldService.Format(def, fv) : null);
                 }
                 if (error is not null) { changes.Add(Change(fieldName, ImportOutcome.Invalid, error, baseValue, excel, current)); continue; }
                 if (PipingLayout.Same(current, newText)) { changes.Add(Change(fieldName, ImportOutcome.NoChange, "The app already has this value.", baseValue, excel, current, newText)); continue; }

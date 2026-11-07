@@ -416,12 +416,12 @@ public sealed class PipingListTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Inspection_done_accepts_NA_and_NA_lines_are_left_out_of_the_inspection_total()
+    public async Task Inspection_done_not_applicable_is_NA_in_the_excel_and_left_out_of_the_inspection_total()
     {
         var field = (await admin.GetFromJsonAsync<JsonElement>("/api/catalog/custom-fields?type=Pipeline")).EnumerateArray()
             .Single(f => f.GetProperty("key").GetString() == "InspectionDone");
         Assert.Equal("List", field.GetProperty("dataType").GetString());
-        Assert.Equal(["Yes", "No", "N/A"], field.GetProperty("options").EnumerateArray().Select(o => o.GetString()));
+        Assert.Equal(["Yes", "No", "Not Applicable"], field.GetProperty("options").EnumerateArray().Select(o => o.GetString()));
 
         var unitId = await UnitIdAsync("Unit 42");
         var before = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("inspected");
@@ -429,7 +429,7 @@ public sealed class PipingListTests : IClassFixture<TestApp>
             [1, "42-0901-HC-2\"-61055-N", null, "HC", "", null, null, null, "Yes", null, null],
             [2, "42-0902-HC-2\"-61055-N", null, "HC", "", null, null, null, "No", null, null],
             [3, "42-0903-HC-2\"-61055-N", null, "HC", "", null, null, null, "n/a", null, null])));
-        Assert.Equal("N/A", (await RowAsync(unitId, "42-0903-HC-2\"-61055-N")).GetProperty("custom").GetProperty("InspectionDone").GetString());
+        Assert.Equal("Not Applicable", (await RowAsync(unitId, "42-0903-HC-2\"-61055-N")).GetProperty("custom").GetProperty("InspectionDone").GetString());
 
         var after = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("inspected");
         Assert.Equal(before.GetProperty("done").GetInt32() + 1, after.GetProperty("done").GetInt32());
@@ -443,5 +443,11 @@ public sealed class PipingListTests : IClassFixture<TestApp>
         var summary = wb.Worksheet("Summary");
         Assert.Equal("Inspection", summary.Cell("I3").GetString());
         Assert.Contains("Table1[Inspection Done ?],\"N/A\"", summary.Cell("J5").FormulaA1);
+        var line = wb.Worksheet("Line List").Table("Table1").DataRange.Rows().Single(r => r.Field("Tag No").GetString() == "42-0903-HC-2\"-61055-N");
+        Assert.Equal("N/A", line.Field("Inspection Done ?").GetString());
+
+        // The file back unchanged: N/A in the cell is the app's Not Applicable, nothing to apply.
+        var back = Changes(await PostAsync($"/api/units/{unitId}/excel/import", bytes));
+        Assert.DoesNotContain(back, c => c.Field == "Inspection Done");
     }
 }

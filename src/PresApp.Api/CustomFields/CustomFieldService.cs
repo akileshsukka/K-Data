@@ -170,7 +170,9 @@ public sealed partial class CustomFieldService(PresAppDbContext db)
                 if (vText is null) return $"{def.Label} must be Yes or No.";
                 break;
             case FieldDataType.List:
-                vText = ActiveOptions(def).FirstOrDefault(o => ValueNormalizer.ListKey(o) == ValueNormalizer.ListKey(text));
+                vText = ActiveOptions(def).FirstOrDefault(o => ValueNormalizer.ListKey(o) == ValueNormalizer.ListKey(text))
+                        // N/A, NA… are the list's Not Applicable option.
+                        ?? (ValueNormalizer.IsNotApplicable(text) ? ActiveOptions(def).FirstOrDefault(ValueNormalizer.IsNotApplicable) : null);
                 if (vText is null) return $"\"{text}\" is not an option of {def.Label}.";
                 break;
         }

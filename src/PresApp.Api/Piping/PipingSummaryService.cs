@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
+using PresApp.Domain.Rules;
 using PresApp.Infrastructure.Data;
 
 namespace PresApp.Api.Piping;
@@ -46,7 +47,7 @@ public sealed class PipingSummaryService(PresAppDbContext db)
                 Walkdown = AssetPreservation.IsCompleted(l.Walkdown),
                 Drained = AssetPreservation.IsCompleted(l.Drained),
                 Inspected = string.Equals(Value(l.Id, PipingFieldKeys.InspectionDone), "Yes", StringComparison.OrdinalIgnoreCase),
-                InspectionNa = PipingFieldKeys.IsNotApplicable(Value(l.Id, PipingFieldKeys.InspectionDone)),
+                InspectionNa = Value(l.Id, PipingFieldKeys.InspectionDone) is { } inspection && ValueNormalizer.IsNotApplicable(inspection),
                 Cleaning = cleaning,
                 InScope = cleaning is not null && !Excel.PipingTemplate.NotScope(cleaning),
                 Cleaned = string.Equals(Value(l.Id, PipingFieldKeys.Cleaned), "Yes", StringComparison.OrdinalIgnoreCase)
