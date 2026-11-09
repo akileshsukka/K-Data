@@ -6,7 +6,8 @@ using PresApp.Domain.Monitoring;
 namespace PresApp.Domain.Assets;
 
 /// <summary>
-/// One physical item: an equipment, a pipeline or an E&amp;I item. Never deleted, only deactivated.
+/// One physical item: an equipment, a pipeline or an E&amp;I item. Deactivated, not deleted; only an asset created by
+/// mistake (nothing real depends on it) can be deleted, by a role with assets.delete (see AssetDeletion).
 /// <see cref="Id"/> is stable forever and is the Simpro <c>flangeId</c> for equipment.
 /// </summary>
 public class Asset : AuditableEntity, IFieldAudited

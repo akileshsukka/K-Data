@@ -61,6 +61,12 @@ public static class AssetEndpoints
         app.MapPost("/api/assets/{id:guid}/active", (Guid id, bool active, AssetEditor e, CancellationToken ct) =>
             e.SetActiveAsync(id, active, ct)).RequirePermission(Permissions.AssetsManage);
 
+        // Permanent deletion of assets created by mistake: preview (what can go and why not), then delete with the typed word.
+        app.MapPost("/api/assets/delete/preview", (DeleteAssetsRequest request, AssetDeletion d, CancellationToken ct) =>
+            d.PreviewAsync(request.AssetIds, ct)).RequirePermission(Permissions.AssetsDelete);
+        app.MapPost("/api/assets/delete", (DeleteAssetsRequest request, AssetDeletion d, CancellationToken ct) =>
+            d.DeleteAsync(request, ct)).RequirePermission(Permissions.AssetsDelete);
+
         app.MapPost("/api/bulk/preview", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.BulkAsync(request, apply: false, user, ct)).RequirePermission(Permissions.BulkEdit);
 

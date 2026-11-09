@@ -19,6 +19,7 @@ public static class Permissions
     public const string AssetsMarkPreserved = "assets.markPreserved";
     public const string BulkEdit = "bulk.edit";
     public const string AssetsManage = "assets.manage";
+    public const string AssetsDelete = "assets.delete";
     public const string ExcelImport = "excel.import";
     public const string ExcelPage = "excel.page";
     public const string HistorySource = "history.source";
@@ -44,6 +45,7 @@ public static class Permissions
         new(AssetsMarkPreserved, "Mark an asset as preserved"),
         new(BulkEdit, "Bulk edit"),
         new(AssetsManage, "Create, deactivate or reactivate assets"),
+        new(AssetsDelete, "Delete assets permanently (only ones created by mistake: not in Simpro, no readings, documents or E7 values)"),
         new(ExcelImport, "Upload Excel files and resolve import issues"),
         new(ExcelPage, "See the Excel page (downloads and uploads of the unit file)"),
         new(HistorySource, "See where each change came from in the history (App, Excel, Bulk edit, Simpro…)"),

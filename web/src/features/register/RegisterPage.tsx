@@ -20,6 +20,7 @@ import { CodeMeaning } from "../lines/CodeMeaning";
 import { NonStandardBadge } from "../lines/FormatCheckToggle";
 import { useToast } from "../../components/Toast";
 import { AddToGroupDialog } from "../groups/AddToGroupDialog";
+import { DeleteAssetsDialog } from "./DeleteAssetsDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 
 const titles: Record<AssetType, string> = {
@@ -214,14 +215,20 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   // Rows can be selected for bulk edit, groups and (E&I register) the E7 report of the selected motors.
-  const canBulk = session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
+  // Roles that may delete can also select inactive rows (an asset loaded by mistake may already be deactivated).
+  const canDelete = session.can(Perm.assetsDelete);
+  const canBulk = canDelete || session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
+  const selectable = (r: RegisterRow) => r.isActive || canDelete;
   const groupCodes = [...new Set(all.flatMap((r) => r.groups ?? []))].sort();
-  const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+  const allSelected = filtered.some(selectable) && filtered.filter(selectable).every((r) => selected.has(r.id));
+  // Bulk edit, groups and the E7 report work on the active ones only.
+  const activeSelected = all.filter((r) => r.isActive && selected.has(r.id)).map((r) => r.id);
+  const [deleting, setDeleting] = useState(false);
 
   function toggleAll() {
     const next = new Set(selected);
     if (allSelected) filtered.forEach((r) => next.delete(r.id));
-    else filtered.forEach((r) => r.isActive && next.add(r.id));
+    else filtered.forEach((r) => selectable(r) && next.add(r.id));
     setSelected(next);
   }
 
@@ -242,17 +249,20 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         description={unit ? `${unit.name} — ${filtered.length} of ${all.length} shown${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
         actions={
           <>
-            {session.can(Perm.groupsManage) && selected.size > 0 && (
-              <Button variant="secondary" onClick={() => setGrouping(true)}>Add {selected.size} to group</Button>
+            {session.can(Perm.groupsManage) && activeSelected.length > 0 && (
+              <Button variant="secondary" onClick={() => setGrouping(true)}>Add {activeSelected.length} to group</Button>
             )}
-            {session.can(Perm.bulkEdit) && selected.size > 0 && (
-              <Button variant="secondary" onClick={() => navigate(`/u/${unitId}/bulk`, { state: { ids: [...selected] } })}>
-                Bulk edit {selected.size} selected
+            {session.can(Perm.bulkEdit) && activeSelected.length > 0 && (
+              <Button variant="secondary" onClick={() => navigate(`/u/${unitId}/bulk`, { state: { ids: activeSelected } })}>
+                Bulk edit {activeSelected.length} selected
               </Button>
             )}
-            {session.can(Perm.excelExport) && type === "ElectricalInstrument" && selected.size > 0 && (
-              <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} body={{ assetIds: [...selected] }}
-                label={`E7 report (${selected.size} selected)`} />
+            {session.can(Perm.excelExport) && type === "ElectricalInstrument" && activeSelected.length > 0 && (
+              <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} body={{ assetIds: activeSelected }}
+                label={`E7 report (${activeSelected.length} selected)`} />
+            )}
+            {canDelete && selected.size > 0 && (
+              <Button variant="danger" onClick={() => setDeleting(true)}>Delete {selected.size} selected</Button>
             )}
             {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
             {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping label="Download line list" />}
@@ -433,7 +443,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         </div>
       )}
 
-      <AddToGroupDialog open={grouping} onClose={() => setGrouping(false)} unitId={unitId} assetIds={[...selected]} onDone={() => setSelected(new Set())} />
+      <AddToGroupDialog open={grouping} onClose={() => setGrouping(false)} unitId={unitId} assetIds={activeSelected} onDone={() => setSelected(new Set())} />
+      <DeleteAssetsDialog open={deleting} onClose={() => setDeleting(false)} assetIds={[...selected]} onDone={() => setSelected(new Set())} />
 
       {(rows.isPending || (f.card && card.isPending)) && <p className="mt-6 text-muted">Loading…</p>}
       {card.isError && <p className="mt-6 text-hold">This dashboard figure no longer exists (the category may have been removed). Clear the filters to see everything.</p>}
@@ -482,7 +493,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                   <tr key={r.id} className={`group ${r.isActive ? "" : "text-muted"} hover:bg-violet-soft/50`}>
                     {canBulk && (
                       <td className="border-b border-line px-3 py-2">
-                        <input type="checkbox" className="size-4 accent-violet" checked={selected.has(r.id)} disabled={!r.isActive} onChange={() => toggle(r.id)} aria-label={`Select ${r.tag ?? r.code}`} />
+                        <input type="checkbox" className="size-4 accent-violet" checked={selected.has(r.id)} disabled={!selectable(r)} onChange={() => toggle(r.id)} aria-label={`Select ${r.tag ?? r.code}`} />
                       </td>
                     )}
                     <td className="border-b border-line px-3 py-2">

@@ -76,6 +76,7 @@ export const Perm = {
   assetsMarkPreserved: "assets.markPreserved",
   bulkEdit: "bulk.edit",
   assetsManage: "assets.manage",
+  assetsDelete: "assets.delete",
   excelImport: "excel.import",
   groupsManage: "groups.manage",
   categoriesManage: "categories.manage",
@@ -806,4 +807,25 @@ export interface PipingTemplateInfo {
   uploadedAtUtc: string | null;
   uploadedBy: string | null;
   notes: string[];
+}
+
+/** One asset selected for permanent deletion; `blocked` says why it cannot be deleted (null: it can). */
+export interface DeletionItem {
+  id: string;
+  code: string;
+  tag: string | null;
+  description: string | null;
+  unit: string;
+  blocked: string | null;
+}
+
+export interface DeletionPreview {
+  items: DeletionItem[];
+  deletable: number;
+  confirmationWord: string;
+}
+
+export interface DeletionResult {
+  deleted: number;
+  notDeleted: DeletionItem[];
 }
