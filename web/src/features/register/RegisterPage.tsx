@@ -46,6 +46,8 @@ interface Filters {
   activity: string;
   /** Gate documentation: "pending" (some still pending) or "ready" (has documents, none pending). */
   docs: string;
+  /** E&I register: "missing" = Electrical items with E7 Completed but no complete IR / winding test sheet. */
+  e7: string;
   inactive: boolean;
   group: string;
   /** Internal control of lines (lines.nonStandard): "nonstandard" or "standard" line numbers. */
@@ -56,13 +58,13 @@ interface Filters {
   tags: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docs: "", inactive: false, group: "", card: "", tags: "" };
+const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docs: "", e7: "", inactive: false, group: "", card: "", tags: "" };
 
 /** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  numberCheck: "number", docs: "docs", inactive: "inactive", group: "group", card: "card", tags: "tags",
+  numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags",
 };
 
 /** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
@@ -206,11 +208,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
           (!f.docs || (f.docs === "pending" ? r.documentsPending > 0 : r.documentsPending === 0 && (r.documentsDone ?? 0) > 0)) &&
+          (!f.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
           (!f.card || !!cardIds?.has(r.id)) &&
           (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
           (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
       ),
-    [all, text, f, gateCount, codes, cardIds, tagSet],
+    [all, text, f, gateCount, codes, cardIds, tagSet, type],
   );
 
   // Grouped view (lines only): sections of one line that change size shown as one row; only the view changes.
@@ -436,6 +439,15 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             <option value="ready">Documentation ready</option>
           </SelectInput>
         </div>
+        {type === "ElectricalInstrument" && (
+          <div className="w-full sm:w-60">
+            <SelectInput value={f.e7} onChange={(e) => set("e7", e.target.value)} aria-label="E7 test" className="mt-0"
+              title="Electrical items whose E7 step is Completed but have no complete IR / winding test recorded.">
+              <option value="">Any E7 test</option>
+              <option value="missing">E7 completed, test missing</option>
+            </SelectInput>
+          </div>
+        )}
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => set("inactive", e.target.checked)} />
           Show inactive
@@ -660,6 +672,11 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
  * - Gates chosen: EVERY chosen gate must match (G1 + G2 + Ongoing = both G1 and G2 Ongoing). Without a status, every chosen gate must be filled in.
  * - No gate chosen, status chosen: any of the shown gates has that status.
  */
+/** Electrical items (discipline Electrical) whose E7 is Completed without a complete IR / winding test sheet. */
+export function e7TestMissing(r: RegisterRow) {
+  return r.discipline.trim().toLowerCase() === "electrical" && /^\s*completed/i.test(r.gates[6] ?? "") && !r.e7Tested;
+}
+
 export function gateMatch(r: RegisterRow, gates: number[], status: string, gateCount: number) {
   const chosen = gates.filter((g) => g <= gateCount);
   if (chosen.length === 0 && !status) return true;

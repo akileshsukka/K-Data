@@ -123,7 +123,7 @@ function ScopeDashboard({ d, unitId, canEdit }: { d: Dashboard; unitId: number; 
   const prefix = d.scope === "ei" ? "ei-" : "";
   return (
     <>
-      <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Key figures">
+      <section className={`mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 ${d.scope === "ei" ? "xl:grid-cols-5" : "xl:grid-cols-6"}`} aria-label="Key figures">
         <KeyFigures d={d} unitId={unitId} />
       </section>
 
@@ -160,7 +160,7 @@ export const cardLink = (unitId: number, card: string, scope: DashboardScope = "
 export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${unitId}/categories${scope === "ei" ? "?scope=ei" : ""}`;
 
 /**
- * The six key figures; the caller sets the grid. With a unit, each figure opens the register filtered on its
+ * The key figures (six mechanical, five E&I); the caller sets the grid. With a unit, each figure opens the register filtered on its
  * equipment. Also used by the PDF export (no unit: plain figures).
  */
 export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
@@ -171,7 +171,6 @@ export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
       <>
         <Stat label="E&I tags" value={d.totalTags} detail="Electrical and instrumentation" to={to("ei-tags")} register={register} />
         <Stat label="Preserved" value={d.preserved} detail="All applicable steps E1–E8 completed" emphasis to={to("ei-preserved")} register={register} />
-        <Stat label="E7 tests pending" value={d.e7Required - d.e7Complete} detail={d.e7Required === 0 ? "No motor marked for E7" : `${d.e7Complete} of ${d.e7Required} IR / winding tests complete`} to={to("ei-e7")} register={register} />
         <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("ei-hold")} register={register} />
         <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("ei-na")} register={register} />
         <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("ei-available")} register={register} />

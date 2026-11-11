@@ -25,7 +25,6 @@ public sealed record CategoryRow(int Id, string? Code, string Label, string Sect
 
 /// <summary>
 /// The dashboard of one unit for one scope: "mechanical" (static, rotating, package) or "ei" (Electrical &amp; Instrumentation).
-/// E7Required / E7Complete: motors that need the E7 IR / winding test, and those whose test sheet is complete (E&amp;I only).
 /// </summary>
 public sealed record DashboardDto(
     int UnitId, string UnitName, string PlantName, string Scope, int TotalTags,
@@ -33,7 +32,7 @@ public sealed record DashboardDto(
     List<CategoryRow> Hold, int TotalHold, List<CategoryRow> NotApplicable, int TotalNotApplicable,
     int GrandTotal, int AvailableForPreservation, int Preserved, int ReadyForPreservation,
     Dictionary<string, int> ByCurrentGate, int DocumentsPending, int ElectricalInstrumentCount, int InactiveCount,
-    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource, int E7Required, int E7Complete);
+    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource);
 
 /// <summary>
 /// One category in the editor. Code is assigned by the app. Keywords and priority are optional: they only feed the
@@ -45,7 +44,7 @@ public sealed record SaveCategory(int? Id, string Label, string Section, int? Pr
 /// <summary>
 /// The equipment behind one dashboard figure, so the register can show exactly those rows.
 /// Mechanical cards: tags, preserved, ready, hold, na, available. E&amp;I cards: ei-tags, ei-preserved, ei-hold, ei-na,
-/// ei-available, ei-e7 (E7 tests still incomplete). Both: category-{id}.
+/// ei-available. Both: category-{id}.
 /// </summary>
 public sealed record DashboardCardDto(string Card, string Label, int Count, List<Guid> AssetIds);
 
@@ -103,7 +102,6 @@ public sealed class UnitDashboard(PresAppDbContext db)
             "hold" => ei ? "E&I on hold" : "On hold",
             "na" => ei ? "E&I not applicable" : "Not applicable",
             "available" => ei ? "E&I available" : "Available",
-            "e7" => "E7 IR / winding test pending",
             _ => dashboard.Hold.Concat(dashboard.NotApplicable).Where(c => $"category-{c.Id}" == key)
                 .Select(c => $"{(c.Section == "Hold" ? "Hold" : "N/A")} {c.Code}: {c.Label}".Replace("  ", " ")).FirstOrDefault() ?? "Category"
         };
@@ -187,12 +185,6 @@ public sealed class UnitDashboard(PresAppDbContext db)
             .Select(a => new { Length = a.Pipeline == null ? null : a.Pipeline.LengthM, a.Preservation!.G4Status }).ToListAsync(ct);
         var pendingDocs = await db.GateDocuments.CountAsync(d => d.Asset.UnitId == unitId && d.Asset.IsActive && d.Status == DocumentationStatus.Pending, ct);
 
-        // E7 IR / winding test of the motors that need it (E&I dashboard only).
-        var scopeIds = items.Select(a => a.Id).ToHashSet();
-        var e7 = !ei ? [] : (await db.ElectricalTests.AsNoTracking().Where(t => t.Required && t.Asset.UnitId == unitId).ToListAsync(ct))
-            .Where(t => scopeIds.Contains(t.AssetId)).ToList();
-        var e7Pending = e7.Where(t => !ElectricalTestSpec.IsComplete(t)).Select(t => t.AssetId).ToList();
-
         // Equipment behind each key figure (the register filters on these; counts equal the figures by construction).
         var holdIds = hold.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
         var naIds = na.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
@@ -208,8 +200,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
             [prefix + "na"] = naIds,
             [prefix + "available"] = items.Where(a => !categorized.Contains(a.Id)).Select(a => a.Id).ToList(),
         };
-        if (ei) cards[prefix + "e7"] = e7Pending;
-        else cards["ready"] = ready;
+        if (!ei) cards["ready"] = ready;
         foreach (var c in hold.Concat(na)) cards[$"category-{c.Id}"] = c.Assets.Select(a => a.Id).ToList();
 
         // Ready for preservation = the "Ready For Preservation" column = Yes, like the Excel Dashboard sheet.
@@ -221,7 +212,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
                 .ToDictionary(g => g.Key, g => g.Count()),
             pendingDocs, active.Count(a => a.Type == AssetType.ElectricalInstrument), all.Count(a => !a.IsActive),
             lines.Count, lines.Sum(l => l.Length ?? 0), lines.Count(l => IsCompleted(l.G4Status)),
-            assigned ? "Assigned" : "Keywords", e7.Count, e7.Count - e7Pending.Count);
+            assigned ? "Assigned" : "Keywords");
         return (dto, cards);
     }
 

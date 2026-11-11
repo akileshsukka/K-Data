@@ -206,7 +206,7 @@ function ScopeSection({ d, newPage }: { d: Dashboard; newPage: boolean }) {
     <>
       <Block newPage={newPage}>
         <h2 className="mb-3 border-l-4 border-ink pl-3 text-2xl font-semibold">{scopeNames[d.scope].title}</h2>
-        <div className="grid grid-cols-6 gap-3"><KeyFigures d={d} /></div>
+        <div className={`grid gap-3 ${d.scope === "ei" ? "grid-cols-5" : "grid-cols-6"}`}><KeyFigures d={d} /></div>
       </Block>
 
       <Block>

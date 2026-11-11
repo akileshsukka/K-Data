@@ -162,6 +162,8 @@ export interface RegisterRow {
   readyForPreservation?: string | null;
   /** Gate documents already received or marked not applicable. */
   documentsDone?: number;
+  /** E&I register only: the item has a complete E7 IR / winding test sheet. */
+  e7Tested?: boolean | null;
 }
 
 export type CustomFieldType = "Text" | "Number" | "Date" | "List" | "YesNo";
@@ -574,7 +576,7 @@ export interface CategoryOption {
   section: CategorySection;
 }
 
-/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}; E&I: ei-tags, ei-preserved, ei-hold, ei-na, ei-available, ei-e7). */
+/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}; E&I: ei-tags, ei-preserved, ei-hold, ei-na, ei-available). */
 export interface DashboardCard {
   card: string;
   label: string;
@@ -606,11 +608,7 @@ export interface Dashboard {
   linesBlanketed: number;
   inactiveCount: number;
   /** "Assigned": categories chosen per equipment (template v4). "Keywords": found in the Preservation Remarks (v3). */
-  categorySource: "Assigned" | "Keywords";
-  /** E&I only: motors that need the E7 IR / winding test, and those whose test sheet is complete. */
-  e7Required: number;
-  e7Complete: number;
-}
+  categorySource: "Assigned" | "Keywords";}
 
 // ---------------------------------------------------------------- Simpro
 

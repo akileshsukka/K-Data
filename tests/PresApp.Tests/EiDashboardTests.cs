@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using PresApp.Domain.Assets;
 using PresApp.Tests.Support;
 
 namespace PresApp.Tests;
@@ -125,20 +126,32 @@ public sealed class EiDashboardTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Motors_marked_for_the_e7_test_show_how_many_are_still_incomplete()
+    public async Task The_ei_register_says_which_items_have_a_complete_e7_test()
     {
         var unitId = await UnitIdAsync("Unit 41");
-        var motor = await CreateEiAsync(unitId, "41-EM-1");
-        await CreateEiAsync(unitId, "41-EM-2");
-        var mark = await admin.PutAsJsonAsync($"/api/assets/{motor}/electrical-test",
-            new { required = true, testedOn = (string?)null, values = new Dictionary<string, decimal?> { ["WrU1U2"] = 0.21m }, expected = (DateTime?)null });
-        Assert.True(mark.IsSuccessStatusCode, await mark.Content.ReadAsStringAsync());
+        var tested = await CreateEiAsync(unitId, "41-EM-1");
+        var partial = await CreateEiAsync(unitId, "41-EM-2");
+        var untested = await CreateEiAsync(unitId, "41-EM-3");
+        var notDone = await CreateEiAsync(unitId, "41-EM-4");
+        // A complete test sheet on 41-EM-1 and 41-EM-4, one value only on 41-EM-2, nothing on 41-EM-3.
+        var full = ElectricalTestSpec.Measures.Where(m => m.Required).ToDictionary(m => m.Key, _ => (decimal?)1.5m);
+        foreach (var (id, values) in new[] { (tested, full), (partial, new Dictionary<string, decimal?> { ["WrU1U2"] = 0.21m }), (notDone, full) })
+        {
+            var mark = await admin.PutAsJsonAsync($"/api/assets/{id}/electrical-test", new { required = true, testedOn = (string?)null, values, expected = (DateTime?)null });
+            Assert.True(mark.IsSuccessStatusCode, await mark.Content.ReadAsStringAsync());
+        }
+        // E7 completed on the first three; 41-EM-4 has its test but E7 is still open.
+        foreach (var id in new[] { tested, partial, untested }) await PatchAsync(id, [("G7Status", "Completed")]);
 
-        var d = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard?scope=ei");
-        Assert.Equal(1, d.GetProperty("e7Required").GetInt32());
-        Assert.Equal(0, d.GetProperty("e7Complete").GetInt32());
-        var pending = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard/cards/ei-e7");
-        Assert.Equal(motor, pending.GetProperty("assetIds").EnumerateArray().Single().GetGuid());
+        // The register filter "E7 completed, test missing" works on these flags (+ E7 Completed + discipline Electrical).
+        var rows = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=ElectricalInstrument"))
+            .EnumerateArray().ToDictionary(r => r.GetProperty("id").GetGuid(), r => r.GetProperty("e7Tested").GetBoolean());
+        Assert.True(rows[tested]);
+        Assert.False(rows[partial]);
+        Assert.False(rows[untested]);
+        Assert.True(rows[notDone]);
+        var equipment = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=Equipment");
+        Assert.All(equipment.EnumerateArray(), r => Assert.Equal(JsonValueKind.Null, r.GetProperty("e7Tested").ValueKind));
     }
 
     // ------------------------------------------------------------------ helpers

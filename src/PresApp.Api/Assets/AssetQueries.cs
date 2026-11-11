@@ -39,6 +39,10 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 v => columns.First(c => c.Id == v.FieldDefinitionId).Key, v => CustomFields.CustomFieldService.Format(columns.First(c => c.Id == v.FieldDefinitionId), v)));
         var specs = type == AssetType.Pipeline ? await PipeSpecLookup.LoadAsync(db, ct) : new PipeSpecLookup([]);
         var showCheck = ShowsLineCheck;
+        // E&I register: which items have a complete E7 test sheet (register filter "E7 completed, test missing").
+        HashSet<Guid>? tested = type != AssetType.ElectricalInstrument ? null
+            : (await db.ElectricalTests.AsNoTracking().Where(t => t.Asset.UnitId == unitId && t.Asset.Type == type).ToListAsync(ct))
+                .Where(ElectricalTestSpec.IsComplete).Select(t => t.AssetId).ToHashSet();
         return rows
             .OrderBy(r => DisciplineRank(r.Discipline)).ThenBy(r => r.Tag ?? r.Code, NaturalComparer.Instance)
             .Select(r => new RegisterRow(
@@ -51,7 +55,7 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
                 r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM,
                     showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null, LineNumber.GroupKey(r.Tag)), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
-                r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone))
+                r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone, tested?.Contains(r.Id)))
             .ToList();
     }
 
