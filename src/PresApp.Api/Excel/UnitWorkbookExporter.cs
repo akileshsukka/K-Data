@@ -222,6 +222,9 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
             cell.SetValue(assets[i].Id.ToString());
         }
         sheet.Column(keyColumn).Hide();
+        // A template that hides every column after the table (e.g. Z:XFD) would swallow the Key column into that
+        // hidden block; the last used column is then hidden up to XFD and Excel's horizontal scrollbar snaps back.
+        if (keyColumn < XLHelper.MaxColumnNumber) sheet.Columns(keyColumn + 1, XLHelper.MaxColumnNumber).Unhide();
 
         // ---- dropdowns from the active options (very hidden _lists sheet)
         if (n == 0) return columns;
