@@ -15,8 +15,9 @@ public sealed record RegisterRow(
     int DocumentsDone = 0);
 
 /// <summary>Pipeline columns of the register.</summary>
+/// <param name="GroupKey">Size group of the line (LineNumber.GroupKey), for the grouped view of the register. Null: the line is on its own.</param>
 public sealed record LineInfo(decimal? SizeIn, string? PipeSpec, string? PressureClass, string? FlangeType, string? Gasket, string? Service, string? PidNumber, decimal? LengthM,
-    LineNumberCheck? NumberCheck = null);
+    LineNumberCheck? NumberCheck = null, string? GroupKey = null);
 
 public sealed record GateDocDto(int Gate, string Status, DateOnly? ReceivedOn, string? Reference, string? Note, string UpdatedBy, DateTime UpdatedAtUtc);
 public sealed record GroupRefDto(int Id, string Code, string Name, string Type);

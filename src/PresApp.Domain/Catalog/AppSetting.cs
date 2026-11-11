@@ -18,4 +18,10 @@ public static class AppSettingKeys
     public const string MonitoringMinPressureBarg = "Monitoring.MinPressureBarg";
     /// <summary>N2 blanket pressure (barg) that completes the blanket while DURING (0.5 by default): the system can then be closed.</summary>
     public const string MonitoringTargetN2Barg = "Monitoring.TargetN2Barg";
+
+    /// <summary>
+    /// "Yes" when the lines of the unit are shown grouped by default (sizes of one line in one row): Pipeline Register,
+    /// piping cards of the Unit overview, the PDF and the line list Excel. Missing = individual.
+    /// </summary>
+    public static string PipingGrouped(int unitId) => $"Piping.Grouped.{unitId}";
 }

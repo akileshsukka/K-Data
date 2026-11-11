@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type RegisterRow } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type PipingView, type RegisterRow } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -22,6 +22,7 @@ import { useToast } from "../../components/Toast";
 import { AddToGroupDialog } from "../groups/AddToGroupDialog";
 import { DeleteAssetsDialog } from "./DeleteAssetsDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
+import { groupLines } from "../lines/lineGroups";
 
 const titles: Record<AssetType, string> = {
   Equipment: "Equipment Register",
@@ -212,6 +213,34 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     [all, text, f, gateCount, codes, cardIds, tagSet],
   );
 
+  // Grouped view (lines only): sections of one line that change size shown as one row; only the view changes.
+  // The page opens as the unit's default (set per unit); the switch changes only this visit until saved as the default.
+  const view = useQuery({
+    queryKey: ["piping-view", unitId],
+    queryFn: ({ signal }) => api<PipingView>(`/api/units/${unitId}/piping-view`, { signal }),
+    enabled: lines,
+  });
+  const [override, setOverride] = useState<boolean | null>(null);
+  const unitDefault = view.data?.grouped ?? false;
+  const groupedOn = override ?? unitDefault;
+  const grouped = lines && groupedOn;
+  const saveDefault = useMutation({
+    mutationFn: (on: boolean) => api<PipingView>(`/api/units/${unitId}/piping-view`, { method: "PUT", body: { grouped: on } }),
+    onSuccess: (r) => {
+      queryClient.setQueryData(["piping-view", unitId], r);
+      queryClient.invalidateQueries({ queryKey: ["piping-summary", unitId] });
+      setOverride(null);
+      toast(`${unit?.name ?? "This unit"} now opens with lines ${r.grouped ? "grouped" : "one by one"} (register, Unit overview, PDF and line list).`);
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
+  const groupSize = useMemo(() => {
+    const size = new Map<string, number>();
+    for (const r of all) if (r.line?.groupKey) size.set(r.line.groupKey, (size.get(r.line.groupKey) ?? 0) + 1);
+    return size;
+  }, [all]);
+  const shown = useMemo(() => (grouped ? groupLines(filtered) : filtered.map((r) => ({ key: r.id, members: [r], row: r }))), [grouped, filtered]);
+
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   // Rows can be selected for bulk edit, groups and (E&I register) the E7 report of the selected motors.
@@ -232,10 +261,14 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     setSelected(next);
   }
 
-  function toggle(id: string) {
+  /** Ticks or unticks a row: every line of a group at once. */
+  function toggle(ids: string[]) {
     const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    const on = ids.every((id) => next.has(id));
+    for (const id of ids) {
+      if (on) next.delete(id);
+      else next.add(id);
+    }
     setSelected(next);
   }
 
@@ -246,7 +279,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     <div>
       <PageHeader
         title={titles[type]}
-        description={unit ? `${unit.name} — ${filtered.length} of ${all.length} shown${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
+        description={unit ? `${unit.name} — ${filtered.length} of ${all.length} shown${grouped ? ` in ${shown.length} grouped rows` : ""}${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
         actions={
           <>
             {session.can(Perm.groupsManage) && activeSelected.length > 0 && (
@@ -265,7 +298,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
               <Button variant="danger" onClick={() => setDeleting(true)}>Delete {selected.size} selected</Button>
             )}
             {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
-            {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping label="Download line list" />}
+            {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping grouped={grouped} label={grouped ? "Download line list (grouped)" : "Download line list"} />}
             {seesNumberCheck && session.can(Perm.assetsEdit) && all.some((r) => r.line?.numberCheck?.nonStandard) && (
               <Button variant="secondary" busy={reread.isPending} onClick={() => reread.mutate()} title="Reads the non-standard numbers again with the current pipe specs and line codes; fills only empty fields.">
                 Re-read non-standard lines
@@ -285,7 +318,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         }
       />
 
-      {lines && <PipingSummaryCards unitId={unitId} />}
+      {lines && view.data && <PipingSummaryCards unitId={unitId} grouped={grouped} />}
       {lines && <PipingNotes unitId={unitId} />}
 
       {/* With 8 gates (E&I, or G5–G8 in use) the gate buttons need about 21rem: that block gets two columns until the screen is wide enough. */}
@@ -407,7 +440,28 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => set("inactive", e.target.checked)} />
           Show inactive
         </label>
+        {lines && (
+          <label className="inline-flex items-center gap-2" title="Sections of one line that only change size (same number, service, spec and insulation) in one row. Only the view and the downloaded list change: each line keeps its own values.">
+            <button type="button" role="switch" aria-checked={groupedOn} disabled={!view.data} onClick={() => setOverride(!groupedOn)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${groupedOn ? "bg-violet" : "bg-line"}`}>
+              <span className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${groupedOn ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+            Group sizes of a line
+            {view.data && groupedOn === unitDefault && <span className="text-sm text-muted">(unit default)</span>}
+          </label>
+        )}
+        {lines && view.data && groupedOn !== unitDefault && session.can(Perm.assetsManage) && (
+          <Button variant="quiet" busy={saveDefault.isPending} onClick={() => saveDefault.mutate(groupedOn)}
+            title="The register, the Pipelines cards of the Unit overview, the PDF and the line list Excel of this unit will open this way for everyone.">
+            Make {groupedOn ? "grouped" : "one by one"} the default for {unit?.name ?? "this unit"}
+          </Button>
+        )}
       </div>
+      {grouped && (
+        <p className="mt-2 text-sm text-muted">
+          Grouped view: a change to a group (tick it and use Bulk edit) is written to each of its lines. “Mixed” means its lines do not have the same value.
+        </p>
+      )}
 
       {active > 0 && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet/30 bg-violet-soft px-4 py-3" role="status">
@@ -489,16 +543,32 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.id} className={`group ${r.isActive ? "" : "text-muted"} hover:bg-violet-soft/50`}>
+                {shown.map(({ key, members, row: r }) => {
+                  const ids = members.filter(selectable).map((m) => m.id);
+                  return (
+                  <tr key={key} className={`group ${r.isActive ? "" : "text-muted"} hover:bg-violet-soft/50`}>
                     {canBulk && (
                       <td className="border-b border-line px-3 py-2">
-                        <input type="checkbox" className="size-4 accent-violet" checked={selected.has(r.id)} disabled={!selectable(r)} onChange={() => toggle(r.id)} aria-label={`Select ${r.tag ?? r.code}`} />
+                        <input type="checkbox" className="size-4 accent-violet" checked={ids.length > 0 && ids.every((id) => selected.has(id))} disabled={ids.length === 0} onChange={() => toggle(ids)}
+                          aria-label={`Select ${members.length > 1 ? `the ${members.length} lines of ` : ""}${members[0].tag ?? members[0].code}`} />
                       </td>
                     )}
                     <td className="border-b border-line px-3 py-2">
-                      <Link to={`/assets/${r.id}`} className="font-semibold whitespace-pre text-ink group-hover:text-violet">{r.tag ?? r.code}</Link>
-                      <span className="block text-sm whitespace-nowrap text-muted">{r.code}{!r.isActive && " · inactive"}</span>
+                      {members.length > 1 ? (
+                        <>
+                          {members.map((m) => (
+                            <Link key={m.id} to={`/assets/${m.id}`} className={`block font-semibold whitespace-pre hover:text-violet ${m.isActive ? "text-ink" : "text-muted"}`}>{m.tag ?? m.code}</Link>
+                          ))}
+                          <span className="block text-sm whitespace-nowrap text-muted">
+                            {members.length} sizes{(groupSize.get(key) ?? members.length) > members.length && ` of ${groupSize.get(key)} (others filtered out)`}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Link to={`/assets/${r.id}`} className="font-semibold whitespace-pre text-ink group-hover:text-violet">{r.tag ?? r.code}</Link>
+                          <span className="block text-sm whitespace-nowrap text-muted">{r.code}{!r.isActive && " · inactive"}</span>
+                        </>
+                      )}
                       {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} className="mt-1" />}
                     </td>
                     {lines ? (
@@ -535,18 +605,22 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     ))}
                     <td className="border-b border-line px-3 py-2 text-sm">{r.actionBy ?? ""}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           <ul className="mt-4 space-y-2 md:hidden">
-            {filtered.map((r) => (
-              <li key={r.id}>
-                <Link to={`/assets/${r.id}`} className={`block rounded-lg border border-line bg-panel p-3 ${r.isActive ? "" : "opacity-70"}`}>
+            {shown.map(({ key, members, row: r }) => {
+              const card = `block rounded-lg border border-line bg-panel p-3 ${r.isActive ? "" : "opacity-70"}`;
+              const content = (
+                <>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>
+                      {members.length > 1
+                        ? members.map((m) => <Link key={m.id} to={`/assets/${m.id}`} className="block font-semibold break-words text-ink hover:text-violet">{m.tag ?? m.code}</Link>)
+                        : <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>}
                       {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} />}
                       <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service, unitId) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>
                       {lines && (
@@ -565,9 +639,15 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                       <span key={i} className="inline-flex items-center gap-1 text-sm text-muted">{step}{i + 1}<GateStatus value={g} compact /></span>
                     ))}
                   </div>
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+              return (
+                <li key={key}>
+                  {/* A group is not one link: each of its line numbers opens that line. */}
+                  {members.length > 1 ? <div className={card}>{content}</div> : <Link to={`/assets/${r.id}`} className={card}>{content}</Link>}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

@@ -450,4 +450,110 @@ public sealed class PipingListTests : IClassFixture<TestApp>
         var back = Changes(await PostAsync($"/api/units/{unitId}/excel/import", bytes));
         Assert.DoesNotContain(back, c => c.Field == "Inspection Done");
     }
+
+    [Fact]
+    public void Sections_of_one_line_that_change_size_share_a_group_key()
+    {
+        var key = LineNumber.GroupKey("541-2089-RF-2\"-31376-C");
+        Assert.NotNull(key);
+        Assert.Equal(key, LineNumber.GroupKey("541-2089-RF-1-1/2\"-31376-C"));
+        Assert.Equal(key, LineNumber.GroupKey("541-02089-RF-24\"-31376-C"));
+        Assert.NotEqual(key, LineNumber.GroupKey("541-2089-RF-2\"-31376-N"));    // other insulation
+        Assert.NotEqual(key, LineNumber.GroupKey("541-2089-RG-2\"-31376-C"));    // other service
+        Assert.NotEqual(key, LineNumber.GroupKey("541-2090-RF-2\"-31376-C"));    // other sequence
+        Assert.Null(LineNumber.GroupKey("541-2089-RF-2\"-31376-C\n541-2089-RF-4\"-31376-C"));
+        Assert.Null(LineNumber.GroupKey("not a line number"));
+    }
+
+    [Fact]
+    public async Task A_grouped_line_list_shows_one_row_per_line_and_writes_each_section_on_its_own()
+    {
+        var unitId = await UnitIdAsync("Unit 39");
+        const string s2 = "39-2089-HC-2\"-61055-N", s4 = "39-2089-HC-4\"-61055-N", s8 = "39-2089-HC-8\"-61055-N", alone = "39-2090-LS-2\"-61055-N";
+        await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/onboarding", EngineerList(
+            [1, s8, "39-00-30-195", "HC", "", null, "Completed", "Yes", "No", "TBC", null],
+            [2, s2, "39-00-30-194", "HC", "", null, "Completed", "Yes", "No", "TBC", null],
+            [3, s4, "39-00-30-194", "HC", "", null, "Completed", null, "No", "Hydromilling", null],
+            [4, alone, "39-00-30-196", "LS", "", null, null, null, "No", "TBC", null])));
+        var ids = await app.WithDbAsync(db => db.Assets.Where(a => a.Tag!.StartsWith("39-2089-")).ToDictionaryAsync(a => a.Tag!, a => a.Id));
+
+        // The register sends the same group key for the three sections.
+        var keys = new[] { s2, s4, s8, alone }.Select(async t => (await RowAsync(unitId, t)).GetProperty("line").GetProperty("groupKey").GetString()).Select(t => t.Result).ToList();
+        Assert.Single(keys.Take(3).Distinct());
+        Assert.NotEqual(keys[0], keys[3]);
+
+        var response = await admin.GetAsync($"/api/units/{unitId}/excel/piping/export?grouped=true");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("GROUPED", response.Content.Headers.ContentDisposition!.FileNameStar ?? response.Content.Headers.ContentDisposition.FileName);
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        using (var wb = new XLWorkbook(new MemoryStream(bytes)))
+        {
+            var rows = wb.Worksheet("Line List").Table("Table1").DataRange.Rows().ToList();
+            var group = rows.Single(r => r.Field("Tag No").GetString().Contains("39-2089"));
+            Assert.Equal($"{s2}\n{s4}\n{s8}", group.Field("Tag No").GetString());   // by size
+            Assert.Equal("39-00-30-194, 39-00-30-195", group.Field("P&ID Number").GetString());
+            Assert.Equal("Mixed", group.Field("Cleaning Required ?").GetString());
+            Assert.Equal("Mixed", group.Field("Bulk liquid drained").GetString());
+            Assert.Equal("Completed", group.Field("EM Walkdown Status").GetString());
+            Assert.Equal(3, group.Field("Key").GetString().Split(',').Length);
+            Assert.Equal(Enumerable.Range(1, rows.Count).Select(i => (double)i), rows.Select(r => r.Field("Sr. No.").GetDouble()));   // counted 1, 2, 3…
+            Assert.Equal("Yes", wb.Worksheet("_meta").Column(1).CellsUsed().Single(c => c.GetString() == "Grouped").CellRight().GetString());
+
+            // The engineer: the whole line cleaned, the single line gets a cleaning scope; Mixed and the P&IDs left as they are.
+            group.Field("Cleaned?").SetValue("Yes");
+            rows.Single(r => r.Field("Tag No").GetString() == alone).Field("Cleaning Required ?").SetValue("Hydromilling");
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            bytes = ms.ToArray();
+        }
+
+        var changes = Changes(await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/import", bytes)));
+        Assert.Equal([s2, s4, s8], changes.Where(c => c is { Field: "Cleaned", Outcome: "Applied" }).Select(c => c.Tag).Order());
+        Assert.Contains(changes, c => c is { Tag: alone, Field: "Cleaning Required", Outcome: "Applied", NewValue: "Hydromilling" });
+        Assert.DoesNotContain(changes, c => c.Tag.StartsWith("39-2089") && c.Field != "Cleaned");   // nothing else came from the group row
+        Assert.Equal("39-00-30-195", (await RowAsync(unitId, s8)).GetProperty("line").GetProperty("pidNumber").GetString());
+        Assert.Equal("Hydromilling", (await RowAsync(unitId, s4)).GetProperty("custom").GetProperty("CleaningRequired").GetString());
+
+        // A value set on the group in the app goes to each section (bulk edit of a custom field).
+        var bulk = await admin.PostAsJsonAsync("/api/bulk/apply", new { assetIds = ids.Values, field = "cf:CleaningRequired", value = "hydromilling" });
+        Assert.Equal(HttpStatusCode.OK, bulk.StatusCode);
+        var result = await bulk.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(2, result.GetProperty("changed").GetInt32());
+        Assert.Equal(1, result.GetProperty("unchanged").GetInt32());
+        foreach (var tag in ids.Keys) Assert.Equal("Hydromilling", (await RowAsync(unitId, tag)).GetProperty("custom").GetProperty("CleaningRequired").GetString());
+        var bad = await admin.PostAsJsonAsync("/api/bulk/preview", new { assetIds = ids.Values, field = "cf:CleaningRequired", value = "Not an option" });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+
+        // The cards count the group once: done only when all its sections are (the 4" section is not drained).
+        var single = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary?grouped=false");
+        var together = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary?grouped=true");
+        Assert.False(single.GetProperty("grouped").GetBoolean());
+        Assert.True(together.GetProperty("grouped").GetBoolean());
+        Assert.Equal(single.GetProperty("lines").GetInt32() - 2, together.GetProperty("lines").GetInt32());
+        Assert.Equal(single.GetProperty("lines").GetInt32(), together.GetProperty("sections").GetInt32());
+        int Done(JsonElement s, string card) => s.GetProperty(card).GetProperty("done").GetInt32();
+        Assert.Equal(Done(single, "drained") - 2, Done(together, "drained"));     // 2" and 8" drained, 4" not: the group is not
+        Assert.Equal(Done(single, "walkdown") - 2, Done(together, "walkdown"));   // all three walked down: the group once
+        Assert.Equal(Done(single, "cleaned") - 2, Done(together, "cleaned"));
+
+        // The unit's default: the summary, the Unit overview, the PDF and the Excel follow it when nothing is asked.
+        Assert.False((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-view")).GetProperty("grouped").GetBoolean());
+        Assert.False((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("grouped").GetBoolean());
+        (await admin.PutAsJsonAsync($"/api/units/{unitId}/piping-view", new { grouped = true })).EnsureSuccessStatusCode();
+        try
+        {
+            Assert.True((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary")).GetProperty("grouped").GetBoolean());
+            var byDefault = await admin.GetAsync($"/api/units/{unitId}/excel/piping/export");
+            Assert.Contains("GROUPED", byDefault.Content.Headers.ContentDisposition!.FileNameStar ?? byDefault.Content.Headers.ContentDisposition.FileName);
+            var asked = await admin.GetAsync($"/api/units/{unitId}/excel/piping/export?grouped=false");
+            Assert.DoesNotContain("GROUPED", asked.Content.Headers.ContentDisposition!.FileNameStar ?? asked.Content.Headers.ContentDisposition.FileName);
+            // Another unit keeps its own default.
+            var other = await UnitIdAsync("Unit 41");
+            Assert.False((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{other}/piping-view")).GetProperty("grouped").GetBoolean());
+        }
+        finally
+        {
+            (await admin.PutAsJsonAsync($"/api/units/{unitId}/piping-view", new { grouped = false })).EnsureSuccessStatusCode();
+        }
+    }
 }

@@ -19,9 +19,11 @@ namespace PresApp.Api.Assets;
 /// the stored value, otherwise the field is reported as a conflict and nothing is saved.
 /// Audit rows are written by the save interceptor in the same transaction.
 /// </summary>
-public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, AuditContext audit, TimeProvider clock)
+public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, AuditContext audit, TimeProvider clock, CustomFields.CustomFieldService customFields)
 {
     public const string PreservedAtField = "PreservedAt";
+    /// <summary>Bulk edit of a custom field: "cf:" and the field key (e.g. cf:piping.cleaned).</summary>
+    public const string CustomFieldPrefix = "cf:";
     /// <summary>Bulk edit pseudo-field: the dashboard category (value = category id, empty clears it).</summary>
     public const string CategoryField = "DashboardCategory";
 
@@ -416,6 +418,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         if (request.AssetIds is not { Count: > 0 }) throw ApiProblem.Invalid("Select at least one asset.");
         if (request.AssetIds.Count > 2000) throw ApiProblem.Invalid("Select at most 2,000 assets at a time.");
         if (request.Field.Equals(CategoryField, StringComparison.OrdinalIgnoreCase)) return await BulkCategoryAsync(request, apply, user, ct);
+        if (request.Field.StartsWith(CustomFieldPrefix, StringComparison.OrdinalIgnoreCase)) return await BulkCustomAsync(request, apply, user, ct);
 
         var isPreserved = request.Field.Equals(PreservedAtField, StringComparison.OrdinalIgnoreCase);
         var field = isPreserved ? null : PreservationFields.Find(request.Field);
@@ -561,6 +564,49 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             if (!apply) continue;
             p.DashboardCategoryId = category?.Id;
             p.DashboardCategory = null;
+        }
+        foreach (var missing in ids.Except(assets.Select(a => a.Id)))
+        {
+            rows.Add(new BulkRow(missing, "?", null, null, newText, "Skipped", "Asset not found"));
+        }
+
+        if (apply) await db.SaveChangesAsync(ct);
+        return new BulkResult(rows.Count(r => r.Outcome == "Change"), rows.Count(r => r.Outcome == "No change"),
+            rows.Count(r => r.Outcome == "Skipped"), rows);
+    }
+
+    /// <summary>
+    /// Bulk edit of a custom field (Field = "cf:" + key), as on the asset page: the value is checked against the field
+    /// (list options, Yes/No, number, date) and written to each asset of the field's register; others are skipped.
+    /// </summary>
+    private async Task<BulkResult> BulkCustomAsync(BulkRequest request, bool apply, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!user.HasPermission(Permissions.AssetsEdit)) throw ApiProblem.Forbidden("Your role cannot change this field.");
+        var key = request.Field[CustomFieldPrefix.Length..];
+        var ids = request.AssetIds.Distinct().ToList();
+        var assets = await db.Assets.Include(a => a.FieldValues).Where(a => ids.Contains(a.Id)).ToListAsync(ct);
+        var defs = await db.FieldDefinitions.Include(f => f.OptionSet).ThenInclude(o => o!.Values)
+            .Where(f => f.Key == key && f.IsActive).ToListAsync(ct);
+        if (defs.Count == 0) throw ApiProblem.Invalid("This field does not exist or is not active.");
+
+        // Checked once on the side, so a wrong value is reported before anything is written.
+        var probeDef = defs[0];
+        var probe = new Asset { FieldValues = [] };
+        if (customFields.Write(probeDef, probe, null, request.Value) is { } invalid) throw ApiProblem.Invalid(invalid);
+        var newText = probe.FieldValues.FirstOrDefault() is { } pv ? CustomFields.CustomFieldService.Format(probeDef, pv) : null;
+
+        var rows = new List<BulkRow>();
+        audit.Source = ChangeSource.Bulk;
+        foreach (var asset in assets.OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance))
+        {
+            var def = defs.FirstOrDefault(d => d.AssetType == asset.Type);
+            var row = def is null ? null : asset.FieldValues.FirstOrDefault(v => v.FieldDefinitionId == def.Id);
+            var current = def is null || row is null ? null : CustomFields.CustomFieldService.Format(def, row);
+            string? skip = !asset.IsActive ? "Inactive asset" : def is null ? "Not a field of this register" : null;
+            if (skip is not null) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Skipped", skip)); continue; }
+            if (string.Equals(current ?? "", newText ?? "", StringComparison.Ordinal)) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "No change", null)); continue; }
+            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Change", null));
+            if (apply) customFields.Write(def!, asset, row, request.Value);
         }
         foreach (var missing in ids.Except(assets.Select(a => a.Id)))
         {

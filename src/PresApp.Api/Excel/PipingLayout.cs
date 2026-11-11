@@ -103,6 +103,28 @@ public static class PipingLayout
             ? PipingFieldKeys.InspectionNotApplicableInExcel
             : value;
 
+    /// <summary>Written in a grouped row when the lines of the group do not have the same value. Left as it is, nothing is imported.</summary>
+    public const string Mixed = "Mixed";
+
+    /// <summary>
+    /// What a grouped row shows for the values of its lines: the value when they all have it, otherwise <see cref="Mixed"/>.
+    /// P&amp;ID numbers (<paramref name="join"/>) are listed together instead: "541-00-30-194, 541-00-30-195".
+    /// </summary>
+    public static string? GroupText(IReadOnlyList<string?> values, bool join = false)
+    {
+        if (values.Count == 1) return values[0];
+        if (join)
+        {
+            var parts = values.SelectMany(v => (v ?? "").Split([',', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                .DistinctBy(Comparable).ToList();
+            return parts.Count == 0 ? null : string.Join(", ", parts);
+        }
+        return values.Skip(1).All(v => Same(v, values[0])) ? values[0] : Mixed;
+    }
+
+    /// <summary>Columns whose values are listed together in a grouped row (P&amp;ID).</summary>
+    public static bool Joins(string baseKey) => baseKey == nameof(PipelineDetail.PidNumber);
+
     /// <summary>Same cell for the engineer: spaces and case do not count.</summary>
     public static bool Same(string? a, string? b) => Comparable(a) == Comparable(b);
 

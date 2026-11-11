@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
-import { Perm, type BulkResult, type CategoryOption, type RegisterRow, type SearchHit } from "../../api/types";
-import { useFields, useOptions, useUnit } from "../../app/useCatalog";
+import { Perm, type BulkResult, type CategoryOption, type CustomField, type RegisterRow, type SearchHit } from "../../api/types";
+import { useCustomFields, useFields, useOptions, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { AssetSearch } from "../../components/AssetSearch";
 import { Button } from "../../components/Button";
@@ -20,6 +20,21 @@ interface Picked {
 
 const PRESERVED = "PreservedAt";
 const CATEGORY = "DashboardCategory";
+const CUSTOM = "cf:";
+
+/** Value of a custom field: its list, Yes/No, a date, or text. */
+function CustomInput({ field, value, onChange }: { field: CustomField; value: string; onChange: (v: string) => void }) {
+  if (field.dataType === "List" || field.dataType === "YesNo") {
+    const choices = field.dataType === "YesNo" ? ["Yes", "No"] : field.options;
+    return (
+      <SelectInput value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">(empty)</option>
+        {choices.map((o) => <option key={o} value={o}>{o}</option>)}
+      </SelectInput>
+    );
+  }
+  return <TextInput type={field.dataType === "Date" ? "date" : "text"} inputMode={field.dataType === "Number" ? "decimal" : undefined} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
 
 /** Change one field on many assets: pick them, choose field and value, preview, confirm. Every change is audited. */
 export function BulkEditPage() {
@@ -35,11 +50,12 @@ export function BulkEditPage() {
   const register = useQuery({
     queryKey: ["register", unitId, "bulk-all"],
     queryFn: async ({ signal }) => {
-      const [eq, ei] = await Promise.all([
+      const [eq, ei, lines] = await Promise.all([
         api<RegisterRow[]>(`/api/units/${unitId}/assets?type=Equipment`, { signal }),
         api<RegisterRow[]>(`/api/units/${unitId}/assets?type=ElectricalInstrument`, { signal }),
+        api<RegisterRow[]>(`/api/units/${unitId}/assets?type=Pipeline`, { signal }),
       ]);
-      return [...eq, ...ei];
+      return [...eq, ...ei, ...lines];
     },
   });
 
@@ -60,6 +76,10 @@ export function BulkEditPage() {
   const field = bulkFields.find((f) => f.key === fieldKey);
   const canPreserve = session.can("assets.markPreserved");
   const canCategory = session.can(Perm.assetsEdit);
+  // Custom fields (e.g. Cleaned? of lines), sent as "cf:" + key; one key can exist in several registers.
+  const allCustom = useCustomFields().data ?? [];
+  const customFields = canCategory ? [...new Map(allCustom.filter((c) => c.isActive).map((c) => [c.key, c])).values()].sort((a, b) => a.label.localeCompare(b.label)) : [];
+  const custom = fieldKey.startsWith(CUSTOM) ? customFields.find((c) => CUSTOM + c.key === fieldKey) : undefined;
   const categories = useQuery({
     queryKey: ["category-options", unitId],
     queryFn: ({ signal }) => api<CategoryOption[]>(`/api/units/${unitId}/category-options`, { signal }),
@@ -195,6 +215,11 @@ export function BulkEditPage() {
                     {bulkFields.filter((f) => f.section === sec).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                   </optgroup>
                 ))}
+                {customFields.length > 0 && (
+                  <optgroup label="Custom fields">
+                    {customFields.map((c) => <option key={c.key} value={CUSTOM + c.key}>{c.label}</option>)}
+                  </optgroup>
+                )}
               </SelectInput>
             </Field>
             {fieldKey === PRESERVED && (
@@ -225,6 +250,13 @@ export function BulkEditPage() {
                 <span className="text-sm font-semibold text-ink">New value</span>
                 <FieldInput field={field} value={value} onChange={(v) => { setValue(v); setPreview(null); }} options={options.data ?? {}} />
                 <span className="mt-1 block text-sm text-muted">Empty clears the field.</span>
+              </label>
+            )}
+            {custom && (
+              <label className="block">
+                <span className="text-sm font-semibold text-ink">New value</span>
+                <CustomInput field={custom} value={value} onChange={(v) => { setValue(v); setPreview(null); }} />
+                <span className="mt-1 block text-sm text-muted">Empty clears the field. Assets of another register are skipped.</span>
               </label>
             )}
           </div>

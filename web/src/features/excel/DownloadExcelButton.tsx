@@ -5,7 +5,7 @@ import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
 
 /** Builds the unit Excel (or the piping line list, or the E7 electrical test report) on the server and saves it in the browser's downloads. */
-export function DownloadExcelButton({ unitId, variant = "primary", label = "Download Excel", piping = false, path, body }: { unitId: number; variant?: "primary" | "secondary"; label?: string; piping?: boolean; path?: string; body?: unknown }) {
+export function DownloadExcelButton({ unitId, variant = "primary", label = "Download Excel", piping = false, grouped, path, body }: { unitId: number; variant?: "primary" | "secondary"; label?: string; piping?: boolean; /** Piping line list grouped by size or one row per line; not given: the unit's default. */ grouped?: boolean; path?: string; body?: unknown }) {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -13,7 +13,7 @@ export function DownloadExcelButton({ unitId, variant = "primary", label = "Down
   async function run() {
     setBusy(true);
     try {
-      const name = await download(path ?? `/api/units/${unitId}/excel/${piping ? "piping/" : ""}export`, body);
+      const name = await download(path ?? `/api/units/${unitId}/excel/${piping ? "piping/" : ""}export${piping && grouped !== undefined ? `?grouped=${grouped}` : ""}`, body);
       toast(`${name} downloaded`);
       queryClient.invalidateQueries({ queryKey: ["excel", unitId] });
     } catch (e) {

@@ -11,17 +11,23 @@ public sealed record CleaningScopeRow(string Value, int Lines, bool InScope);
 /// <summary>InspectionTotal: the lines of the service without Inspection Done = N/A (what Inspected is counted against).</summary>
 public sealed record PipingServiceRow(string Code, string? Description, int Lines, int Walkdown, int Drained, int Inspected, int Scope, int Cleaned,
     int InspectionTotal);
+/// <param name="Lines">Rows counted: lines, or groups when <paramref name="Grouped"/>.</param>
+/// <param name="Sections">The lines themselves (equal to <paramref name="Lines"/> when not grouped).</param>
 public sealed record PipingSummary(int Lines, decimal LengthM, PipingCount Walkdown, PipingCount Drained, PipingCount Inspected,
-    PipingCount Cleaned, int NoCleaningSet, List<CleaningScopeRow> Cleaning, List<PipingServiceRow> ByService);
+    PipingCount Cleaned, int NoCleaningSet, List<CleaningScopeRow> Cleaning, List<PipingServiceRow> ByService, bool Grouped = false, int Sections = 0);
 
 /// <summary>
 /// The figures of the piping Summary for the app (same rules as the Excel): walkdown Completed, bulk liquid drained
 /// (Completed), inspection done (Yes; lines with N/A are left out of the total), cleaning scope per Cleaning Required value (TBC and similar are not scope)
 /// and lines cleaned (Cleaned = Yes) against the scope.
+/// Grouped, each size group counts once, as the Summary of the grouped line list counts its rows: an activity is done
+/// when every line of the group has it, and a group whose lines have different Cleaning Required values is "Mixed" (not scope).
 /// </summary>
 public sealed class PipingSummaryService(PresAppDbContext db)
 {
-    public async Task<PipingSummary> GetAsync(int unitId, CancellationToken ct)
+    private sealed record Row(string Service, decimal? Length, bool Walkdown, bool Drained, bool Inspected, bool InspectionNa, string? Cleaning, bool InScope, bool Cleaned);
+
+    public async Task<PipingSummary> GetAsync(int unitId, CancellationToken ct, bool grouped = false)
     {
         var lines = await db.Assets.AsNoTracking()
             .Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline)
@@ -37,22 +43,23 @@ public sealed class PipingSummaryService(PresAppDbContext db)
         string? Value(Guid asset, string key) => defs.TryGetValue(key, out var d) ? values[asset].FirstOrDefault(v => v.FieldDefinitionId == d.Id)?.ValueText : null;
         var codes = await LineCodeMeanings.LoadAsync(db, ct);
 
-        var rows = lines.Select(l =>
+        var perLine = lines.Select(l =>
         {
             var cleaning = Value(l.Id, PipingFieldKeys.CleaningRequired);
-            return new
-            {
-                Service = (l.Service ?? LineNumber.Parse(l.Tag)?.Service ?? "").ToUpperInvariant(),
+            return (l.Tag, Row: new Row(
+                (l.Service ?? LineNumber.Parse(l.Tag)?.Service ?? "").ToUpperInvariant(),
                 l.Length,
-                Walkdown = AssetPreservation.IsCompleted(l.Walkdown),
-                Drained = AssetPreservation.IsCompleted(l.Drained),
-                Inspected = string.Equals(Value(l.Id, PipingFieldKeys.InspectionDone), "Yes", StringComparison.OrdinalIgnoreCase),
-                InspectionNa = Value(l.Id, PipingFieldKeys.InspectionDone) is { } inspection && ValueNormalizer.IsNotApplicable(inspection),
-                Cleaning = cleaning,
-                InScope = cleaning is not null && !Excel.PipingTemplate.NotScope(cleaning),
-                Cleaned = string.Equals(Value(l.Id, PipingFieldKeys.Cleaned), "Yes", StringComparison.OrdinalIgnoreCase)
-            };
+                AssetPreservation.IsCompleted(l.Walkdown),
+                AssetPreservation.IsCompleted(l.Drained),
+                string.Equals(Value(l.Id, PipingFieldKeys.InspectionDone), "Yes", StringComparison.OrdinalIgnoreCase),
+                Value(l.Id, PipingFieldKeys.InspectionDone) is { } inspection && ValueNormalizer.IsNotApplicable(inspection),
+                cleaning,
+                cleaning is not null && !Excel.PipingTemplate.NotScope(cleaning),
+                string.Equals(Value(l.Id, PipingFieldKeys.Cleaned), "Yes", StringComparison.OrdinalIgnoreCase)));
         }).ToList();
+        var rows = grouped
+            ? perLine.Select((x, i) => (Key: LineNumber.GroupKey(x.Tag) ?? "#" + i, x.Row)).GroupBy(x => x.Key).Select(g => Merge(g.Select(x => x.Row).ToList())).ToList()
+            : perLine.Select(x => x.Row).ToList();
 
         // Every value of the list, in its order, plus values still used but no longer in the list.
         var listed = defs.TryGetValue(PipingFieldKeys.CleaningRequired, out var cr)
@@ -61,7 +68,8 @@ public sealed class PipingSummaryService(PresAppDbContext db)
         var used = rows.Where(r => r.Cleaning is not null).Select(r => r.Cleaning!).Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(u => !listed.Contains(u, StringComparer.OrdinalIgnoreCase));
         var cleaningRows = listed.Concat(used)
-            .Select(v => new CleaningScopeRow(v, rows.Count(r => string.Equals(r.Cleaning, v, StringComparison.OrdinalIgnoreCase)), !Excel.PipingTemplate.NotScope(v)))
+            .Select(v => new CleaningScopeRow(v, rows.Count(r => string.Equals(r.Cleaning, v, StringComparison.OrdinalIgnoreCase)),
+                v != Excel.PipingLayout.Mixed && !Excel.PipingTemplate.NotScope(v)))
             .ToList();
         var scope = rows.Count(r => r.InScope);
 
@@ -76,6 +84,17 @@ public sealed class PipingSummaryService(PresAppDbContext db)
             rows.GroupBy(r => r.Service).OrderBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => new PipingServiceRow(g.Key, codes.Service(g.Key, unitId), g.Count(), g.Count(r => r.Walkdown), g.Count(r => r.Drained),
                     g.Count(r => r.Inspected), g.Count(r => r.InScope), g.Count(r => r.Cleaned && r.InScope), g.Count(r => !r.InspectionNa)))
-                .ToList());
+                .ToList(),
+            grouped, perLine.Count);
+    }
+
+    /// <summary>One row for a size group: done when all its lines are; one Cleaning Required value, or Mixed.</summary>
+    private static Row Merge(List<Row> g)
+    {
+        if (g.Count == 1) return g[0];
+        var cleaning = g.All(r => string.Equals(r.Cleaning ?? "", g[0].Cleaning ?? "", StringComparison.OrdinalIgnoreCase)) ? g[0].Cleaning : Excel.PipingLayout.Mixed;
+        var inScope = cleaning is not null && cleaning != Excel.PipingLayout.Mixed && !Excel.PipingTemplate.NotScope(cleaning);
+        return new Row(g[0].Service, g.Any(r => r.Length is not null) ? g.Sum(r => r.Length ?? 0) : null,
+            g.All(r => r.Walkdown), g.All(r => r.Drained), g.All(r => r.Inspected), g.All(r => r.InspectionNa), cleaning, inScope, g.All(r => r.Cleaned));
     }
 }

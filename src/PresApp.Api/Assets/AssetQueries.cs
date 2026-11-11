@@ -50,7 +50,7 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 r.P?.LastFieldActionDate, r.P?.PreservedAtUtc, r.DocsPending, r.IsActive,
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
                 r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM,
-                    showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
+                    showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null, LineNumber.GroupKey(r.Tag)), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
                 r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone))
             .ToList();
     }

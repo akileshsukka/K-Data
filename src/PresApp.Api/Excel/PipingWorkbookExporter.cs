@@ -19,7 +19,12 @@ namespace PresApp.Api.Excel;
 /// </summary>
 public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clock)
 {
-    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct)
+    /// <param name="grouped">
+    /// One row per size group (<see cref="LineNumber.GroupKey"/>): the line numbers in one cell, one per line, the P&amp;IDs
+    /// listed together and each other value shown once when all the lines have it (<see cref="PipingLayout.Mixed"/> when
+    /// not). The hidden Key holds the ids of all the lines of the row, so the import writes each line on its own.
+    /// </param>
+    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct, bool grouped = false)
     {
         var unit = await db.Units.AsNoTracking().FirstOrDefaultAsync(u => u.Id == unitId, ct) ?? throw ApiProblem.NotFound("Unit not found.");
         var lines = (await db.Assets.AsNoTracking().Include(a => a.Preservation).Include(a => a.Pipeline).Include(a => a.FieldValues)
@@ -35,7 +40,8 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         var now = clock.GetUtcNow().UtcDateTime;
         var local = TimeZoneInfo.ConvertTimeFromUtc(now, SiteClock.Dubai);
         var sessionId = Guid.NewGuid();
-        var n = lines.Count;
+        var groups = grouped ? Group(lines) : lines.Select(a => (IReadOnlyList<Asset>)[a]).ToList();
+        var n = groups.Count;
 
         using var wb = Open(templateBytes);
         var table = PipingTemplate.FindTable(wb)!;
@@ -54,7 +60,9 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         var body = table.DataRange;
         for (var i = 0; i < n; i++)
         {
-            var a = lines[i];
+            var g = groups[i];
+            var a = g[0];
+            string? Shown(Func<Asset, string?> pick, bool join = false) => PipingLayout.GroupText(g.Select(pick).ToList(), join);
             var row = body.Row(i + 1);
             var service = a.Pipeline?.Service ?? LineNumber.Parse(a.Tag)?.Service;
             for (var c = 0; c < headers.Count; c++)
@@ -64,20 +72,24 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
                 if (customByIndex.TryGetValue(c, out var customDef))
                 {
                     cell.Style.NumberFormat.Format = "@";
-                    cell.SetValue(CustomText(customDef, a) ?? "");
+                    cell.SetValue(Shown(x => CustomText(customDef, x)) ?? "");
                     continue;
                 }
                 if (!byIndex.TryGetValue(c, out var col)) { cell.Value = Blank.Value; continue; }
                 switch (col.Role)
                 {
                     case PipingRole.Serial: cell.Value = i + 1; break;
-                    case PipingRole.Tag: cell.SetValue(a.Tag ?? a.Code); break;
+                    case PipingRole.Tag:
+                        cell.SetValue(string.Join('\n', g.Select(x => x.Tag ?? x.Code)));
+                        if (g.Count > 1) cell.Style.Alignment.WrapText = true;
+                        break;
                     case PipingRole.ProcessCode: cell.SetValue(service ?? ""); break;
                     case PipingRole.ProcessDescription: cell.SetValue(codes.Service(service, unitId)?.ToUpperInvariant() ?? ""); break;
-                    case PipingRole.N2Blanket: cell.SetValue(PipingLayout.N2Blanket(a) ?? ""); break;
+                    case PipingRole.N2Blanket: cell.SetValue(Shown(PipingLayout.N2Blanket) ?? ""); break;
                     default:
                         cell.Style.NumberFormat.Format = "@";
-                        cell.SetValue(PipingLayout.Display(col, a, defs) ?? "");
+                        cell.SetValue(Shown(x => PipingLayout.Display(col, x, defs), PipingLayout.Joins(col.BaseKey)) ?? "");
+                        if (g.Count > 1) cell.Style.Alignment.WrapText = true;
                         break;
                 }
             }
@@ -92,7 +104,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         {
             var cell = body.Row(i + 1).Cell(table.DataRange.ColumnCount());
             cell.Style.NumberFormat.Format = "@";
-            cell.SetValue(lines[i].Id.ToString());
+            cell.SetValue(string.Join(KeySeparator, groups[i].Select(a => a.Id.ToString())));
         }
         var keys = ws.Range(table.HeadersRow().RowNumber(), keyColumn, table.HeadersRow().RowNumber() + Math.Max(n, 1), keyColumn);
         keys.Style.Alignment.WrapText = false;   // a wrapped id makes every row tall
@@ -167,6 +179,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             ["ExportedBy", exportedBy],
             ["FormatVersion", WorkbookFormat.FormatVersion.ToString(CultureInfo.InvariantCulture)],
             ["RowCount", n.ToString(CultureInfo.InvariantCulture)],
+            ["Grouped", grouped ? "Yes" : "No"],
             ["App", WorkbookFormat.AppName]
         ];
         for (var r = 0; r < metaRows.Length; r++)
@@ -181,7 +194,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         ws.SetTabActive();
         wb.FullCalculationOnLoad = true;
 
-        var fileName = $"U{unit.Number} ALL PIPING LINES {local.ToString("dd MMM yyyy HHmm", CultureInfo.InvariantCulture).ToUpperInvariant()}.xlsx";
+        var fileName = $"U{unit.Number} ALL PIPING LINES {(grouped ? "GROUPED " : "")}{local.ToString("dd MMM yyyy HHmm", CultureInfo.InvariantCulture).ToUpperInvariant()}.xlsx";
         using var output = new MemoryStream();
         wb.SaveAs(output);
 
@@ -196,7 +209,7 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             Status = ExcelSessionStatus.Open,
             FormatVersion = WorkbookFormat.FormatVersion,
             FileName = fileName,
-            RowCount = n,
+            RowCount = lines.Count,
             StructureSignature = new StructureSignature(table.Name, table.HeadersRow().RowNumber(),
                 table.HeadersRow().FirstCell().Address.ColumnNumber, finalHeaders).ToJson(),
             BaseJson = new BaseSnapshot(lines.Select(a => new BaseRow(a.Id, a.Tag, a.Code,
@@ -207,6 +220,21 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
         await db.SaveChangesAsync(ct);
         return new ExportResult(fileName, output.ToArray(), sessionId, n);
     }
+
+    /// <summary>Between the line ids of a grouped row in the hidden Key column.</summary>
+    public const char KeySeparator = ',';
+
+    /// <summary>
+    /// Lines in size groups, in the order of the list (a group where its first line is); inside a group by size.
+    /// A line without a group key is a group of its own.
+    /// </summary>
+    public static List<IReadOnlyList<Asset>> Group(IReadOnlyList<Asset> lines) =>
+        lines.Select((a, i) => (Asset: a, Key: LineNumber.GroupKey(a.Tag) ?? "#" + i))
+            .GroupBy(x => x.Key)
+            .Select(g => (IReadOnlyList<Asset>)g.Select(x => x.Asset)
+                .OrderBy(a => a.Pipeline?.SizeIn ?? LineNumber.Parse(a.Tag)?.SizeIn ?? decimal.MaxValue)
+                .ThenBy(a => a.Tag ?? a.Code, NaturalComparer.Instance).ToList())
+            .ToList();
 
     // ------------------------------------------------------------------ template
 

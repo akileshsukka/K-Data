@@ -65,6 +65,21 @@ public static partial class LineNumber
     public static string IdentityKey(LineNumberParts p) =>
         string.Join('|', p.Unit, p.Sequence.TrimStart('0'), p.Service, p.SizeIn.ToString("0.###", CultureInfo.InvariantCulture), p.Spec);
 
+    /// <summary>
+    /// Key of the size group of a line: unit, sequence, service, spec and insulation, without the size. Sections of one line
+    /// that change size (541-2089-RF-2"-31376-C, 541-2089-RF-4"-31376-C…) share it, so the grouped view and the grouped line
+    /// list show them as one row. Only a single standard number has a key; any other line stays on its own (null).
+    /// Nothing is stored: the groups are worked out each time from the line numbers.
+    /// </summary>
+    public static string? GroupKey(string? lineNumber)
+    {
+        if (string.IsNullOrWhiteSpace(lineNumber) || lineNumber.Contains('\n')) return null;
+        var m = Pattern().Match(lineNumber.Trim().Replace('”', '"').Replace('″', '"'));
+        if (!m.Success) return null;
+        return string.Join('|', int.Parse(m.Groups["unit"].Value, CultureInfo.InvariantCulture), m.Groups["seq"].Value.TrimStart('0').ToUpperInvariant(),
+            m.Groups["service"].Value.ToUpperInvariant(), m.Groups["spec"].Value.ToUpperInvariant(), m.Groups["ins"].Value.ToUpperInvariant());
+    }
+
     /// <summary>First non-empty number of a cell that holds several ("39-0061-RSX-16"-13030-H⏎39-0061-RSX-12"-13030-H").</summary>
     public static string First(string lineNumber) =>
         lineNumber.Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";

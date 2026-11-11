@@ -17,6 +17,9 @@ namespace PresApp.Api.Excel;
 /// </summary>
 public sealed partial class ExcelImportService
 {
+    /// <summary>Key of the line numbers of a row among the values it showed (not a field).</summary>
+    private const string TagKey = "#tag";
+
     private async Task<Plan> AnalysePipingAsync(XLWorkbook wb, ExcelSession session, bool tracking, CancellationToken ct)
     {
         var signature = StructureSignature.FromJson(session.StructureSignature)
@@ -34,7 +37,9 @@ public sealed partial class ExcelImportService
         var customColumns = PipingTemplate.MapCustom(headers, await PipingWorkbookExporter.LoadCustomFieldsAsync(db, tracking, ct))
             .Select(m => (Def: m.Key, Index: m.Value + 1)).ToList();
 
-        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row)>();
+        // A grouped row (several ids in the Key) stands for each of its lines: one entry per line, with what the row showed
+        // at export. A cell left as it was shown is not a change; a changed cell is written to every line of the row.
+        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row, Dictionary<string, string?> Shown, bool Grouped)>();
         var changes = new List<ImportChange>();
         var seen = new HashSet<Guid>();
         var body = table.DataRange;
@@ -53,11 +58,19 @@ public sealed partial class ExcelImportService
                 });
                 continue;
             }
-            if (!Guid.TryParse(keyText, out var key) || !baseRows.TryGetValue(key, out var baseRow))
-                throw new ImportRejected($"The hidden Key column was changed in row {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
-            if (!seen.Add(key))
-                throw new ImportRejected($"The hidden Key of row {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
-            rows.Add((i, baseRow, row));
+            var members = new List<BaseRow>();
+            foreach (var part in keyText.Split(PipingWorkbookExporter.KeySeparator, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!Guid.TryParse(part, out var key) || !baseRows.TryGetValue(key, out var baseRow))
+                    throw new ImportRejected($"The hidden Key column was changed in row {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
+                if (!seen.Add(key))
+                    throw new ImportRejected($"The hidden Key of row {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
+                members.Add(baseRow);
+            }
+            var shown = members.SelectMany(m => m.Values.Keys).Distinct()
+                .ToDictionary(k => k, k => PipingLayout.GroupText(members.Select(m => m.Values.GetValueOrDefault(k)).ToList(), PipingLayout.Joins(k)));
+            shown[TagKey] = string.Join('\n', members.Select(m => m.Tag ?? m.Code));
+            foreach (var m in members) rows.Add((i, m, row, shown, members.Count > 1));
         }
 
         var ids = rows.Select(r => r.Base.Key).ToList();
@@ -66,8 +79,13 @@ public sealed partial class ExcelImportService
         var defs = await PipingWorkbookExporter.LoadFixedFieldsAsync(db, tracking, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
 
-        foreach (var (number, baseRow, row) in rows)
+        var tagWarned = new HashSet<int>();
+        foreach (var (number, baseRow, row, shown, grouped) in rows)
         {
+            // The cell is not a change when it still reads as the row was written (a grouped row: the group's text).
+            bool Untouched(string? excel, string baseKey, string? baseValue) =>
+                grouped ? PipingLayout.Same(excel, shown.GetValueOrDefault(baseKey)) || PipingLayout.Same(excel, PipingLayout.Mixed)
+                        : PipingLayout.Same(excel, baseValue);
             assets.TryGetValue(baseRow.Key, out var asset);
             ImportChange Change(string field, ImportOutcome outcome, string? reason, string? baseValue = null, string? excel = null, string? current = null, string? newValue = null) => new()
             {
@@ -78,16 +96,17 @@ public sealed partial class ExcelImportService
             if (tagColumn > 0)
             {
                 var tagInFile = ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(tagColumn)));
-                if (!string.Equals(tagInFile, ValueNormalizer.CleanText(baseRow.Tag), StringComparison.Ordinal))
+                var tagWritten = grouped ? shown[TagKey] : baseRow.Tag;
+                if (!string.Equals(tagInFile, ValueNormalizer.CleanText(tagWritten), StringComparison.Ordinal) && tagWarned.Add(number))
                     changes.Add(Change("Tag", ImportOutcome.Warning, "Tag No was changed in the file. Line numbers are changed in the app; the row was matched by its hidden Key.",
-                        baseRow.Tag, tagInFile, asset?.Tag));
+                        tagWritten, tagInFile, grouped ? null : asset?.Tag));
             }
 
             foreach (var (col, index) in editable)
             {
                 if (!baseRow.Values.TryGetValue(col.BaseKey, out var baseValue)) continue;
                 var excel = ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(index)));
-                if (PipingLayout.Same(excel, baseValue)) continue;   // the engineer did not change this cell
+                if (Untouched(excel, col.BaseKey, baseValue)) continue;   // the engineer did not change this cell
 
                 var fieldName = col.Role == PipingRole.Custom ? defs.GetValueOrDefault(col.Key!)?.Label ?? col.Header : col.Key!;
                 if (asset is null) { changes.Add(Change(fieldName, ImportOutcome.Rejected, "The line no longer exists.", baseValue, excel)); continue; }
@@ -140,7 +159,7 @@ public sealed partial class ExcelImportService
             {
                 if (!baseRow.Values.TryGetValue("cf:" + def.Key, out var baseValue)) continue;   // the column was not in the export
                 var excel = ValueNormalizer.CleanText(WorkbookFormat.CellText(row.Cell(index)));
-                if (PipingLayout.Same(excel, baseValue)) continue;
+                if (Untouched(excel, "cf:" + def.Key, baseValue)) continue;
                 if (asset is null) { changes.Add(Change(def.Label, ImportOutcome.Rejected, "The line no longer exists.", baseValue, excel)); continue; }
                 var current = PipingWorkbookExporter.CustomText(def, asset);
                 if (!asset.IsActive) { changes.Add(Change(def.Label, ImportOutcome.Rejected, "Inactive line: it cannot be edited.", baseValue, excel, current)); continue; }

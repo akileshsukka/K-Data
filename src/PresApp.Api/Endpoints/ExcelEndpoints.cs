@@ -42,15 +42,24 @@ public static class ExcelEndpoints
         }).RequirePermission(Permissions.ExcelExport);
 
         // Piping line list (Line List + Summary), imported back through the same import as the unit file.
-        app.MapGet("/api/units/{unitId:int}/excel/piping/export", async (int unitId, ClaimsPrincipal user, PipingWorkbookExporter exporter, CancellationToken ct) =>
+        // grouped=true: one row per size group (same line number except the size); not given: the unit's default view.
+        app.MapGet("/api/units/{unitId:int}/excel/piping/export", async (int unitId, bool? grouped, ClaimsPrincipal user, PipingWorkbookExporter exporter,
+            Piping.PipingViewSettings view, CancellationToken ct) =>
         {
-            var result = await exporter.ExportAsync(unitId, user.Identity?.Name ?? "unknown", ct);
+            var result = await exporter.ExportAsync(unitId, user.Identity?.Name ?? "unknown", ct, await view.ResolveAsync(unitId, grouped, ct));
             return Results.File(result.Content, XlsxType, result.FileName);
         }).RequirePermission(Permissions.ExcelExport);
 
-        // Figures of the piping Summary for the app (Unit overview and Pipeline Register).
-        app.MapGet("/api/units/{unitId:int}/piping-summary", (int unitId, Piping.PipingSummaryService s, CancellationToken ct) => s.GetAsync(unitId, ct))
+        // Figures of the piping Summary for the app (Unit overview, Pipeline Register, PDF): grouped or not as asked, else the unit's default.
+        app.MapGet("/api/units/{unitId:int}/piping-summary", async (int unitId, bool? grouped, Piping.PipingSummaryService s, Piping.PipingViewSettings view, CancellationToken ct) =>
+                await s.GetAsync(unitId, ct, await view.ResolveAsync(unitId, grouped, ct)))
             .RequirePermission(Permissions.AssetsView);
+
+        // How the unit shows its lines by default (individual or grouped by size).
+        app.MapGet("/api/units/{unitId:int}/piping-view", async (int unitId, Piping.PipingViewSettings view, CancellationToken ct) =>
+            new Piping.PipingViewDto(await view.GroupedAsync(unitId, ct))).RequirePermission(Permissions.AssetsView);
+        app.MapPut("/api/units/{unitId:int}/piping-view", (int unitId, Piping.PipingViewDto request, Piping.PipingViewSettings view, CancellationToken ct) =>
+            view.SetAsync(unitId, request.Grouped, ct)).RequirePermission(Permissions.AssetsManage);
 
         // Notes under the Summary of the piping line list.
         app.MapGet("/api/units/{unitId:int}/piping-notes", (int unitId, Piping.PipingNoteService s, CancellationToken ct) => s.ListAsync(unitId, ct))

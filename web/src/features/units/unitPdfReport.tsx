@@ -205,6 +205,8 @@ function Report({ unitName, plantName, d, piping, at }: { unitName: string; plan
           {/* Pipelines always start on a new page, so the section can be reviewed (or left out) on its own. */}
           <Block newPage>
             <h2 className="text-xl font-semibold">Pipelines</h2>
+            {/* The unit's default view: grouped, sizes of one line count once. */}
+            {piping.grouped && <p className="mt-1 text-sm text-muted">Grouped by line: sizes of one line count as one; a line is done when all its sizes are.</p>}
             <div className="mt-3 grid grid-cols-6 gap-3"><PipingCards s={piping} /></div>
           </Block>
           {piping.byService.length > 0 && chunk(piping.byService, TABLE_ROWS_PER_BLOCK).map((rows, i) => (

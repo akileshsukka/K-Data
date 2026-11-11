@@ -44,6 +44,7 @@ builder.Services.AddScoped<PresApp.Api.Excel.UnitWorkbookExporter>();
 builder.Services.AddScoped<PresApp.Api.Excel.PipingWorkbookExporter>();
 builder.Services.AddScoped<PresApp.Api.Piping.PipingNoteService>();
 builder.Services.AddScoped<PresApp.Api.Piping.PipingSummaryService>();
+builder.Services.AddScoped<PresApp.Api.Piping.PipingViewSettings>();
 builder.Services.AddScoped<PresApp.Api.Excel.ExcelImportService>();
 builder.Services.AddScoped<PresApp.Api.Excel.OnboardingService>();
 builder.Services.AddScoped<PresApp.Api.Excel.ExcelTemplateService>();

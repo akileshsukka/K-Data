@@ -9,9 +9,12 @@ const pct = (c: PipingCount) => (c.total > 0 ? Math.round((c.done / c.total) * 1
  * The piping Summary of the line list as cards: walkdown, draining, inspection, cleaning scope and cleaning done
  * (against the scope), with a table per service code on demand. Same rules as the Summary sheet of the Excel.
  */
-export function PipingSummaryCards({ unitId, title = "Piping status" }: { unitId: number; title?: string }) {
+export function PipingSummaryCards({ unitId, title = "Piping status", grouped }: { unitId: number; title?: string; /** Not given: the unit's default view. */ grouped?: boolean }) {
   const [open, setOpen] = useState(false);
-  const q = useQuery({ queryKey: ["piping-summary", unitId], queryFn: ({ signal }) => api<PipingSummary>(`/api/units/${unitId}/piping-summary`, { signal }) });
+  const q = useQuery({
+    queryKey: ["piping-summary", unitId, grouped ?? "default"],
+    queryFn: ({ signal }) => api<PipingSummary>(`/api/units/${unitId}/piping-summary${grouped === undefined ? "" : `?grouped=${grouped}`}`, { signal }),
+  });
   const s = q.data;
   // Say so instead of hiding the section: a role without access must be visible, not silently missing.
   if (q.isError) return <p className="mt-6 text-hold">{title}: {q.error.message}</p>;
@@ -26,6 +29,9 @@ export function PipingSummaryCards({ unitId, title = "Piping status" }: { unitId
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <PipingCards s={s} />
       </div>
+      {s.grouped && (
+        <p className="mt-2 text-sm text-muted">Sizes of one line count as one; a line is done when all its sizes are.</p>
+      )}
       {open && (
         <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-panel">
           <PipingServiceTable rows={s.byService} className="min-w-[44rem]" />
@@ -41,9 +47,11 @@ export function PipingCards({ s }: { s: PipingSummary }) {
   return (
     <>
       <div className="rounded-lg border border-line bg-panel p-4">
-        <p className="text-sm font-semibold text-muted">Lines</p>
+        <p className="text-sm font-semibold text-muted">{s.grouped ? "Lines (grouped)" : "Lines"}</p>
         <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{s.lines}</p>
-        <p className="mt-1 text-sm text-muted">{s.lengthM > 0 ? `${Math.round(s.lengthM).toLocaleString("en")} m` : "Active lines"}</p>
+        <p className="mt-1 text-sm text-muted">
+          {[s.grouped && s.sections !== s.lines && `${s.sections} sizes`, s.lengthM > 0 && `${Math.round(s.lengthM).toLocaleString("en")} m`].filter(Boolean).join(" · ") || "Active lines"}
+        </p>
       </div>
       <Progress label="Walkdown" count={s.walkdown} detail="EM walkdown completed" />
       <Progress label="Drained" count={s.drained} detail="Bulk liquid drained" />

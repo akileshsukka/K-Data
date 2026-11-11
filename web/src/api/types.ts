@@ -205,6 +205,8 @@ export interface LineInfo {
   lengthM: number | null;
   /** Internal mark of a non-standard line number; only sent to roles with lines.nonStandard. */
   numberCheck?: LineNumberCheck | null;
+  /** Size group: sections of one line that only change size share it (grouped view). Null: the line is on its own. */
+  groupKey?: string | null;
 }
 
 export interface PipeSpec {
@@ -799,6 +801,10 @@ export interface PipingSummary {
   noCleaningSet: number;
   cleaning: { value: string; lines: number; inScope: boolean }[];
   byService: { code: string; description: string | null; lines: number; walkdown: number; drained: number; inspected: number; scope: number; cleaned: number; /** Lines without Inspection Done = N/A. */ inspectionTotal: number }[];
+  /** Counted by size group (each group once): the unit default or what the page asked for. */
+  grouped: boolean;
+  /** The lines themselves; equal to lines when not grouped. */
+  sections: number;
 }
 
 export interface PipingTemplateInfo {
@@ -828,4 +834,9 @@ export interface DeletionPreview {
 export interface DeletionResult {
   deleted: number;
   notDeleted: DeletionItem[];
+}
+
+/** How a unit shows its lines by default: one row per line, or sizes of a line grouped. */
+export interface PipingView {
+  grouped: boolean;
 }
