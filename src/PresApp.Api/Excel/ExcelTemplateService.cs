@@ -133,14 +133,14 @@ public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvid
         foreach (var c in existing)
         {
             var stripped = StripCodePrefix(c.Label);
-            if (stripped != c.Label && !existing.Any(o => o != c && string.Equals(o.Label, stripped, StringComparison.OrdinalIgnoreCase))) c.Label = stripped;
+            if (stripped != c.Label && !existing.Any(o => o != c && o.Scope == c.Scope && string.Equals(o.Label, stripped, StringComparison.OrdinalIgnoreCase))) c.Label = stripped;
         }
         Reporting.UnitDashboard.AssignCodes(existing);
 
         var order = existing.Select(c => c.SortOrder).DefaultIfEmpty(0).Max();
         foreach (var t in fromTemplate)
         {
-            var match = existing.FirstOrDefault(c => c.Section == t.Section && c.Code == t.Code);
+            var match = existing.FirstOrDefault(c => c.Scope == t.Scope && c.Section == t.Section && c.Code == t.Code);
             if (match is not null)
             {
                 match.ActionBy ??= t.ActionBy;
@@ -149,10 +149,10 @@ public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvid
                 match.Note ??= t.Note;
                 continue;
             }
-            var label = existing.Any(c => string.Equals(c.Label, t.Description, StringComparison.OrdinalIgnoreCase)) ? $"{t.Description} ({t.Code})" : t.Description;
+            var label = existing.Any(c => c.Scope == t.Scope && string.Equals(c.Label, t.Description, StringComparison.OrdinalIgnoreCase)) ? $"{t.Description} ({t.Code})" : t.Description;
             var created = new DashboardCategory
             {
-                UnitId = unitId, Section = t.Section, Code = t.Code, Label = Truncate(label, DashboardCategory.ShortText)!,
+                UnitId = unitId, Scope = t.Scope, Section = t.Section, Code = t.Code, Label = Truncate(label, DashboardCategory.ShortText)!,
                 Priority = 100 + t.Order, SortOrder = existing.Count == 0 ? t.Order : ++order,
                 ActionBy = t.ActionBy, EmailAction = t.EmailAction, Recommendation = t.Recommendation, Note = t.Note
             };
@@ -170,7 +170,7 @@ public sealed partial class ExcelTemplateService(PresAppDbContext db, TimeProvid
         return rest.Length == 0 ? label : rest;
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*Cat\s*\d+\s*[:\-–.]?\s*", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*Cat\s*E?\s*\d+\s*[:\-–.]?\s*", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
     private static partial System.Text.RegularExpressions.Regex CodePrefix();
 
     /// <summary>Categories defined in a template: one per Category label, with all its keywords.</summary>

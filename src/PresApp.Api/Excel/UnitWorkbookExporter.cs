@@ -60,7 +60,12 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         using var wb = OpenTemplate(template.Content);
         var v4 = TemplateV4.IsV4(wb);
         var formatVersion = v4 ? TemplateV4.FormatVersion : WorkbookFormat.FormatVersion;
-        if (v4 && TemplateV4.ShowSlots(wb, categories.Where(c => c.Code is not null).ToList()) is { } slotProblem) throw ApiProblem.Invalid(slotProblem);
+        List<DashboardCategory> Coded(CategoryScope scope) => categories.Where(c => c.Code is not null && c.Scope == scope).ToList();
+        if (v4)
+        {
+            foreach (var block in TemplateV4.Blocks(wb))
+                if (TemplateV4.ShowSlots(wb, Coded(block.Scope), block) is { } slotProblem) throw ApiProblem.Invalid(slotProblem);
+        }
         var table = WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable)!;
         var sheet = table.Worksheet;
         var eiTable = WorkbookFormat.FindTable(wb, ExcelColumns.EiTable);
@@ -69,9 +74,10 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var masterAssets = eiTable is null ? assets : assets.Where(a => a.Type != AssetType.ElectricalInstrument).ToList();
         var eiAssets = eiTable is null ? [] : assets.Where(a => a.Type == AssetType.ElectricalInstrument).ToList();
         var lists = new ListSheet(wb.Worksheets.Add(WorkbookFormat.ListsSheet));
-        var context = new FillContext(unit, optionsBySet, categories, lists);
+        // Category dropdowns: each list offers its own catalogue (an old file without EIList keeps every item in the MasterList).
+        var context = new FillContext(unit, optionsBySet, eiTable is null ? categories : Coded(CategoryScope.Mechanical), lists);
         var masterColumns = Fill(table, masterAssets, context);
-        var eiColumns = eiTable is null ? [] : Fill(eiTable, eiAssets, context);
+        var eiColumns = eiTable is null ? [] : Fill(eiTable, eiAssets, context with { Categories = Coded(CategoryScope.ElectricalInstrument) });
 
         // ---- E&I rows of the MasterList hidden by the filter (still in the file, not counted by the dashboard)
         var disciplineCol = masterColumns.FirstOrDefault(c => c.Role == ColumnRole.Discipline);
@@ -95,8 +101,11 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         // ---- placeholders, categories and dashboard
         var reportDate = local.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
         ReplacePlaceholders(wb, unit.Number.ToString(CultureInfo.InvariantCulture), reportDate);
-        if (v4) TemplateV4.WriteCategories(wb, categories.Where(c => c.Code is not null).ToList());
-        else DashboardSheetWriter.Write(wb, categories);
+        if (v4)
+        {
+            foreach (var block in TemplateV4.Blocks(wb)) TemplateV4.WriteCategories(wb, Coded(block.Scope), block);
+        }
+        else DashboardSheetWriter.Write(wb, categories.Where(c => c.Scope == CategoryScope.Mechanical).ToList());
 
         // ---- session sheet
         var n = assets.Count;
@@ -228,7 +237,8 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         {
             if (!columns.Any(c => c.Role == role)) continue;
             var codes = TemplateV4.Ordered(context.Categories).Where(c => c.Section == section).Select(c => c.Code!).ToList();
-            var source = context.Lists.Source(section == CategorySection.Hold ? "HoldCategory" : "NACategory", codes);
+            var ei = context.Categories.Count > 0 && context.Categories.All(c => c.Scope == CategoryScope.ElectricalInstrument);
+            var source = context.Lists.Source((ei ? "EI" : "") + (section == CategorySection.Hold ? "HoldCategory" : "NACategory"), codes);
             if (source is null) continue;
             foreach (var c in columns.Where(c => c.Role == role))
                 AddList(body.Column(c.Index + 1), source, "Invalid category", "Pick a category code of this section. Categories are created in K Data.");

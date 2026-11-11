@@ -55,6 +55,11 @@ npm run dev
 4. **Onboarding** – a client master list (any version) can be loaded on the same page: rows are matched by
    EQUIP NO, unknown tags become new equipment, empty cells never clear anything.
 
+Template v6 adds the E&I dashboard: an `EICategories` table next to `Categories` (codes CatE1, CatE2…) and an
+`E&I Dashboard` sheet over the `EIList`, whose category rows are the named ranges `KD_EI_HoldSlots` / `KD_EI_NASlots`.
+Mechanical equipment and E&I items have separate category lists (Dashboard categories page, two tabs); each list in the
+file offers only its own codes. A v5 template keeps working: the E&I categories then only feed the EIList dropdowns.
+
 The structure check allows hidden columns and rows, filters and sorting; moving, renaming, inserting or
 deleting columns, or editing the Key column, stops the import.
 

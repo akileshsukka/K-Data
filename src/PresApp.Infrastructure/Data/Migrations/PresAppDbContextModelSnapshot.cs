@@ -1744,6 +1744,11 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("Section")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1757,7 +1762,7 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UnitId", "Label")
+                    b.HasIndex("UnitId", "Scope", "Label")
                         .IsUnique();
 
                     b.HasIndex("UnitId", "Section", "Code")

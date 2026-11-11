@@ -8,6 +8,7 @@ using PresApp.Api.Hosting;
 using PresApp.Api.Reporting;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Imports;
+using PresApp.Domain.Reporting;
 using PresApp.Domain.Security;
 using PresApp.Infrastructure.Data;
 
@@ -200,19 +201,19 @@ public static class ExcelEndpoints
         }).RequirePermission(Permissions.CatalogManage);
 
         // ---------------------------------------------------------------- dashboard and categories
-        app.MapGet("/api/units/{unitId:int}/dashboard", (int unitId, UnitDashboard d, CancellationToken ct) => d.GetAsync(unitId, ct))
+        app.MapGet("/api/units/{unitId:int}/dashboard", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.GetAsync(unitId, ct, CategoryScopes.Parse(scope)))
             .RequirePermission(Permissions.AssetsView);
 
         app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", (int unitId, string card, UnitDashboard d, CancellationToken ct) => d.CardAsync(unitId, card, ct))
             .RequirePermission(Permissions.AssetsView);
 
-        app.MapGet("/api/units/{unitId:int}/categories", (int unitId, UnitDashboard d, CancellationToken ct) => d.CategoriesAsync(unitId, ct))
+        app.MapGet("/api/units/{unitId:int}/categories", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.CategoriesAsync(unitId, CategoryScopes.Parse(scope), ct))
             .RequirePermission(Permissions.AssetsView);
 
-        app.MapPut("/api/units/{unitId:int}/categories", (int unitId, List<SaveCategory> request, UnitDashboard d, CancellationToken ct) =>
-            d.SaveCategoriesAsync(unitId, request, ct)).RequirePermission(Permissions.CategoriesManage);
+        app.MapPut("/api/units/{unitId:int}/categories", (int unitId, string? scope, List<SaveCategory> request, UnitDashboard d, CancellationToken ct) =>
+            d.SaveCategoriesAsync(unitId, CategoryScopes.Parse(scope), request, ct)).RequirePermission(Permissions.CategoriesManage);
 
-        app.MapGet("/api/units/{unitId:int}/category-options", (int unitId, UnitDashboard d, CancellationToken ct) => d.OptionsAsync(unitId, ct))
+        app.MapGet("/api/units/{unitId:int}/category-options", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.OptionsAsync(unitId, CategoryScopes.Parse(scope), ct))
             .RequirePermission(Permissions.AssetsView);
     }
 }

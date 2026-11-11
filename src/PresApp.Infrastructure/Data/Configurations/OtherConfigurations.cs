@@ -74,7 +74,9 @@ internal sealed class DashboardCategoryConfiguration : IEntityTypeConfiguration<
         b.Property(x => x.EmailAction).HasMaxLength(DashboardCategory.ShortText);
         b.Property(x => x.Recommendation).HasMaxLength(DashboardCategory.LongText);
         b.Property(x => x.Note).HasMaxLength(DashboardCategory.LongText);
-        b.HasIndex(x => new { x.UnitId, x.Label }).IsUnique();
+        b.Property(x => x.Scope).HasConversion<string>().HasMaxLength(30);
+        // The same description may exist in both catalogues (mechanical and E&I).
+        b.HasIndex(x => new { x.UnitId, x.Scope, x.Label }).IsUnique();
         // Hold Cat1 and N/A Cat1 can coexist; rows without a code yet are not checked.
         b.HasIndex(x => new { x.UnitId, x.Section, x.Code }).IsUnique().HasFilter("[Code] IS NOT NULL");
         b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId);

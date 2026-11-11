@@ -10,16 +10,18 @@ import { useToast } from "../../components/Toast";
 import { useSetCategory } from "./useAsset";
 
 /**
- * Hold / N/A dashboard category of the asset. One at most: the section comes from the category.
+ * Hold / N/A dashboard category of the asset. One at most: the section comes from the category. E&I items choose
+ * from the E&I list (CatE1…), other equipment from the mechanical one (Cat1…).
  * The same choice is made in the Excel with the Hold Category / N/A Category columns.
  */
 export function CategoryCard({ asset }: { asset: AssetProfile }) {
   const session = useSession();
   const toast = useToast();
   const set = useSetCategory(asset.id);
+  const ei = asset.type === "ElectricalInstrument";
   const options = useQuery({
-    queryKey: ["category-options", asset.unit.id],
-    queryFn: ({ signal }) => api<CategoryOption[]>(`/api/units/${asset.unit.id}/category-options`, { signal }),
+    queryKey: ["category-options", asset.unit.id, ei ? "ei" : "mechanical"],
+    queryFn: ({ signal }) => api<CategoryOption[]>(`/api/units/${asset.unit.id}/category-options${ei ? "?scope=ei" : ""}`, { signal }),
   });
   const current = asset.dashboardCategory;
   const [choice, setChoice] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function CategoryCard({ asset }: { asset: AssetProfile }) {
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-lg font-semibold">Dashboard category</h2>
         {session.can(Perm.categoriesManage) && (
-          <Link to={`/u/${asset.unit.id}/categories`} className="text-sm font-semibold text-violet">Edit categories</Link>
+          <Link to={`/u/${asset.unit.id}/categories${ei ? "?scope=ei" : ""}`} className="text-sm font-semibold text-violet">Edit categories</Link>
         )}
       </div>
       <p className="mt-1">

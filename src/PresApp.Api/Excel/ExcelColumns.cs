@@ -46,6 +46,11 @@ public static partial class ExcelColumns
     public const string HoldSlotsName = "KD_HoldSlots";
     public const string NaSlotsName = "KD_NASlots";
 
+    /// <summary>Template v6: categories of the E&amp;I items (codes CatE1…) and their rows on the "E&amp;I Dashboard" sheet.</summary>
+    public const string EiCategoriesTable = "EICategories";
+    public const string EiHoldSlotsName = "KD_EI_HoldSlots";
+    public const string EiNaSlotsName = "KD_EI_NASlots";
+
     /// <summary>Fields the engineers may change in the unit Excel (same set as the Power Automate flow).</summary>
     private static readonly HashSet<string> EditableInUnitFile = new(StringComparer.Ordinal)
     {

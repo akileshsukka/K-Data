@@ -6,7 +6,11 @@ namespace PresApp.Api.Excel;
 
 /// <summary>Category of a v4 template's Categories table, as read at upload.</summary>
 public sealed record TemplateCategory(CategorySection Section, string Code, string Description, string? ActionBy,
-    string? EmailAction, string? Recommendation, string? Note, int Order);
+    string? EmailAction, string? Recommendation, string? Note, int Order)
+{
+    /// <summary>Catalogue of the category, told by its code (CatE… is E&amp;I).</summary>
+    public CategoryScope Scope => Reporting.UnitDashboard.ScopeOfCode(Code);
+}
 
 /// <summary>
 /// Template v4: the engineer chooses each equipment's category by code in the "Hold Category" / "N/A Category"
@@ -16,6 +20,9 @@ public sealed record TemplateCategory(CategorySection Section, string Code, stri
 /// EnerMech Recommendation, Note. The app rewrites its rows from the unit's active categories.</item>
 /// <item>Named ranges <c>KD_HoldSlots</c> / <c>KD_NASlots</c>: dashboard rows of each section, already holding the
 /// formulas. The app shows one row per active category and hides the rest.</item>
+/// <item>Template v6 adds the same for the E&amp;I items: an <c>EICategories</c> table (same columns, codes CatE1…) and
+/// the <c>KD_EI_HoldSlots</c> / <c>KD_EI_NASlots</c> rows of the "E&amp;I Dashboard" sheet, over the <c>EIList</c> table.
+/// Without it, the E&amp;I categories only feed the dropdowns of the EIList.</item>
 /// </list>
 /// The app never writes dashboard formulas for v4: the template owns them.
 /// </summary>
@@ -26,29 +33,52 @@ public static class TemplateV4
 
     private static readonly string[] Required = ["section", "code", "description"];
 
+    /// <summary>One catalogue in the file: its Categories table, its dashboard rows and the list table it serves.</summary>
+    public sealed record Block(CategoryScope Scope, string Table, string HoldSlots, string NaSlots, string ListTable);
+
+    public static readonly Block Mechanical = new(CategoryScope.Mechanical, ExcelColumns.CategoriesTable, ExcelColumns.HoldSlotsName, ExcelColumns.NaSlotsName, ExcelColumns.MasterTable);
+    public static readonly Block Ei = new(CategoryScope.ElectricalInstrument, ExcelColumns.EiCategoriesTable, ExcelColumns.EiHoldSlotsName, ExcelColumns.EiNaSlotsName, ExcelColumns.EiTable);
+
+    /// <summary>The catalogues this file has: always the mechanical one, the E&amp;I one with template v6.</summary>
+    public static IEnumerable<Block> Blocks(XLWorkbook wb)
+    {
+        yield return Mechanical;
+        if (HasEiDashboard(wb)) yield return Ei;
+    }
+
+    /// <summary>Template v6: the file has an EICategories table (and so an E&amp;I dashboard).</summary>
+    public static bool HasEiDashboard(XLWorkbook wb) => WorkbookFormat.FindTable(wb, ExcelColumns.EiCategoriesTable) is not null;
+
     /// <summary>A v4 template or file: its Categories table has a Code column.</summary>
     public static bool IsV4(XLWorkbook wb) => CategoryHeaders(wb) is { } h && h.Contains("code");
 
     public static string? Problem(XLWorkbook wb)
     {
-        var headers = CategoryHeaders(wb) ?? [];
-        var missing = Required.Where(r => !headers.Contains(r)).ToList();
-        if (missing.Count > 0) return $"The Categories table needs the columns Section, Code and Description (missing: {string.Join(", ", missing)}).";
-        var master = WorkbookFormat.FindTable(wb, ExcelColumns.MasterTable)!;
-        var masterHeaders = master.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
-        if (!masterHeaders.Contains("holdcategory") || !masterHeaders.Contains("nacategory"))
-            return "The MasterList table needs the columns \"Hold Category\" and \"N/A Category\".";
-        foreach (var name in new[] { ExcelColumns.HoldSlotsName, ExcelColumns.NaSlotsName })
+        foreach (var block in Blocks(wb))
         {
-            if (Slots(wb, name) is null) return $"The template has no named range {name} (dashboard rows of the categories).";
+            var headers = CategoryHeaders(wb, block.Table) ?? [];
+            var missing = Required.Where(r => !headers.Contains(r)).ToList();
+            if (missing.Count > 0) return $"The {block.Table} table needs the columns Section, Code and Description (missing: {string.Join(", ", missing)}).";
+            var list = WorkbookFormat.FindTable(wb, block.ListTable);
+            if (list is null) return $"The template has an {block.Table} table but no {block.ListTable} table.";
+            var listHeaders = list.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
+            if (!listHeaders.Contains("holdcategory") || !listHeaders.Contains("nacategory"))
+                return $"The {block.ListTable} table needs the columns \"Hold Category\" and \"N/A Category\".";
+            foreach (var name in new[] { block.HoldSlots, block.NaSlots })
+            {
+                if (Slots(wb, name) is null) return $"The template has no named range {name} (dashboard rows of the categories).";
+            }
         }
         return null;
     }
 
-    /// <summary>Categories listed in the template's Categories table (rows without a code are skipped).</summary>
-    public static List<TemplateCategory> ReadCategories(XLWorkbook wb)
+    /// <summary>Categories listed in the template's Categories tables (EICategories too with v6; rows without a code are skipped).</summary>
+    public static List<TemplateCategory> ReadCategories(XLWorkbook wb) =>
+        Blocks(wb).SelectMany(b => ReadCategories(wb, b)).ToList();
+
+    private static List<TemplateCategory> ReadCategories(XLWorkbook wb, Block block)
     {
-        var table = WorkbookFormat.FindTable(wb, ExcelColumns.CategoriesTable);
+        var table = WorkbookFormat.FindTable(wb, block.Table);
         if (table?.DataRange is null) return [];
         var headers = table.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
         string? Get(IXLTableRow row, params string[] names)
@@ -63,7 +93,7 @@ public static class TemplateV4
         {
             var code = Reporting.UnitDashboard.NormalizeCode(Get(row, "code"));
             var description = Get(row, "description");
-            if (code is null || description is null) continue;
+            if (code is null || description is null || Reporting.UnitDashboard.ScopeOfCode(code) != block.Scope) continue;
             var section = ParseSection(Get(row, "section"));
             if (section is null || result.Any(c => c.Section == section && c.Code == code)) continue;
             result.Add(new TemplateCategory(section.Value, code, Cut(description, DashboardCategory.ShortText)!,
@@ -74,10 +104,10 @@ public static class TemplateV4
         return result;
     }
 
-    /// <summary>Rewrites the Categories table with the unit's active categories (Hold first, then N/A).</summary>
-    public static void WriteCategories(XLWorkbook wb, IReadOnlyList<DashboardCategory> categories)
+    /// <summary>Rewrites the Categories table of a catalogue with its active categories (Hold first, then N/A).</summary>
+    public static void WriteCategories(XLWorkbook wb, IReadOnlyList<DashboardCategory> categories, Block block)
     {
-        var table = WorkbookFormat.FindTable(wb, ExcelColumns.CategoriesTable)!;
+        var table = WorkbookFormat.FindTable(wb, block.Table)!;
         var headers = table.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
         int Col(params string[] names) => headers.FindIndex(names.Contains) + 1;
         int section = Col("section"), code = Col("code"), description = Col("description"), actionBy = Col("actionby"),
@@ -111,15 +141,15 @@ public static class TemplateV4
     /// Shows one dashboard row per active category of each section and hides the others.
     /// Returns a problem when a section has more categories than the template has rows.
     /// </summary>
-    public static string? ShowSlots(XLWorkbook wb, IReadOnlyList<DashboardCategory> categories)
+    public static string? ShowSlots(XLWorkbook wb, IReadOnlyList<DashboardCategory> categories, Block block)
     {
-        foreach (var (name, section) in new[] { (ExcelColumns.HoldSlotsName, CategorySection.Hold), (ExcelColumns.NaSlotsName, CategorySection.NotApplicable) })
+        foreach (var (name, section) in new[] { (block.HoldSlots, CategorySection.Hold), (block.NaSlots, CategorySection.NotApplicable) })
         {
             var range = Slots(wb, name)!;
             var count = categories.Count(c => c.Section == section);
             var rows = range.RowCount();
             if (count > rows)
-                return $"This unit has {count} {SectionText(section)} categories but the template has rows for {rows}. Add rows to {name} in the template, or deactivate categories.";
+                return $"This unit has {count} {(block.Scope == CategoryScope.ElectricalInstrument ? "E&I " : "")}{SectionText(section)} categories but the template has rows for {rows}. Add rows to {name} in the template, or deactivate categories.";
             for (var i = 1; i <= rows; i++)
             {
                 var row = range.Row(i).WorksheetRow();
@@ -143,8 +173,8 @@ public static class TemplateV4
         return defined?.Ranges.FirstOrDefault();
     }
 
-    private static List<string>? CategoryHeaders(XLWorkbook wb) =>
-        WorkbookFormat.FindTable(wb, ExcelColumns.CategoriesTable)?.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
+    private static List<string>? CategoryHeaders(XLWorkbook wb, string table = ExcelColumns.CategoriesTable) =>
+        WorkbookFormat.FindTable(wb, table)?.HeadersRow().Cells().Select(c => ExcelColumns.Norm(WorkbookFormat.CellText(c))).ToList();
 
     private static CategorySection? ParseSection(string? text) => ExcelColumns.Norm(text) switch
     {

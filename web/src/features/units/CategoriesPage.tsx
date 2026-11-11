@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { CategoryRow, CategorySection } from "../../api/types";
+import type { CategoryRow, CategorySection, DashboardScope } from "../../api/types";
 import { useUnit } from "../../app/useCatalog";
 import { Button } from "../../components/Button";
 import { Field, SelectInput, TextInput } from "../../components/Field";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
+import { scopeNames } from "./UnitHomePage";
 
 interface Draft {
   key: string;
@@ -36,16 +37,22 @@ const toDraft = (c: CategoryRow): Draft => ({
 const sectionTitle: Record<CategorySection, string> = { Hold: "Hold categories", NotApplicable: "Not applicable categories" };
 
 /**
- * Dashboard categories of one unit. The engineer assigns each equipment to one category by its code (Cat1, Cat2…),
- * from the equipment page or the Excel. Codes are given by the app and never reused. Categories are deactivated,
- * never deleted, and only when no equipment has them. The four note columns go to the Excel dashboard.
+ * Dashboard categories of one unit, in two separate catalogues: mechanical equipment (Cat1, Cat2…) and E&I items
+ * (CatE1, CatE2…), so a category of one never shows for the other. The engineer assigns each item to one category by
+ * its code, from the item page or the Excel. Codes are given by the app and never reused. Categories are deactivated,
+ * never deleted, and only when no item has them. The four note columns go to the Excel dashboard of their catalogue.
+ * The catalogue is kept in the address (?scope=ei).
  */
 export function CategoriesPage() {
   const unitId = Number(useParams().unitId);
   const { unit } = useUnit(unitId);
   const toast = useToast();
   const queryClient = useQueryClient();
-  const categories = useQuery({ queryKey: ["categories", unitId], queryFn: ({ signal }) => api<CategoryRow[]>(`/api/units/${unitId}/categories`, { signal }) });
+  const [params, setParams] = useSearchParams();
+  const scope: DashboardScope = params.get("scope") === "ei" ? "ei" : "mechanical";
+  const ei = scope === "ei";
+  const url = `/api/units/${unitId}/categories${ei ? "?scope=ei" : ""}`;
+  const categories = useQuery({ queryKey: ["categories", unitId, scope], queryFn: ({ signal }) => api<CategoryRow[]>(url, { signal }) });
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [dirty, setDirty] = useState(false);
 
@@ -53,8 +60,20 @@ export function CategoriesPage() {
     if (categories.data && !dirty) setDrafts(categories.data.map(toDraft));
   }, [categories.data, dirty]);
 
+  function switchScope(next: DashboardScope) {
+    if (next === scope) return;
+    if (dirty && !window.confirm("You have unsaved changes in this list. Leave them?")) return;
+    setDirty(false);
+    setDrafts([]);
+    setParams((p) => {
+      if (next === "ei") p.set("scope", "ei");
+      else p.delete("scope");
+      return p;
+    }, { replace: true });
+  }
+
   const save = useMutation({
-    mutationFn: () => api<CategoryRow[]>(`/api/units/${unitId}/categories`, {
+    mutationFn: () => api<CategoryRow[]>(url, {
       method: "PUT",
       body: drafts.map((d) => ({
         id: d.id, label: d.label, section: d.section, priority: d.priority, keywords: d.keywords,
@@ -63,12 +82,12 @@ export function CategoriesPage() {
       })),
     }),
     onSuccess: (rows) => {
-      queryClient.setQueryData(["categories", unitId], rows);
+      queryClient.setQueryData(["categories", unitId, scope], rows);
       queryClient.invalidateQueries({ queryKey: ["dashboard", unitId] });
       queryClient.invalidateQueries({ queryKey: ["category-options", unitId] });
       setDirty(false);
       setDrafts(rows.map(toDraft));
-      toast("Categories saved. The dashboard, the equipment pages and the next Excel use them.");
+      toast(ei ? "E&I categories saved. The E&I dashboard, the E&I item pages and the next Excel use them." : "Categories saved. The dashboard, the equipment pages and the next Excel use them.");
     },
     onError: (e) => toast(e.message, "error"),
   });
@@ -115,7 +134,7 @@ export function CategoriesPage() {
     <div>
       <PageHeader
         title={`${unit?.name ?? "Unit"} dashboard categories`}
-        description="Each equipment on Hold or Not Applicable gets one category, chosen by its code on the equipment page or in the Excel. The code is given by the app when you save and never changes."
+        description="Each item on Hold or Not Applicable gets one category, chosen by its code on the item page or in the Excel. Mechanical equipment and E&I items have separate lists. The code is given by the app when you save and never changes."
         actions={
           <>
             {dirty && <Button variant="secondary" onClick={() => { setDirty(false); setDrafts((categories.data ?? []).map(toDraft)); }}>Discard changes</Button>}
@@ -124,6 +143,20 @@ export function CategoriesPage() {
         }
       />
 
+      <div className="mt-5 flex w-fit max-w-full flex-wrap rounded-md border border-line bg-panel p-1" role="tablist" aria-label="Category list">
+        {(["mechanical", "ei"] as const).map((s) => (
+          <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => switchScope(s)}
+            className={`min-h-9 rounded px-4 font-semibold ${scope === s ? "bg-violet text-white" : "text-ink hover:text-violet"}`}>
+            {scopeNames[s].tab}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-sm text-muted">
+        {ei
+          ? "Only for E&I items (Electrical, Instrumentation, E&I). Codes CatE1, CatE2… In the Excel they go to the EIList and the E&I Dashboard sheet."
+          : "Only for static, rotating and package equipment. Codes Cat1, Cat2… In the Excel they go to the MasterList and the Dashboard sheet."}
+      </p>
+
       {categories.isPending && <p className="mt-6 text-muted">Loading…</p>}
       {categories.isError && <p className="mt-6 text-hold">{categories.error.message}</p>}
       {(["Hold", "NotApplicable"] as const).map((section) => {
@@ -131,7 +164,7 @@ export function CategoriesPage() {
         return (
           <section key={section} className="mt-8">
             <div className="flex items-baseline justify-between gap-3">
-              <h2 className="text-2xl font-semibold">{sectionTitle[section]}</h2>
+              <h2 className="text-2xl font-semibold">{ei ? `E&I ${sectionTitle[section].toLowerCase()}` : sectionTitle[section]}</h2>
               <Button variant="quiet" onClick={() => add(section)}>Add category</Button>
             </div>
             {list.length === 0 && <p className="mt-2 text-muted">None.</p>}
@@ -143,6 +176,7 @@ export function CategoriesPage() {
                   first={i === 0}
                   last={i === list.length - 1}
                   dirty={dirty}
+                  keywords={!ei}
                   onChange={(patch) => update(d.key, patch)}
                   onMove={(by) => move(d.key, by)}
                   onDeactivate={() => deactivate(d)}
@@ -172,11 +206,13 @@ export function CategoriesPage() {
   );
 }
 
-function CategoryCard({ draft: d, first, last, dirty, onChange, onMove, onDeactivate }: {
+function CategoryCard({ draft: d, first, last, dirty, keywords, onChange, onMove, onDeactivate }: {
   draft: Draft;
   first: boolean;
   last: boolean;
   dirty: boolean;
+  /** Keyword matching only exists for the mechanical list (template v3). */
+  keywords: boolean;
   onChange: (patch: Partial<Draft>) => void;
   onMove: (by: -1 | 1) => void;
   onDeactivate: () => void;
@@ -211,7 +247,7 @@ function CategoryCard({ draft: d, first, last, dirty, onChange, onMove, onDeacti
         <Field label="Note"><TextInput value={d.note} maxLength={1000} onChange={(e) => onChange({ note: e.target.value })} /></Field>
       </div>
 
-      <div className="mt-3">
+      {keywords && <div className="mt-3">
         <button type="button" className="text-sm font-semibold text-violet" aria-expanded={showKeywords} onClick={() => setShowKeywords(!showKeywords)}>
           {showKeywords ? "Hide" : "Show"} keywords for the current Excel ({d.keywords.length})
         </button>
@@ -229,11 +265,11 @@ function CategoryCard({ draft: d, first, last, dirty, onChange, onMove, onDeacti
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="mr-auto text-sm text-muted">
-          {d.id === null ? "New: gets its code when you save" : !dirty || d.count > 0 ? `${d.count} equipment in this category now` : ""}
+          {d.id === null ? "New: gets its code when you save" : !dirty || d.count > 0 ? `${d.count} ${keywords ? "equipment" : d.count === 1 ? "item" : "items"} in this category now` : ""}
         </span>
         <Button variant="quiet" className="disabled:opacity-40" disabled={first} onClick={() => onMove(-1)} aria-label="Move up">Move up</Button>
         <Button variant="quiet" className="disabled:opacity-40" disabled={last} onClick={() => onMove(1)} aria-label="Move down">Move down</Button>

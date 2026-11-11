@@ -10,6 +10,36 @@ public enum CategorySection
 }
 
 /// <summary>
+/// Which dashboard a category belongs to. Mechanical (static, rotating, package) and Electrical &amp; Instrumentation
+/// items each have their own catalogue: a category of one never applies to the other ("Motor removed" is no use for a vessel).
+/// </summary>
+public enum CategoryScope
+{
+    Mechanical = 0,
+    ElectricalInstrument = 1
+}
+
+public static class CategoryScopes
+{
+    /// <summary>Code prefix of each catalogue: Cat1, Cat2… for mechanical equipment, CatE1, CatE2… for E&amp;I items.</summary>
+    public static string CodePrefix(CategoryScope scope) => scope == CategoryScope.ElectricalInstrument ? "CatE" : "Cat";
+
+    /// <summary>Catalogue of an asset type. Pipelines have no dashboard category (null).</summary>
+    public static CategoryScope? Of(AssetType type) => type switch
+    {
+        AssetType.Equipment => CategoryScope.Mechanical,
+        AssetType.ElectricalInstrument => CategoryScope.ElectricalInstrument,
+        _ => null
+    };
+
+    /// <summary>"ei", "e&amp;i", "ElectricalInstrument" → E&amp;I; anything else (empty included) → Mechanical.</summary>
+    public static CategoryScope Parse(string? text) =>
+        (text ?? "").Trim().ToLowerInvariant() is "ei" or "e&i" or "electricalinstrument" or "electrical" ? CategoryScope.ElectricalInstrument : CategoryScope.Mechanical;
+
+    public static string Key(CategoryScope scope) => scope == CategoryScope.ElectricalInstrument ? "ei" : "mechanical";
+}
+
+/// <summary>
 /// Dashboard category of one unit (e.g. "Cat 3: DNV inspection is ongoing").
 /// Template v4: the engineer picks the category of each asset by its <see cref="Code"/>
 /// (<see cref="AssetPreservation.DashboardCategoryId"/>). Template v3 (still supported until the export changes):
@@ -26,10 +56,14 @@ public class DashboardCategory
     public int UnitId { get; set; }
     public Unit Unit { get; set; } = null!;
     public CategorySection Section { get; set; }
+
+    /// <summary>Dashboard of the category: mechanical equipment or E&amp;I items. Fixed once the category is created.</summary>
+    public CategoryScope Scope { get; set; }
+
     public string Label { get; set; } = "";
 
     /// <summary>
-    /// "Cat1", "Cat2"… unique per unit and section, never renumbered nor reused (the Excel stores it).
+    /// "Cat1", "Cat2"… (mechanical) or "CatE1", "CatE2"… (E&amp;I), unique per unit and section, never renumbered nor reused (the Excel stores it).
     /// Null only for rows created before template v4, until they get one.
     /// </summary>
     public string? Code { get; set; }

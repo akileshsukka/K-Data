@@ -106,9 +106,10 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         var p = asset.Preservation!;
         if (p.DashboardCategoryId != request.Expected)
             throw ApiProblem.Conflict("Someone else changed the dashboard category while you were editing. Check it and try again.");
+        var scope = Domain.Reporting.CategoryScopes.Of(asset.Type);
         if (request.CategoryId is { } categoryId
-            && !await db.DashboardCategories.AnyAsync(c => c.Id == categoryId && c.UnitId == asset.UnitId && c.IsActive && c.Code != null, ct))
-            throw ApiProblem.Invalid("That category is not an active category of this unit.");
+            && !await db.DashboardCategories.AnyAsync(c => c.Id == categoryId && c.UnitId == asset.UnitId && c.Scope == scope && c.IsActive && c.Code != null, ct))
+            throw ApiProblem.Invalid(asset.Type == AssetType.Pipeline ? "Pipelines have no dashboard category." : $"That category is not an active {(asset.Type == AssetType.ElectricalInstrument ? "E&I" : "equipment")} category of this unit.");
         if (p.DashboardCategoryId == request.CategoryId) return await queries.ProfileAsync(id, ct);
         p.DashboardCategoryId = request.CategoryId;
         p.DashboardCategory = null;
@@ -556,6 +557,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             string? skip = !asset.IsActive ? "Inactive asset"
                 : asset.Type == AssetType.Pipeline ? "Pipelines have no dashboard category"
                 : category is not null && category.UnitId != asset.UnitId ? "The category belongs to another unit"
+                : category is not null && category.Scope != Domain.Reporting.CategoryScopes.Of(asset.Type) ? (category.Scope == Domain.Reporting.CategoryScope.ElectricalInstrument ? "E&I category: only for E&I items" : "Equipment category: not for E&I items")
                 : null;
             if (skip is not null) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "Skipped", skip)); continue; }
             if (p.DashboardCategoryId == category?.Id) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, newText, "No change", null)); continue; }

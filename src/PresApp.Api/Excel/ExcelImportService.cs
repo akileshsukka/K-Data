@@ -260,7 +260,8 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
                 var excelText = hold is not null && na is not null ? $"Hold:{hold} / N/A:{na}" : hold is not null ? $"Hold:{hold}" : na is not null ? $"N/A:{na}" : null;
                 var section = hold is not null ? CategorySection.Hold : CategorySection.NotApplicable;
                 var code = Reporting.UnitDashboard.NormalizeCode(hold ?? na);
-                var wanted = code is null ? null : unitCategories.FirstOrDefault(c => c.Section == section && c.Code == code);
+                var rowScope = asset is null ? (CategoryScope?)null : CategoryScopes.Of(asset.Type);
+                var wanted = code is null ? null : unitCategories.FirstOrDefault(c => c.Section == section && c.Code == code && (rowScope is null || c.Scope == rowScope));
                 var wantedToken = excelText is null ? null : wanted is null ? excelText : TemplateV4.Token(wanted);
 
                 if (wantedToken != baseCategory)
@@ -272,7 +273,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
                         changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Invalid, "Both Hold Category and N/A Category are filled. Keep only one.", baseCategory, excelText, current));
                     else if (excelText is not null && wanted is null)
                         changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.Invalid,
-                            $"\"{hold ?? na}\" is not an active {TemplateV4.SectionText(section)} category of this unit. Categories are created in K Data (Dashboard categories).",
+                            $"\"{hold ?? na}\" is not an active {(rowScope == CategoryScope.ElectricalInstrument ? "E&I " : "")}{TemplateV4.SectionText(section)} category of this unit{(rowScope == CategoryScope.ElectricalInstrument ? " (E&I codes are CatE1, CatE2…)" : "")}. Categories are created in K Data (Dashboard categories).",
                             baseCategory, excelText, current));
                     else if (current == wantedToken)
                         changes.Add(Change(TemplateV4.CategoryField, ImportOutcome.NoChange, "The app already has this value.", baseCategory, excelText, current, wantedToken));

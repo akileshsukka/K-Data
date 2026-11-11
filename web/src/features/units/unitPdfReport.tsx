@@ -7,7 +7,7 @@ import { jsPDF } from "jspdf";
 import { api } from "../../api/client";
 import type { CategoryRow, Dashboard, PipingSummary } from "../../api/types";
 import { PipingCards, PipingServiceTable } from "../lines/PipingSummaryCards";
-import { ActivityBar, DisciplineTable, KeyFigures, Legend, categoryDetail } from "./UnitHomePage";
+import { ActivityBar, DisciplineTable, KeyFigures, Legend, categoryDetail, dashboardUrl, scopeNames } from "./UnitHomePage";
 
 /*
   How the PDF is made: the report below is drawn off screen at a fixed width with the same components as the
@@ -31,14 +31,17 @@ const NEUTRAL = {
 const CATEGORY_WEIGHT_PER_BLOCK = 14;
 
 interface ReportInput {
+  unitId: number;
   unitName: string;
   plantName: string;
-  dashboard: Dashboard;
 }
 
 /** Builds the PDF of the Unit overview and saves it in the browser's downloads. Returns the file name. */
-export async function exportUnitPdf({ unitName, plantName, dashboard }: ReportInput): Promise<string> {
-  const piping = dashboard.lineCount > 0 ? await api<PipingSummary>(`/api/units/${dashboard.unitId}/piping-summary`) : null;
+export async function exportUnitPdf({ unitId, unitName, plantName }: ReportInput): Promise<string> {
+  // Every discipline of the unit, whichever dashboard is on screen.
+  const [mechanical, ei] = await Promise.all([api<Dashboard>(dashboardUrl(unitId, "mechanical")), api<Dashboard>(dashboardUrl(unitId, "ei"))]);
+  const piping = mechanical.lineCount > 0 ? await api<PipingSummary>(`/api/units/${unitId}/piping-summary`) : null;
+  if (mechanical.totalTags + ei.totalTags === 0 && !piping?.lines) throw new Error("This unit has no equipment, E&I items or lines yet: there is nothing to put in the PDF.");
   const now = new Date();
 
   const host = document.createElement("div");
@@ -47,7 +50,7 @@ export async function exportUnitPdf({ unitName, plantName, dashboard }: ReportIn
   document.body.append(host);
   const root = createRoot(host);
   try {
-    flushSync(() => root.render(<Report unitName={unitName} plantName={plantName} d={dashboard} piping={piping} at={now} />));
+    flushSync(() => root.render(<Report unitName={unitName} plantName={plantName} mechanical={mechanical} ei={ei} piping={piping} at={now} />));
     await document.fonts.ready;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -74,7 +77,7 @@ export async function exportUnitPdf({ unitName, plantName, dashboard }: ReportIn
 
 interface PdfBlock {
   canvas: HTMLCanvasElement;
-  /** Starts a new page (the Pipelines section always begins on its own page). */
+  /** Starts a new page (the E&I and Pipelines sections always begin on their own page). */
   newPage: boolean;
 }
 
@@ -150,8 +153,10 @@ function chunkCategories(rows: CategoryRow[]): CategoryRow[][] {
 
 // ---------------------------------------------------------------- the report (white page, no app frame)
 
-function Report({ unitName, plantName, d, piping, at }: { unitName: string; plantName: string; d: Dashboard; piping: PipingSummary | null; at: Date }) {
-  const byKeyword = d.categorySource === "Keywords";
+function Report({ unitName, plantName, mechanical, ei, piping, at }: {
+  unitName: string; plantName: string; mechanical: Dashboard; ei: Dashboard; piping: PipingSummary | null; at: Date;
+}) {
+  const sections = [mechanical, ei].filter((d) => d.totalTags > 0);
   return (
     <div className="bg-white text-text" style={{ width: REPORT_WIDTH_PX, ...NEUTRAL }}>
       <Block>
@@ -162,43 +167,13 @@ function Report({ unitName, plantName, d, piping, at }: { unitName: string; plan
           </div>
           <p className="text-sm text-muted">Generated {formatDate(at)}</p>
         </header>
+        <p className="mt-3 text-sm text-muted">
+          Contents: {[...sections.map((d) => `${scopeNames[d.scope].title} (${d.totalTags} tags)`), ...(piping && piping.lines > 0 ? [`Pipelines (${piping.lines} lines)`] : [])].join(" · ")}
+        </p>
       </Block>
 
-      {d.totalTags > 0 && (
-        <>
-          <Block>
-            <div className="grid grid-cols-6 gap-3"><KeyFigures d={d} /></div>
-          </Block>
-
-          <Block>
-            <section className="rounded-lg border border-line bg-white p-5">
-              <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-xl font-semibold">Activity progress</h2>
-                <Legend />
-              </div>
-              <ul className="mt-4 space-y-4">
-                {d.activities.map((a) => <ActivityBar key={a.label} row={a} />)}
-              </ul>
-            </section>
-          </Block>
-        </>
-      )}
-
-      {d.totalTags > 0 && (
-        <>
-          {chunk(d.disciplines, TABLE_ROWS_PER_BLOCK).map((rows, i) => (
-            <Block key={`disc${i}`}>
-              <Panel title={i === 0 ? "Discipline-wise status" : "Discipline-wise status (continued)"}>
-                <DisciplineTable rows={rows} />
-              </Panel>
-            </Block>
-          ))}
-
-          <Categories title="Hold categories" rows={d.hold} total={d.totalHold} byKeyword={byKeyword} />
-          <Categories title="Not applicable categories" rows={d.notApplicable} total={d.totalNotApplicable} byKeyword={byKeyword} />
-
-        </>
-      )}
+      {/* Each discipline section after the first starts on a new page, so it can be reviewed (or left out) on its own. */}
+      {sections.map((d, i) => <ScopeSection key={d.scope} d={d} newPage={i > 0} />)}
 
       {piping && piping.lines > 0 && (
         <>
@@ -220,6 +195,43 @@ function Report({ unitName, plantName, d, piping, at }: { unitName: string; plan
       )}
 
     </div>
+  );
+}
+
+/** One dashboard (mechanical or E&I): title, key figures, activity bars, disciplines and categories. */
+function ScopeSection({ d, newPage }: { d: Dashboard; newPage: boolean }) {
+  const byKeyword = d.categorySource === "Keywords";
+  const ei = d.scope === "ei";
+  return (
+    <>
+      <Block newPage={newPage}>
+        <h2 className="mb-3 border-l-4 border-ink pl-3 text-2xl font-semibold">{scopeNames[d.scope].title}</h2>
+        <div className="grid grid-cols-6 gap-3"><KeyFigures d={d} /></div>
+      </Block>
+
+      <Block>
+        <section className="rounded-lg border border-line bg-white p-5">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="text-xl font-semibold">{ei ? "Step progress" : "Activity progress"}</h2>
+            <Legend scope={d.scope} />
+          </div>
+          <ul className="mt-4 space-y-4">
+            {d.activities.map((a) => <ActivityBar key={a.code} row={a} scope={d.scope} />)}
+          </ul>
+        </section>
+      </Block>
+
+      {chunk(d.disciplines, TABLE_ROWS_PER_BLOCK).map((rows, i) => (
+        <Block key={`disc${i}`}>
+          <Panel title={i === 0 ? "Discipline-wise status" : "Discipline-wise status (continued)"}>
+            <DisciplineTable rows={rows} activities={d.activities} />
+          </Panel>
+        </Block>
+      ))}
+
+      <Categories title={ei ? "E&I hold categories" : "Hold categories"} rows={d.hold} total={d.totalHold} byKeyword={byKeyword} />
+      <Categories title={ei ? "E&I not applicable categories" : "Not applicable categories"} rows={d.notApplicable} total={d.totalNotApplicable} byKeyword={byKeyword} />
+    </>
   );
 }
 

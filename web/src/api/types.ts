@@ -520,11 +520,18 @@ export interface ExcelTemplateInfo {
   categories: number;
 }
 
+/** Dashboard of a unit: mechanical equipment (static, rotating, package) or Electrical & Instrumentation items. */
+export type DashboardScope = "mechanical" | "ei";
+
 export interface ActivityRow {
+  /** Short column title: "Walkdown", "G1"…, "E1"… */
+  code: string;
   label: string;
   completed: number;
   pending: number;
   hold: number;
+  /** Not Applicable, counted apart on the E&I dashboard only (left out of its completion %). */
+  notApplicable: number;
   other: number;
   total: number;
   completionPct: number;
@@ -533,11 +540,8 @@ export interface ActivityRow {
 export interface DisciplineRow {
   discipline: string;
   total: number;
-  walkdown: number;
-  g1: number;
-  g2: number;
-  g3: number;
-  g4: number;
+  /** Completed count of each activity, in the order of Dashboard.activities. */
+  done: number[];
   euPreserved: number;
   progressPct: number;
 }
@@ -546,10 +550,11 @@ export type CategorySection = "Hold" | "NotApplicable";
 
 export interface CategoryRow {
   id: number;
-  /** "Cat1", "Cat2"… assigned by the app; null only for old rows not saved since. */
+  /** "Cat1", "Cat2"… (E&I: "CatE1"…) assigned by the app; null only for old rows not saved since. */
   code: string | null;
   label: string;
   section: CategorySection;
+  scope: DashboardScope;
   priority: number;
   keywords: string[];
   actionBy: string | null;
@@ -569,7 +574,7 @@ export interface CategoryOption {
   section: CategorySection;
 }
 
-/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}). */
+/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}; E&I: ei-tags, ei-preserved, ei-hold, ei-na, ei-available, ei-e7). */
 export interface DashboardCard {
   card: string;
   label: string;
@@ -581,6 +586,7 @@ export interface Dashboard {
   unitId: number;
   unitName: string;
   plantName: string;
+  scope: DashboardScope;
   totalTags: number;
   activities: ActivityRow[];
   disciplines: DisciplineRow[];
@@ -601,6 +607,9 @@ export interface Dashboard {
   inactiveCount: number;
   /** "Assigned": categories chosen per equipment (template v4). "Keywords": found in the Preservation Remarks (v3). */
   categorySource: "Assigned" | "Keywords";
+  /** E&I only: motors that need the E7 IR / winding test, and those whose test sheet is complete. */
+  e7Required: number;
+  e7Complete: number;
 }
 
 // ---------------------------------------------------------------- Simpro

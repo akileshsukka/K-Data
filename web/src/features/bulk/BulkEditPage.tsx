@@ -80,13 +80,24 @@ export function BulkEditPage() {
   const allCustom = useCustomFields().data ?? [];
   const customFields = canCategory ? [...new Map(allCustom.filter((c) => c.isActive).map((c) => [c.key, c])).values()].sort((a, b) => a.label.localeCompare(b.label)) : [];
   const custom = fieldKey.startsWith(CUSTOM) ? customFields.find((c) => CUSTOM + c.key === fieldKey) : undefined;
+  // Both catalogues: mechanical equipment (Cat1…) and E&I items (CatE1…). The API skips items of the other catalogue.
   const categories = useQuery({
-    queryKey: ["category-options", unitId],
-    queryFn: ({ signal }) => api<CategoryOption[]>(`/api/units/${unitId}/category-options`, { signal }),
+    queryKey: ["category-options", unitId, "all"],
+    queryFn: async ({ signal }) => {
+      const [m, e] = await Promise.all([
+        api<CategoryOption[]>(`/api/units/${unitId}/category-options`, { signal }),
+        api<CategoryOption[]>(`/api/units/${unitId}/category-options?scope=ei`, { signal }),
+      ]);
+      return { mechanical: m, ei: e, length: m.length + e.length };
+    },
     enabled: canCategory,
   });
-  const holdOptions = (categories.data ?? []).filter((o) => o.section === "Hold");
-  const naOptions = (categories.data ?? []).filter((o) => o.section === "NotApplicable");
+  const optionGroups = categories.data
+    ? ([["Equipment", categories.data.mechanical], ["E&I", categories.data.ei]] as const).flatMap(([scope, list]) => [
+        { label: `${scope} · Hold`, options: list.filter((o) => o.section === "Hold") },
+        { label: `${scope} · Not Applicable`, options: list.filter((o) => o.section === "NotApplicable") },
+      ]).filter((g) => g.options.length > 0)
+    : [];
   const ids = new Set(list.map((p) => p.id));
 
   function add(items: Picked[]) {
@@ -231,18 +242,14 @@ export function BulkEditPage() {
               <Field label="Category" hint="None removes the category. Lines are skipped.">
                 <SelectInput value={value} disabled={categories.isPending} onChange={(e) => { setValue(e.target.value); setPreview(null); }}>
                   <option value="">None</option>
-                  {holdOptions.length > 0 && (
-                    <optgroup label="Hold">
-                      {holdOptions.map((o) => <option key={o.id} value={o.id}>{o.code} – {o.label}</option>)}
+                  {optionGroups.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options.map((o) => <option key={o.id} value={o.id}>{o.code} – {o.label}</option>)}
                     </optgroup>
-                  )}
-                  {naOptions.length > 0 && (
-                    <optgroup label="Not Applicable">
-                      {naOptions.map((o) => <option key={o.id} value={o.id}>{o.code} – {o.label}</option>)}
-                    </optgroup>
-                  )}
+                  ))}
                 </SelectInput>
-                {categories.data?.length === 0 && <span className="mt-1 block text-sm text-muted">This unit has no categories yet.</span>}
+                {categories.data?.length === 0 ? <span className="mt-1 block text-sm text-muted">This unit has no categories yet.</span>
+                  : <span className="mt-1 block text-sm text-muted">Equipment categories only apply to equipment, E&I categories only to E&I items; the others are skipped.</span>}
               </Field>
             )}
             {field && (

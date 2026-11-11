@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, type ActivityRow, type CategoryRow, type Dashboard } from "../../api/types";
+import { Perm, type ActivityRow, type CategoryRow, type Dashboard, type DashboardScope } from "../../api/types";
 import { lastUnit, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
@@ -10,17 +10,29 @@ import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 import { PipingSummaryCards } from "../lines/PipingSummaryCards";
 import { ExportPdfButton } from "./UnitDashboardPdf";
 
+/** The two dashboards of a unit, as the switch at the top of the overview names them. */
+export const scopeNames: Record<DashboardScope, { tab: string; title: string; register: string; path: string }> = {
+  mechanical: { tab: "Mechanical equipment", title: "Mechanical equipment (static and rotating)", register: "Equipment Register", path: "equipment" },
+  ei: { tab: "Electrical & Instrumentation", title: "Electrical & Instrumentation", register: "E&I Register", path: "ei" },
+};
+
+/** Dashboard of one scope, shared by the overview and the PDF. */
+export const dashboardUrl = (unitId: number, scope: DashboardScope) => `/api/units/${unitId}/dashboard${scope === "ei" ? "?scope=ei" : ""}`;
+
 /**
- * Unit overview = the client dashboard, computed by the API exactly like the Dashboard sheet of the unit Excel
- * (static and rotating equipment; Electrical, Instrumentation and E&I excluded), so both always show the same numbers.
+ * Unit overview = the client dashboards, computed by the API exactly like the dashboard sheets of the unit Excel, so
+ * both always show the same numbers: "Mechanical equipment" (sheet Dashboard: static and rotating, E&I excluded) and
+ * "Electrical & Instrumentation" (sheet E&I Dashboard). The switch is kept in the address (?view=ei).
  */
 export function UnitHomePage() {
   const unitId = Number(useParams().unitId);
   const { unit, plantName, isPending } = useUnit(unitId);
   const session = useSession();
+  const [params, setParams] = useSearchParams();
+  const scope: DashboardScope = params.get("view") === "ei" ? "ei" : "mechanical";
   const dashboard = useQuery({
-    queryKey: ["dashboard", unitId],
-    queryFn: ({ signal }) => api<Dashboard>(`/api/units/${unitId}/dashboard`, { signal }),
+    queryKey: ["dashboard", unitId, scope],
+    queryFn: ({ signal }) => api<Dashboard>(dashboardUrl(unitId, scope), { signal }),
     enabled: !!unit,
   });
 
@@ -38,7 +50,15 @@ export function UnitHomePage() {
     );
   }
 
-  const d = dashboard.data;
+  const d = dashboard.data?.scope === scope ? dashboard.data : undefined;
+  const ei = scope === "ei";
+  const setScope = (s: DashboardScope) =>
+    setParams((p) => {
+      if (s === "ei") p.set("view", "ei");
+      else p.delete("view");
+      return p;
+    }, { replace: true });
+
   return (
     <div>
       <PageHeader
@@ -46,7 +66,7 @@ export function UnitHomePage() {
         description={`${plantName} · preservation dashboard`}
         actions={
           <>
-            {d && d.totalTags + d.lineCount > 0 && <ExportPdfButton unitName={unit.name} plantName={plantName ?? ""} dashboard={d} />}
+            <ExportPdfButton unitId={unit.id} unitName={unit.name} plantName={plantName ?? ""} />
             {session.can(Perm.excelExport) && <DownloadExcelButton unitId={unit.id} variant="secondary" />}
             {session.can(Perm.assetsManage) && (
               <Link to={`/u/${unit.id}/new`} className="inline-flex min-h-10 items-center rounded-md bg-violet px-4 font-semibold text-white hover:bg-violet-dark">New equipment</Link>
@@ -55,105 +75,143 @@ export function UnitHomePage() {
         }
       />
 
+      <div className="mt-5 flex w-fit max-w-full flex-wrap rounded-md border border-line bg-panel p-1" role="tablist" aria-label="Dashboard">
+        {(["mechanical", "ei"] as const).map((s) => (
+          <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => setScope(s)}
+            className={`min-h-9 rounded px-4 font-semibold ${scope === s ? "bg-violet text-white" : "text-ink hover:text-violet"}`}>
+            {scopeNames[s].tab}
+          </button>
+        ))}
+      </div>
+
       {dashboard.isPending && <p className="mt-6 text-muted">Loading dashboard…</p>}
       {dashboard.isError && <p className="mt-6 text-hold">{dashboard.error.message}</p>}
 
       {d && d.totalTags === 0 && (
-        <div className="mt-8 max-w-xl rounded-lg border border-dashed border-line bg-panel p-6">
-          <h2 className="text-xl font-semibold">No equipment in this unit yet</h2>
-          <p className="mt-2 text-muted">Equipment arrives with the migration, an Onboarding list on the Excel page, or “New equipment”.</p>
+        <div className="mt-6 max-w-xl rounded-lg border border-dashed border-line bg-panel p-6">
+          <h2 className="text-xl font-semibold">{ei ? "No E&I items in this unit yet" : "No equipment in this unit yet"}</h2>
+          <p className="mt-2 text-muted">
+            {ei
+              ? "E&I items arrive with an Onboarding list on the Excel page (E&I list), or “New equipment” with an Electrical or Instrumentation discipline."
+              : "Equipment arrives with the migration, an Onboarding list on the Excel page, or “New equipment”."}
+          </p>
         </div>
       )}
 
-      {d && d.totalTags > 0 && (
-        <>
-          <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Key figures">
-            <KeyFigures d={d} unitId={unit.id} />
-          </section>
+      {d && d.totalTags > 0 && <ScopeDashboard d={d} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} />}
 
-          <section className="mt-6 rounded-lg border border-line bg-panel p-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-xl font-semibold">Activity progress</h2>
-              <Legend />
-            </div>
-            <ul className="mt-4 space-y-4">
-              {d.activities.map((a) => <ActivityBar key={a.label} row={a} />)}
-            </ul>
-          </section>
+      {d && !ei && d.lineCount > 0 && <PipingSummaryCards unitId={unit.id} title="Pipelines" />}
 
-          {d.lineCount > 0 && <PipingSummaryCards unitId={unit.id} title="Pipelines" />}
-
-          <section className="mt-6 rounded-lg border border-line bg-panel">
-            <h2 className="px-5 pt-5 text-xl font-semibold">Discipline-wise status</h2>
-            <div className="mt-3 overflow-x-auto">
-              <DisciplineTable rows={d.disciplines} className="min-w-[40rem]" />
-            </div>
-          </section>
-
-          <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <CategoryPanel title="Hold categories" card="hold" rows={d.hold} total={d.totalHold} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
-            <CategoryPanel title="Not applicable categories" card="na" rows={d.notApplicable} total={d.totalNotApplicable} unitId={unit.id} canEdit={session.can(Perm.categoriesManage)} byKeyword={d.categorySource === "Keywords"} />
-          </div>
-
-          <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Tile to={`/u/${unit.id}/equipment`} title="Equipment Register" detail={`${Object.values(d.byCurrentGate).reduce((a, b) => a + b, 0)} mechanical equipment`} />
-            <Tile to={`/u/${unit.id}/lines`} title="Pipeline Register" detail={d.lineCount === 0 ? "No lines yet" : `${d.lineCount} lines · ${Math.round(d.lineLengthM).toLocaleString("en")} m · ${d.linesBlanketed} N2 blanketed`} />
-            <Tile to={`/u/${unit.id}/ei`} title="E&I Register" detail={`${d.electricalInstrumentCount} electrical and instrumentation items`} />
-            <Tile to={`/u/${unit.id}/monitoring`} title="Monitoring" detail="N2 blanket checks during and after preservation" />
-            {session.can(Perm.groupsView) && <Tile to={`/u/${unit.id}/groups`} title="Workpacks" detail="Groups of equipment, lines and E&I items" />}
-            {session.can(Perm.excelPage) && <Tile to={`/u/${unit.id}/excel`} title="Excel" detail="Download the unit file, upload it back" />}
-            {session.can(Perm.historyView) && <Tile to={`/u/${unit.id}/history`} title="History" detail={`${d.documentsPending} gate documents pending`} />}
-          </section>
-        </>
+      {d && (
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Tile to={`/u/${unit.id}/equipment`} title="Equipment Register" detail={d.scope === "mechanical" ? `${Object.values(d.byCurrentGate).reduce((a, b) => a + b, 0)} mechanical equipment` : "Static, rotating and package equipment"} />
+          <Tile to={`/u/${unit.id}/lines`} title="Pipeline Register" detail={d.lineCount === 0 ? "No lines yet" : `${d.lineCount} lines · ${Math.round(d.lineLengthM).toLocaleString("en")} m · ${d.linesBlanketed} N2 blanketed`} />
+          <Tile to={`/u/${unit.id}/ei`} title="E&I Register" detail={`${d.electricalInstrumentCount} electrical and instrumentation items`} />
+          <Tile to={`/u/${unit.id}/monitoring`} title="Monitoring" detail="N2 blanket checks during and after preservation" />
+          {session.can(Perm.groupsView) && <Tile to={`/u/${unit.id}/groups`} title="Workpacks" detail="Groups of equipment, lines and E&I items" />}
+          {session.can(Perm.excelPage) && <Tile to={`/u/${unit.id}/excel`} title="Excel" detail="Download the unit file, upload it back" />}
+          {session.can(Perm.historyView) && <Tile to={`/u/${unit.id}/history`} title="History" detail={`${d.documentsPending} gate documents pending`} />}
+        </section>
       )}
-
-      {d && d.totalTags === 0 && d.lineCount > 0 && <PipingSummaryCards unitId={unit.id} title="Pipelines" />}
     </div>
   );
 }
 
-/** Equipment Register showing exactly the equipment behind one dashboard figure. */
-export const cardLink = (unitId: number, card: string) => `/u/${unitId}/equipment?card=${encodeURIComponent(card)}`;
-
-/**
- * The six key figures; the caller sets the grid. With a unit, each figure opens the Equipment Register filtered on
- * its equipment. Also used by the PDF export (no unit: plain figures).
- */
-export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
-  const to = (card: string) => (unitId ? cardLink(unitId, card) : undefined);
+/** Key figures, activity bars, discipline table and the two category panels of one dashboard. */
+function ScopeDashboard({ d, unitId, canEdit }: { d: Dashboard; unitId: number; canEdit: boolean }) {
+  const byKeyword = d.categorySource === "Keywords";
+  const prefix = d.scope === "ei" ? "ei-" : "";
   return (
     <>
-      <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" to={to("tags")} />
-      <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis to={to("preserved")} />
-      <Stat label="Ready for preservation" value={d.readyForPreservation} detail="Ready For Preservation = Yes" to={to("ready")} />
-      <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("hold")} />
-      <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("na")} />
-      <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("available")} />
+      <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Key figures">
+        <KeyFigures d={d} unitId={unitId} />
+      </section>
+
+      <section className="mt-6 rounded-lg border border-line bg-panel p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xl font-semibold">{d.scope === "ei" ? "Step progress" : "Activity progress"}</h2>
+          <Legend scope={d.scope} />
+        </div>
+        <ul className="mt-4 space-y-4">
+          {d.activities.map((a) => <ActivityBar key={a.code} row={a} scope={d.scope} />)}
+        </ul>
+      </section>
+
+      <section className="mt-6 rounded-lg border border-line bg-panel">
+        <h2 className="px-5 pt-5 text-xl font-semibold">Discipline-wise status</h2>
+        <div className="mt-3 overflow-x-auto">
+          <DisciplineTable rows={d.disciplines} activities={d.activities} className={d.scope === "ei" ? "min-w-[56rem]" : "min-w-[40rem]"} />
+        </div>
+      </section>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <CategoryPanel title="Hold categories" card={`${prefix}hold`} rows={d.hold} total={d.totalHold} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} />
+        <CategoryPanel title="Not applicable categories" card={`${prefix}na`} rows={d.notApplicable} total={d.totalNotApplicable} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} />
+      </div>
     </>
   );
 }
 
-/** Discipline-wise status table. Also used by the PDF export. */
-export function DisciplineTable({ rows, className = "" }: { rows: Dashboard["disciplines"]; className?: string }) {
+/** Register (Equipment or E&I) showing exactly the equipment behind one dashboard figure. */
+export const cardLink = (unitId: number, card: string, scope: DashboardScope = "mechanical") =>
+  `/u/${unitId}/${scopeNames[scope].path}?card=${encodeURIComponent(card)}`;
+
+/** Category editor of one catalogue. */
+export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${unitId}/categories${scope === "ei" ? "?scope=ei" : ""}`;
+
+/**
+ * The six key figures; the caller sets the grid. With a unit, each figure opens the register filtered on its
+ * equipment. Also used by the PDF export (no unit: plain figures).
+ */
+export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
+  const register = scopeNames[d.scope].register;
+  const to = (card: string) => (unitId ? cardLink(unitId, card, d.scope) : undefined);
+  if (d.scope === "ei") {
+    return (
+      <>
+        <Stat label="E&I tags" value={d.totalTags} detail="Electrical and instrumentation" to={to("ei-tags")} register={register} />
+        <Stat label="Preserved" value={d.preserved} detail="All applicable steps E1–E8 completed" emphasis to={to("ei-preserved")} register={register} />
+        <Stat label="E7 tests pending" value={d.e7Required - d.e7Complete} detail={d.e7Required === 0 ? "No motor marked for E7" : `${d.e7Complete} of ${d.e7Required} IR / winding tests complete`} to={to("ei-e7")} register={register} />
+        <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("ei-hold")} register={register} />
+        <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("ei-na")} register={register} />
+        <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("ei-available")} register={register} />
+      </>
+    );
+  }
+  return (
+    <>
+      <Stat label="Equipment tags" value={d.totalTags} detail="Static and rotating" to={to("tags")} register={register} />
+      <Stat label="Preserved" value={d.preserved} detail="G4 N2 blanketing completed" emphasis to={to("preserved")} register={register} />
+      <Stat label="Ready for preservation" value={d.readyForPreservation} detail="Ready For Preservation = Yes" to={to("ready")} register={register} />
+      <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("hold")} register={register} />
+      <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("na")} register={register} />
+      <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("available")} register={register} />
+    </>
+  );
+}
+
+/** Discipline-wise status table, one column per activity (Walkdown, G1–G4 or E1–E8). Also used by the PDF export. */
+export function DisciplineTable({ rows, activities, className = "" }: { rows: Dashboard["disciplines"]; activities: ActivityRow[]; className?: string }) {
+  const headers = ["Discipline", "Total tags", ...activities.map((a) => a.code), "EU preserved", "Overall progress"];
   return (
     <table className={`w-full text-left ${className}`}>
       <thead className="text-sm text-muted">
         <tr>
-          {["Discipline", "Total tags", "Walkdown", "G1", "G2", "G3", "G4", "EU preserved", "Overall progress"].map((h, i) => (
-            <th key={h} className={`border-b border-line px-4 py-2 font-semibold ${i > 0 ? "text-right" : ""}`}>{h}</th>
+          {headers.map((h, i) => (
+            <th key={h} className={`border-b border-line px-3 py-2 font-semibold ${i > 0 ? "text-right" : ""}`} title={activities.find((a) => a.code === h)?.label}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((r) => (
           <tr key={r.discipline} className="border-b border-line last:border-0">
-            <td className="px-4 py-2.5 font-semibold text-ink">{r.discipline}</td>
-            {[r.total, r.walkdown, r.g1, r.g2, r.g3, r.g4, r.euPreserved].map((n, i) => (
-              <td key={i} className="px-4 py-2.5 text-right tabular-nums">{n}</td>
+            <td className="px-3 py-2.5 font-semibold text-ink">{r.discipline}</td>
+            {[r.total, ...r.done, r.euPreserved].map((n, i) => (
+              <td key={i} className="px-3 py-2.5 text-right tabular-nums">{n}</td>
             ))}
-            <td className="px-4 py-2.5">
+            <td className="px-3 py-2.5">
               <div className="flex items-center justify-end gap-2">
-                <span className="h-2 w-20 rounded-full bg-surface">
+                <span className="h-2 w-16 rounded-full bg-surface">
                   <span className="block h-2 rounded-full bg-violet" style={{ width: `${Math.min(100, r.progressPct)}%` }} />
                 </span>
                 <span className="w-12 text-right tabular-nums">{r.progressPct}%</span>
@@ -172,7 +230,7 @@ export function categoryDetail(c: CategoryRow, byKeyword: boolean) {
     (byKeyword && c.keywords.length > 0 ? `Keywords: ${c.keywords.join(", ")}` : "");
 }
 
-function Stat({ label, value, detail, emphasis = false, to }: { label: string; value: number; detail: string; emphasis?: boolean; to?: string }) {
+function Stat({ label, value, detail, emphasis = false, to, register }: { label: string; value: number; detail: string; emphasis?: boolean; to?: string; register: string }) {
   const body = (
     <>
       <p className="text-sm font-semibold text-muted">{label}</p>
@@ -183,23 +241,31 @@ function Stat({ label, value, detail, emphasis = false, to }: { label: string; v
   const look = `rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`;
   if (!to) return <div className={look}>{body}</div>;
   return (
-    <Link to={to} title={`Open these ${value} in the Equipment Register`} className={`${look} block transition hover:border-violet hover:shadow-sm focus-visible:outline-2 focus-visible:outline-violet`}>
+    <Link to={to} title={`Open these ${value} in the ${register}`} className={`${look} block transition hover:border-violet hover:shadow-sm focus-visible:outline-2 focus-visible:outline-violet`}>
       {body}
     </Link>
   );
 }
 
-const segments = [
+type SegmentKey = "completed" | "pending" | "hold" | "notApplicable" | "other";
+
+/**
+ * Bar segments. The mechanical dashboard keeps N/A inside "N/A or other" like its Excel sheet; the E&I one shows
+ * Not Applicable apart, because those steps are left out of its completion %.
+ */
+const segmentsOf = (scope: DashboardScope): { key: SegmentKey; label: string; color: string }[] => [
   { key: "completed", label: "Completed", color: "bg-done" },
   { key: "pending", label: "Pending", color: "bg-ongoing" },
   { key: "hold", label: "Hold", color: "bg-hold" },
-  { key: "other", label: "N/A or other", color: "bg-na/45" },
-] as const;
+  ...(scope === "ei"
+    ? [{ key: "notApplicable" as const, label: "Not applicable", color: "bg-na/25" }, { key: "other" as const, label: "Not started", color: "bg-na/55" }]
+    : [{ key: "other" as const, label: "N/A or other", color: "bg-na/45" }]),
+];
 
-export function Legend() {
+export function Legend({ scope = "mechanical" }: { scope?: DashboardScope }) {
   return (
     <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-      {segments.map((s) => (
+      {segmentsOf(scope).map((s) => (
         <li key={s.key} className="flex items-center gap-1.5"><span className={`size-2.5 rounded-sm ${s.color}`} aria-hidden />{s.label}</li>
       ))}
     </ul>
@@ -207,17 +273,22 @@ export function Legend() {
 }
 
 /** One stacked bar per activity; the numbers are always written next to it, so colour never carries meaning alone. */
-export function ActivityBar({ row }: { row: ActivityRow }) {
+export function ActivityBar({ row, scope = "mechanical" }: { row: ActivityRow; scope?: DashboardScope }) {
+  const segments = segmentsOf(scope);
   const visible = segments.filter((s) => row[s.key] > 0);
+  const ei = scope === "ei";
+  const counts = ei
+    ? `${row.completed} done · ${row.pending} pending · ${row.hold} hold · ${row.notApplicable} N/A · ${row.other} not started`
+    : `${row.completed} done · ${row.pending} pending · ${row.hold} hold · ${row.other} N/A or other`;
   return (
     <li>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4">
         <span className="font-display text-lg font-semibold text-ink">{row.label}</span>
         <span className="text-sm text-muted tabular-nums">
-          <strong className="text-text">{row.completionPct}%</strong> completed · {row.completed} done · {row.pending} pending · {row.hold} hold · {row.other} N/A or other
+          <strong className="text-text">{row.completionPct}%</strong> completed{ei && row.notApplicable > 0 ? " (of applicable)" : ""} · {counts}
         </span>
       </div>
-      <div className="mt-1.5 flex h-3 gap-0.5" role="img" aria-label={`${row.label}: ${row.completed} completed, ${row.pending} pending, ${row.hold} hold, ${row.other} other, of ${row.total}`}>
+      <div className="mt-1.5 flex h-3 gap-0.5" role="img" aria-label={`${row.label}: ${counts}, of ${row.total}`}>
         {visible.map((s, i) => (
           <span
             key={s.key}
@@ -231,13 +302,16 @@ export function ActivityBar({ row }: { row: ActivityRow }) {
   );
 }
 
-function CategoryPanel({ title, card, rows, total, unitId, canEdit, byKeyword }: { title: string; card: string; rows: CategoryRow[]; total: number; unitId: number; canEdit: boolean; byKeyword: boolean }) {
+function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKeyword }: {
+  title: string; card: string; rows: CategoryRow[]; total: number; unitId: number; scope: DashboardScope; canEdit: boolean; byKeyword: boolean;
+}) {
   const [open, setOpen] = useState<number | null>(null);
+  const register = scopeNames[scope].register;
   return (
     <section className="rounded-lg border border-line bg-panel">
       <div className="flex items-baseline justify-between gap-3 px-5 pt-5">
         <h2 className="text-xl font-semibold">{title}</h2>
-        {canEdit && <Link to={`/u/${unitId}/categories`} className="text-sm font-semibold text-violet">Edit categories</Link>}
+        {canEdit && <Link to={categoriesLink(unitId, scope)} className="text-sm font-semibold text-violet">Edit categories</Link>}
       </div>
       {rows.length === 0 ? (
         <p className="px-5 pt-2 pb-5 text-muted">No categories yet.{canEdit ? " Add them under Edit categories." : ""}</p>
@@ -265,14 +339,14 @@ function CategoryPanel({ title, card, rows, total, unitId, canEdit, byKeyword }:
               {open === c.id && (
                 <div className="px-5 pb-4">
                   {c.assets.length > 0 && (
-                    <Link to={cardLink(unitId, `category-${c.id}`)} className="mb-2 inline-block text-sm font-semibold text-violet">
-                      Open these {c.count} in the Equipment Register →
+                    <Link to={cardLink(unitId, `category-${c.id}`, scope)} className="mb-2 inline-block text-sm font-semibold text-violet">
+                      Open these {c.count} in the {register} →
                     </Link>
                   )}
                   {c.assets.length === 0 ? (
                     <p className="text-sm text-muted">
-                      No equipment in this category.
-                      {byKeyword ? ` Keywords searched in Preservation Remarks: ${c.keywords.join(", ") || "none"}.` : " Assign it from the equipment page."}
+                      {scope === "ei" ? "No E&I item in this category." : "No equipment in this category."}
+                      {byKeyword ? ` Keywords searched in Preservation Remarks: ${c.keywords.join(", ") || "none"}.` : ` Assign it from the ${scope === "ei" ? "item" : "equipment"} page.`}
                     </p>
                   ) : (
                     <ul className="flex flex-wrap gap-1.5">
@@ -288,7 +362,7 @@ function CategoryPanel({ title, card, rows, total, unitId, canEdit, byKeyword }:
             </li>
           ))}
           <li className="border-t border-line">
-            <Link to={cardLink(unitId, card)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title="Open in the Equipment Register">
+            <Link to={cardLink(unitId, card, scope)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title={`Open in the ${register}`}>
               <span>Total</span>
               <span className="tabular-nums">{total}</span>
             </Link>
