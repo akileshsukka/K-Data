@@ -452,13 +452,18 @@ public sealed class PipingListTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public void Sections_of_one_line_that_change_size_share_a_group_key()
+    public void Sections_of_one_line_share_a_group_key_by_unit_sequence_and_service()
     {
         var key = LineNumber.GroupKey("541-2089-RF-2\"-31376-C");
         Assert.NotNull(key);
         Assert.Equal(key, LineNumber.GroupKey("541-2089-RF-1-1/2\"-31376-C"));
         Assert.Equal(key, LineNumber.GroupKey("541-02089-RF-24\"-31376-C"));
-        Assert.NotEqual(key, LineNumber.GroupKey("541-2089-RF-2\"-31376-N"));    // other insulation
+        Assert.Equal(key, LineNumber.GroupKey("541-2089-RF-2\"-31376-N"));       // other insulation
+        Assert.Equal(key, LineNumber.GroupKey("541-2089-rf-2\"-S60BS"));          // other spec, no insulation
+        Assert.NotNull(LineNumber.GroupKey("541-7012-N2-3/4\"-S15BS"));
+        Assert.Equal(LineNumber.GroupKey("541-7012-N2-3/4\"-S15BS"), LineNumber.GroupKey("541-7012-N2-3/4\"-S60BS-N"));
+        Assert.Null(LineNumber.GroupKey("541-2089-RF"));                           // nothing after the service
+        Assert.Null(LineNumber.GroupKey("541-2089-2\"-31376-C"));                 // no service
         Assert.NotEqual(key, LineNumber.GroupKey("541-2089-RG-2\"-31376-C"));    // other service
         Assert.NotEqual(key, LineNumber.GroupKey("541-2090-RF-2\"-31376-C"));    // other sequence
         Assert.Null(LineNumber.GroupKey("541-2089-RF-2\"-31376-C\n541-2089-RF-4\"-31376-C"));

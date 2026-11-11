@@ -3,7 +3,7 @@ import type { RegisterRow } from "../../api/types";
 /** Shown when the lines of a group do not have the same value (same word as in the grouped Excel). */
 export const MIXED = "Mixed";
 
-/** Lines that only change size (same line number otherwise), shown as one row. Nothing is stored: worked out from the line numbers. */
+/** Sections of one line (same unit, sequence and service; size, spec and insulation may differ), shown as one row. Nothing is stored: worked out from the line numbers. */
 export interface LineGroup {
   key: string;
   /** The lines of the group that pass the filters, by size. */

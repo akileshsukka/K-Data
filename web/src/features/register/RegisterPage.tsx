@@ -441,7 +441,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           Show inactive
         </label>
         {lines && (
-          <label className="inline-flex items-center gap-2" title="Sections of one line that only change size (same number, service, spec and insulation) in one row. Only the view and the downloaded list change: each line keeps its own values.">
+          <label className="inline-flex items-center gap-2" title="Sections of one line (same unit, sequence and service; size, spec and insulation may differ) in one row. Only the view and the downloaded list change: each line keeps its own values.">
             <button type="button" role="switch" aria-checked={groupedOn} disabled={!view.data} onClick={() => setOverride(!groupedOn)}
               className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${groupedOn ? "bg-violet" : "bg-line"}`}>
               <span className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${groupedOn ? "translate-x-5" : "translate-x-0.5"}`} />

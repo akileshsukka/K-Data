@@ -66,18 +66,21 @@ public static partial class LineNumber
         string.Join('|', p.Unit, p.Sequence.TrimStart('0'), p.Service, p.SizeIn.ToString("0.###", CultureInfo.InvariantCulture), p.Spec);
 
     /// <summary>
-    /// Key of the size group of a line: unit, sequence, service, spec and insulation, without the size. Sections of one line
-    /// that change size (541-2089-RF-2"-31376-C, 541-2089-RF-4"-31376-C…) share it, so the grouped view and the grouped line
-    /// list show them as one row. Only a single standard number has a key; any other line stays on its own (null).
-    /// Nothing is stored: the groups are worked out each time from the line numbers.
+    /// Key of the line group: unit, sequence and service, the first three parts of the number. What comes after them (size,
+    /// pipe spec, insulation) does not count, as the client counts lines: 541-7012-N2-3/4"-S15BS and 541-7012-N2-3/4"-S60BS-N
+    /// are one line, and so are 541-2089-RF-2"-31376-C and 541-2089-RF-4"-31376-C. The grouped view and the grouped line list
+    /// show each group as one row. Only a single number that starts unit-sequence-service and has more after it has a key;
+    /// any other line stays on its own (null). Nothing is stored: the groups are worked out each time from the line numbers.
     /// </summary>
     public static string? GroupKey(string? lineNumber)
     {
         if (string.IsNullOrWhiteSpace(lineNumber) || lineNumber.Contains('\n')) return null;
-        var m = Pattern().Match(lineNumber.Trim().Replace('”', '"').Replace('″', '"'));
-        if (!m.Success) return null;
-        return string.Join('|', int.Parse(m.Groups["unit"].Value, CultureInfo.InvariantCulture), m.Groups["seq"].Value.TrimStart('0').ToUpperInvariant(),
-            m.Groups["service"].Value.ToUpperInvariant(), m.Groups["spec"].Value.ToUpperInvariant(), m.Groups["ins"].Value.ToUpperInvariant());
+        var parts = lineNumber.Trim().Split('-', 4);
+        if (parts.Length < 4 || parts[3].Trim().Length == 0) return null;
+        var (unit, seq, service) = (parts[0].Trim(), parts[1].Trim(), parts[2].Trim());
+        if (!UnitPart().IsMatch(unit) || !CodePart().IsMatch(seq) || !CodePart().IsMatch(service)) return null;
+        var sequence = seq.TrimStart('0');
+        return string.Join('|', int.Parse(unit, CultureInfo.InvariantCulture), (sequence.Length > 0 ? sequence : "0").ToUpperInvariant(), service.ToUpperInvariant());
     }
 
     /// <summary>First non-empty number of a cell that holds several ("39-0061-RSX-16"-13030-H⏎39-0061-RSX-12"-13030-H").</summary>

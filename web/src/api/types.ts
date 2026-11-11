@@ -205,7 +205,7 @@ export interface LineInfo {
   lengthM: number | null;
   /** Internal mark of a non-standard line number; only sent to roles with lines.nonStandard. */
   numberCheck?: LineNumberCheck | null;
-  /** Size group: sections of one line that only change size share it (grouped view). Null: the line is on its own. */
+  /** Line group: sections with the same unit, sequence and service share it (grouped view). Null: the line is on its own. */
   groupKey?: string | null;
 }
 
