@@ -6,6 +6,7 @@ using PresApp.Api.Excel;
 using PresApp.Api.Auth;
 using PresApp.Api.Hosting;
 using PresApp.Api.Reporting;
+using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Imports;
 using PresApp.Domain.Reporting;
@@ -20,6 +21,7 @@ public static class ExcelEndpoints
 
     public sealed record ExcelSettingsDto(int MaxAgeHours);
     public sealed record ElectricalReportRequest(IReadOnlyList<Guid>? AssetIds);
+    public sealed record InactiveExportRequest(string? Type, IReadOnlyList<Guid>? AssetIds, bool? Grouped);
 
     public static void MapExcelEndpoints(this IEndpointRouteBuilder app)
     {
@@ -48,6 +50,20 @@ public static class ExcelEndpoints
             Piping.PipingViewSettings view, CancellationToken ct) =>
         {
             var result = await exporter.ExportAsync(unitId, user.Identity?.Name ?? "unknown", ct, await view.ResolveAsync(unitId, grouped, ct));
+            return Results.File(result.Content, XlsxType, result.FileName);
+        }).RequirePermission(Permissions.ExcelExport);
+
+        // Inactive assets shown in a register ("Inactive only"), in that register's template: unit file (Equipment, E&I) or
+        // line list (Pipeline). A read-only report: no dashboard / Summary, no session, so it cannot be imported.
+        app.MapPost("/api/units/{unitId:int}/excel/inactive/export", async (int unitId, InactiveExportRequest request, ClaimsPrincipal user,
+            UnitWorkbookExporter unitExporter, PipingWorkbookExporter pipingExporter, Piping.PipingViewSettings view, CancellationToken ct) =>
+        {
+            var type = Enum.TryParse<AssetType>(request.Type, ignoreCase: true, out var t) ? t : throw ApiProblem.Invalid("Unknown register.");
+            var by = user.Identity?.Name ?? "unknown";
+            var ids = request.AssetIds ?? [];
+            var result = type == AssetType.Pipeline
+                ? await pipingExporter.ExportAsync(unitId, by, ct, await view.ResolveAsync(unitId, request.Grouped, ct), ids)
+                : await unitExporter.ExportAsync(unitId, by, ct, new InactiveSelection(type, ids));
             return Results.File(result.Content, XlsxType, result.FileName);
         }).RequirePermission(Permissions.ExcelExport);
 

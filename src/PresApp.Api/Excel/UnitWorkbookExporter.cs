@@ -33,19 +33,29 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
     /// <summary>What a table needs to be filled.</summary>
     private sealed record FillContext(Domain.Catalog.Unit Unit, Dictionary<string, List<string>> OptionsBySet, List<DashboardCategory> Categories, ListSheet Lists);
 
-    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct)
+    /// <param name="inactive">
+    /// Given: the inactive equipment or E&amp;I items chosen in the register, listed in their sheet of the template as a
+    /// read-only report (<see cref="InactiveListExport"/>): no dashboard, no session, "Deactivated on / by" columns.
+    /// </param>
+    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct, InactiveSelection? inactive = null)
     {
         var unit = await db.Units.AsNoTracking().Include(u => u.Plant).FirstOrDefaultAsync(u => u.Id == unitId, ct)
                    ?? throw ApiProblem.NotFound("Unit not found.");
         var template = await db.ExcelTemplates.AsNoTracking().FirstOrDefaultAsync(t => t.UnitId == unitId, ct)
                        ?? throw ApiProblem.Invalid($"There is no Excel template for {unit.Name} yet. An administrator can upload it in Excel templates.");
 
-        var assets = (await db.Assets.AsNoTracking()
-                .Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.Discipline)
-                .Where(a => a.UnitId == unitId && a.IsActive && a.Type != AssetType.Pipeline)
-                .ToListAsync(ct))
+        if (inactive is { Type: AssetType.Pipeline }) throw ApiProblem.Invalid("Lines are listed in the piping line list.");
+        var inactiveIds = inactive is null ? null : InactiveListExport.Check(inactive);
+        var query = db.Assets.AsNoTracking()
+            .Include(a => a.Preservation).ThenInclude(p => p!.DashboardCategory).Include(a => a.Discipline)
+            .Where(a => a.UnitId == unitId && a.Type != AssetType.Pipeline);
+        query = inactiveIds is null ? query.Where(a => a.IsActive)
+            : query.Where(a => !a.IsActive && a.Type == inactive!.Type && inactiveIds.Contains(a.Id));
+        var assets = (await query.ToListAsync(ct))
             .OrderBy(a => AssetQueries.DisciplineRank(a.Discipline.Name)).ThenBy(a => a.Tag ?? a.Code, NaturalComparer.Instance)
             .ToList();
+        if (inactiveIds is not null && assets.Count == 0)
+            throw ApiProblem.Invalid("None of the assets on screen is inactive any more. Reload the register.");
         var options = await db.OptionValues.AsNoTracking().Where(o => o.IsActive)
             .OrderBy(o => o.SortOrder).Select(o => new { o.OptionSet.Key, o.Value }).ToListAsync(ct);
         var optionsBySet = options.GroupBy(o => o.Key).ToDictionary(g => g.Key, g => g.Select(o => o.Value).Distinct().ToList());
@@ -61,7 +71,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var v4 = TemplateV4.IsV4(wb);
         var formatVersion = v4 ? TemplateV4.FormatVersion : WorkbookFormat.FormatVersion;
         List<DashboardCategory> Coded(CategoryScope scope) => categories.Where(c => c.Code is not null && c.Scope == scope).ToList();
-        if (v4)
+        if (v4 && inactive is null)
         {
             foreach (var block in TemplateV4.Blocks(wb))
                 if (TemplateV4.ShowSlots(wb, Coded(block.Scope), block) is { } slotProblem) throw ApiProblem.Invalid(slotProblem);
@@ -79,9 +89,10 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var masterColumns = Fill(table, masterAssets, context);
         var eiColumns = eiTable is null ? [] : Fill(eiTable, eiAssets, context with { Categories = Coded(CategoryScope.ElectricalInstrument) });
 
-        // ---- E&I rows of the MasterList hidden by the filter (still in the file, not counted by the dashboard)
+        // ---- E&I rows of the MasterList hidden by the filter (still in the file, not counted by the dashboard).
+        // An inactive list shows every row it has: it has no dashboard.
         var disciplineCol = masterColumns.FirstOrDefault(c => c.Role == ColumnRole.Discipline);
-        if (disciplineCol is not null && masterAssets.Count > 0)
+        if (inactive is null && disciplineCol is not null && masterAssets.Count > 0)
         {
             var body = table.DataRange;
             var all = masterAssets.Select(a => a.Discipline.Name).Distinct().ToList();
@@ -105,7 +116,27 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         {
             foreach (var block in TemplateV4.Blocks(wb)) TemplateV4.WriteCategories(wb, Coded(block.Scope), block);
         }
-        else DashboardSheetWriter.Write(wb, categories.Where(c => c.Scope == CategoryScope.Mechanical).ToList());
+        else if (inactive is null) DashboardSheetWriter.Write(wb, categories.Where(c => c.Scope == CategoryScope.Mechanical).ToList());
+
+        if (inactive is not null)
+        {
+            // ---- inactive list: only the sheet of this register, no dashboard and no session (it is never imported)
+            var listTable = eiTable is not null && inactive.Type == AssetType.ElectricalInstrument ? eiTable : table;
+            var keyColumn = listTable.HeadersRow().Cells().First(c => WorkbookFormat.CellText(c) == ExcelColumns.KeyHeader).Address.ColumnNumber;
+            InactiveListExport.AddDeactivationColumns(listTable, keyColumn, await InactiveListExport.DeactivationsAsync(db, inactiveIds!, ct), assets.Count);
+            InactiveListExport.KeepOnly(wb, [listTable.Worksheet]);
+            InactiveListExport.WriteMeta(wb, unit.Name, now, exportedBy, inactive.Type, assets.Count);
+            foreach (var w in wb.Worksheets) { w.TabActive = false; w.TabSelected = false; }
+            listTable.Worksheet.TabSelected = true;
+            listTable.Worksheet.SetTabActive();
+            wb.FullCalculationOnLoad = true;
+
+            var what = inactive.Type == AssetType.ElectricalInstrument ? "EI_List" : "Master_Equipment_List";
+            var inactiveName = $"Unit_{unit.Number}_{what}_INACTIVE_{local.ToString("dd_MMM_yyyy_HHmm", CultureInfo.InvariantCulture)}.xlsx";
+            using var inactiveOutput = new MemoryStream();
+            wb.SaveAs(inactiveOutput);
+            return new ExportResult(inactiveName, inactiveOutput.ToArray(), Guid.Empty, assets.Count);
+        }
 
         // ---- session sheet
         var n = assets.Count;

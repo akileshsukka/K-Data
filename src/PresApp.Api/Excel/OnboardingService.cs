@@ -133,6 +133,8 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         catch (Exception) { throw new Rejected("The file could not be opened as an Excel workbook (.xlsx)."); }
         using (wb)
         {
+            // An inactive list would create its assets again as new active ones.
+            if (InactiveListExport.Is(wb)) throw new Rejected(InactiveListExport.RejectionMessage);
             var (headers, rows) = FindList(wb) ?? throw new Rejected("No list with an \"EQUIP NO\", \"Line No.\" or \"Tag No\" column was found on the visible sheets.");
             var first = ReadList(headers, rows, customHeaders, checkLineFormat);
             if (first.Lines) return first;

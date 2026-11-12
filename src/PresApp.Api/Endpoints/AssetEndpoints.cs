@@ -12,8 +12,9 @@ public static class AssetEndpoints
     {
         var view = app.MapGroup("/api").RequirePermission(Permissions.AssetsView);
 
-        view.MapGet("/units/{unitId:int}/assets", (int unitId, string? type, bool? includeInactive, AssetQueries q, CancellationToken ct) =>
-            q.RegisterAsync(unitId, ParseType(type) ?? AssetType.Equipment, includeInactive ?? false, ct));
+        // inactiveOnly=true: only the deactivated assets (the register's "Inactive only"); otherwise only the active ones.
+        view.MapGet("/units/{unitId:int}/assets", (int unitId, string? type, bool? inactiveOnly, AssetQueries q, CancellationToken ct) =>
+            q.RegisterAsync(unitId, ParseType(type) ?? AssetType.Equipment, inactiveOnly ?? false, ct));
 
         view.MapGet("/units/{unitId:int}/summary", (int unitId, AssetQueries q, CancellationToken ct) => q.SummaryAsync(unitId, ct));
 

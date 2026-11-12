@@ -362,6 +362,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
 
     private async Task<ExcelSession> CheckSessionAsync(XLWorkbook wb, int unitId, bool tracking, bool allowProcessing, CancellationToken ct)
     {
+        if (InactiveListExport.Is(wb)) throw new ImportRejected(InactiveListExport.RejectionMessage);
         var meta = WorkbookFormat.ReadMeta(wb);
         if (!meta.TryGetValue("SessionId", out var sessionText))
         {

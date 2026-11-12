@@ -24,12 +24,20 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
     /// listed together and each other value shown once when all the lines have it (<see cref="PipingLayout.Mixed"/> when
     /// not). The hidden Key holds the ids of all the lines of the row, so the import writes each line on its own.
     /// </param>
-    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct, bool grouped = false)
+    /// <param name="inactiveIds">
+    /// Given: the inactive lines chosen in the register, listed as a read-only report (<see cref="InactiveListExport"/>):
+    /// only the line list sheet (no Summary), no session, "Deactivated on / by" columns.
+    /// </param>
+    public async Task<ExportResult> ExportAsync(int unitId, string exportedBy, CancellationToken ct, bool grouped = false, IReadOnlyCollection<Guid>? inactiveIds = null)
     {
         var unit = await db.Units.AsNoTracking().FirstOrDefaultAsync(u => u.Id == unitId, ct) ?? throw ApiProblem.NotFound("Unit not found.");
-        var lines = (await db.Assets.AsNoTracking().Include(a => a.Preservation).Include(a => a.Pipeline).Include(a => a.FieldValues)
-                .Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline).ToListAsync(ct))
-            .OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance).ToList();
+        if (inactiveIds is not null) inactiveIds = InactiveListExport.Check(new InactiveSelection(AssetType.Pipeline, inactiveIds));
+        var query = db.Assets.AsNoTracking().Include(a => a.Preservation).Include(a => a.Pipeline).Include(a => a.FieldValues)
+            .Where(a => a.UnitId == unitId && a.Type == AssetType.Pipeline);
+        query = inactiveIds is null ? query.Where(a => a.IsActive) : query.Where(a => !a.IsActive && inactiveIds.Contains(a.Id));
+        var lines = (await query.ToListAsync(ct)).OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance).ToList();
+        if (inactiveIds is not null && lines.Count == 0)
+            throw ApiProblem.Invalid("None of the lines on screen is inactive any more. Reload the register.");
         var defs = await LoadFixedFieldsAsync(db, tracking: false, ct);
         var codes = await Piping.LineCodeMeanings.LoadAsync(db, ct);
         var options = await AssetEditor.LoadActiveOptionsAsync(db, ct);
@@ -160,6 +168,23 @@ public sealed class PipingWorkbookExporter(PresAppDbContext db, TimeProvider clo
             dv.ErrorMessage = "Select a value from the list. New values are added in K Data (Custom fields).";
         }
         lists.Visibility = XLWorksheetVisibility.VeryHidden;
+
+        if (inactiveIds is not null)
+        {
+            // ---------------------------------------------------------------- inactive list: the line list only, never imported
+            ReplacePlaceholders(wb, unit.Number.ToString(CultureInfo.InvariantCulture), local.Date);
+            InactiveListExport.AddDeactivationColumns(table, keyColumn, await InactiveListExport.DeactivationsAsync(db, inactiveIds, ct), n);
+            InactiveListExport.KeepOnly(wb, [ws]);
+            InactiveListExport.WriteMeta(wb, unit.Name, now, exportedBy, AssetType.Pipeline, n);
+            foreach (var w in wb.Worksheets) { w.TabActive = false; w.TabSelected = false; }
+            ws.TabSelected = true;
+            ws.SetTabActive();
+            wb.FullCalculationOnLoad = true;
+            var inactiveName = $"U{unit.Number} INACTIVE PIPING LINES {(grouped ? "GROUPED " : "")}{local.ToString("dd MMM yyyy HHmm", CultureInfo.InvariantCulture).ToUpperInvariant()}.xlsx";
+            using var inactiveOutput = new MemoryStream();
+            wb.SaveAs(inactiveOutput);
+            return new ExportResult(inactiveName, inactiveOutput.ToArray(), Guid.Empty, n);
+        }
 
         // ---------------------------------------------------------------- Summary, notes and placeholders
         var serviceCodes = lines.Select(a => a.Pipeline?.Service ?? LineNumber.Parse(a.Tag)?.Service).OfType<string>()

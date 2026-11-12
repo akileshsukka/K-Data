@@ -171,7 +171,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
   const rows = useQuery({
     queryKey: ["register", unitId, type, f.inactive],
-    queryFn: ({ signal }) => api<RegisterRow[]>(`/api/units/${unitId}/assets?type=${type}&includeInactive=${f.inactive}`, { signal }),
+    // "Inactive only": the register shows the deactivated assets alone, never mixed with the active ones.
+    queryFn: ({ signal }) => api<RegisterRow[]>(`/api/units/${unitId}/assets?type=${type}&inactiveOnly=${f.inactive}`, { signal }),
   });
 
   const all = rows.data ?? [];
@@ -259,7 +260,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const inactiveSelected = all.filter((r) => !r.isActive && selected.has(r.id)).map((r) => r.id);
   const [deleting, setDeleting] = useState(false);
 
-  // Deactivate / reactivate in bulk: nothing is deleted, the assets come back with "Show inactive" + Reactivate.
+  // Deactivate / reactivate in bulk: nothing is deleted, the assets come back with "Inactive only" + Reactivate.
   const setActive = useMutation({
     mutationFn: ({ ids, active }: { ids: string[]; active: boolean }) =>
       api<SetActiveResult>("/api/assets/active", { method: "POST", body: { assetIds: ids, active } }),
@@ -279,7 +280,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
   function deactivateSelected() {
     const n = activeSelected.length;
-    if (!window.confirm(`Deactivate ${n} asset${n === 1 ? "" : "s"}? They disappear from the registers, dashboards and the Excel, but nothing is deleted: tick "Show inactive", select them and reactivate them at any time.`)) return;
+    if (!window.confirm(`Deactivate ${n} asset${n === 1 ? "" : "s"}? They disappear from the registers, dashboards and the Excel, but nothing is deleted: tick "Inactive only", select them and reactivate them at any time.`)) return;
     setActive.mutate({ ids: activeSelected, active: false });
   }
 
@@ -308,7 +309,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     <div>
       <PageHeader
         title={titles[type]}
-        description={unit ? `${unit.name} — ${filtered.length} of ${all.length} shown${grouped ? ` in ${shown.length} grouped rows` : ""}${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
+        description={unit ? `${unit.name} — ${filtered.length} of ${all.length}${f.inactive ? " inactive" : ""} shown${grouped ? ` in ${shown.length} grouped rows` : ""}${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
         actions={
           <>
             {session.can(Perm.groupsManage) && activeSelected.length > 0 && (
@@ -338,8 +339,14 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             {canDelete && selected.size > 0 && (
               <Button variant="danger" onClick={() => setDeleting(true)}>Delete {selected.size} selected</Button>
             )}
-            {session.can(Perm.excelExport) && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
-            {session.can(Perm.excelExport) && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping grouped={grouped} label={grouped ? "Download line list (grouped)" : "Download line list"} />}
+            {/* Inactive only: the rows on screen in this register's template (unit file or line list), without dashboard; a report, never imported. */}
+            {session.can(Perm.excelExport) && f.inactive && filtered.length > 0 && (
+              <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/excel/inactive/export`}
+                body={{ type, assetIds: filtered.map((r) => r.id), grouped: lines ? grouped : undefined }}
+                label={`Download inactive list (${filtered.length})`} />
+            )}
+            {session.can(Perm.excelExport) && !f.inactive && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
+            {session.can(Perm.excelExport) && !f.inactive && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping grouped={grouped} label={grouped ? "Download line list (grouped)" : "Download line list"} />}
             {seesNumberCheck && session.can(Perm.assetsEdit) && all.some((r) => r.line?.numberCheck?.nonStandard) && (
               <Button variant="secondary" busy={reread.isPending} onClick={() => reread.mutate()} title="Reads the non-standard numbers again with the current pipe specs and line codes; fills only empty fields.">
                 Re-read non-standard lines
@@ -486,9 +493,9 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             </SelectInput>
           </div>
         )}
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => set("inactive", e.target.checked)} />
-          Show inactive
+        <label className="inline-flex items-center gap-2" title="Shows only the deactivated assets of this register. They can be reactivated or downloaded as a list.">
+          <input type="checkbox" className="size-4 accent-violet" checked={f.inactive} onChange={(e) => { set("inactive", e.target.checked); setSelected(new Set()); }} />
+          Inactive only
         </label>
         {lines && (
           <label className="inline-flex items-center gap-2" title="Sections of one line (same unit, sequence and service; size, spec and insulation may differ) in one row. Only the view and the downloaded list change: each line keeps its own values.">
@@ -553,7 +560,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
       {(rows.isPending || (f.card && card.isPending)) && <p className="mt-6 text-muted">Loading…</p>}
       {card.isError && <p className="mt-6 text-hold">This dashboard figure no longer exists (the category may have been removed). Clear the filters to see everything.</p>}
       {rows.error && <p className="mt-6 text-hold">{rows.error.message}</p>}
-      {rows.data && !(f.card && card.isPending) && filtered.length === 0 && <p className="mt-6 text-muted">{all.length === 0 ? (lines ? "No lines in this unit yet. Add one, or paste the line list." : "No assets of this type in the unit yet.") : "Nothing matches these filters."}</p>}
+      {rows.data && !(f.card && card.isPending) && filtered.length === 0 && <p className="mt-6 text-muted">{all.length === 0 ? f.inactive ? "No inactive assets in this register." : (lines ?"No lines in this unit yet. Add one, or paste the line list." : "No assets of this type in the unit yet.") : "Nothing matches these filters."}</p>}
 
       {filtered.length > 0 && (
         <>

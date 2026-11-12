@@ -11,10 +11,11 @@ namespace PresApp.Api.Assets;
 /// <summary>Read side: registers, profile, search, history, unit summary.</summary>
 public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
 {
-    public async Task<List<RegisterRow>> RegisterAsync(int unitId, AssetType type, bool includeInactive, CancellationToken ct)
+    /// <summary>The register of one type: its active assets, or with <paramref name="inactiveOnly"/> only the deactivated ones.</summary>
+    public async Task<List<RegisterRow>> RegisterAsync(int unitId, AssetType type, bool inactiveOnly, CancellationToken ct)
     {
         var rows = await db.Assets.AsNoTracking()
-            .Where(a => a.UnitId == unitId && a.Type == type && (includeInactive || a.IsActive))
+            .Where(a => a.UnitId == unitId && a.Type == type && a.IsActive != inactiveOnly)
             .Select(a => new
             {
                 a.Id, a.Code, a.Tag, a.Description, Discipline = a.Discipline.Name, a.Priority, a.IsActive, a.UpdatedAtUtc,
