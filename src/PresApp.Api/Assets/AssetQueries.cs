@@ -24,7 +24,8 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 Groups = a.GroupMemberships.Where(m => m.Group.IsActive).Select(m => m.Group.Code).ToList(),
                 Circuit = a.GroupMemberships.Where(m => m.Group.IsActive && m.Group.GroupType.Name == "Circuit").Select(m => m.Group.Code).FirstOrDefault(),
                 DocsPending = a.GateDocuments.Count(d => d.Status == DocumentationStatus.Pending),
-                DocsDone = a.GateDocuments.Count(d => d.Status != DocumentationStatus.Pending)
+                DocsDone = a.GateDocuments.Count(d => d.Status != DocumentationStatus.Pending),
+                Docs = a.GateDocuments.Select(d => new { d.Gate, d.Status }).ToList()
             })
             .ToListAsync(ct);
 
@@ -56,7 +57,8 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 r.P is null || r.UpdatedAtUtc > r.P.UpdatedAtUtc ? r.UpdatedAtUtc : r.P.UpdatedAtUtc,
                 r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM,
                     showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null, LineNumber.GroupKey(r.Tag)), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
-                r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone, tested?.Contains(r.Id)))
+                r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone, tested?.Contains(r.Id),
+                Enumerable.Range(1, 8).Select(g => r.Docs.FirstOrDefault(d => d.Gate == g)?.Status.ToString()).ToList()))
             .ToList();
     }
 

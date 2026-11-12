@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type PipingView, type RegisterRow, type SetActiveResult } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type GateDocStatus, type PipingView, type RegisterRow, type SetActiveResult } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -188,6 +188,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   // E&I items always show their 8 steps (E1–E8); equipment and lines show G5–G8 only once someone uses them.
   const gateCount = showLaterGates || type === "ElectricalInstrument" ? 8 : 4;
   const step = gatePrefix(type);
+  // With gates chosen, the documentation filter looks at those gates only ("E7 document pending").
+  const docGates = f.gates.filter((g) => g <= gateCount).sort((a, b) => a - b).map((g) => `${step}${g}`).join(" + ");
 
   const lines = type === "Pipeline";
   const tagSet = useMemo(() => new Set(tagList(f.tags)), [f.tags]);
@@ -208,7 +210,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
           (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
-          (!f.docs || (f.docs === "pending" ? r.documentsPending > 0 : r.documentsPending === 0 && (r.documentsDone ?? 0) > 0)) &&
+          docsMatch(r, f.docs, f.gates, gateCount) &&
           (!f.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
           (!f.card || !!cardIds?.has(r.id)) &&
           (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
@@ -478,10 +480,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         <TagListFilter value={f.tags} onChange={(v) => set("tags", v)} />
         <div className="w-full sm:w-60">
           <SelectInput value={f.docs} onChange={(e) => set("docs", e.target.value)} aria-label="Documentation" className="mt-0"
-            title="Gate documentation. Ready: has gate documents and none is pending (received or N/A).">
+            title={docGates
+              ? `Documentation of ${docGates} only (the gates chosen above). Pending: a chosen gate's document is still pending. Ready: every chosen gate has its document received or N/A.`
+              : "Gate documentation of the whole asset. Ready: has gate documents and none is pending (received or N/A). Choose gates above to check only their documents."}>
             <option value="">Any documentation</option>
-            <option value="pending">Documentation pending</option>
-            <option value="ready">Documentation ready</option>
+            <option value="pending">{docGates ? `${docGates} document pending` : "Documentation pending"}</option>
+            <option value="ready">{docGates ? `${docGates} document ready` : "Documentation ready"}</option>
           </SelectInput>
         </div>
         {type === "ElectricalInstrument" && (
@@ -654,11 +658,14 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     {customColumns.map((c) => <td key={c.key} className="border-b border-line px-3 py-2 text-sm">{c.dataType === "Date" && r.custom?.[c.key] ? <span className="whitespace-nowrap">{formatDate(r.custom[c.key])}</span> : r.custom?.[c.key] ?? ""}</td>)}
                     <td className="border-b border-line px-3 py-2">
                       <CurrentGateChip value={r.currentGate} type={type} />
-                      {r.documentsPending > 0 && <span className="mt-1 block text-sm text-ongoing">{r.documentsPending} doc. pending</span>}
-                      {r.documentsPending === 0 && (r.documentsDone ?? 0) > 0 && <span className="mt-1 block text-sm text-done">Docs ready</span>}
                     </td>
                     {r.gates.slice(0, gateCount).map((g, i) => (
-                      <td key={i} className="border-b border-line px-2 py-2"><GateStatus value={g} compact /></td>
+                      <td key={i} className="border-b border-line px-2 py-2">
+                        <span className="inline-flex items-center gap-1">
+                          <GateStatus value={g} compact />
+                          <GateDocMark status={r.gateDocuments?.[i]} label={`${step}${i + 1}`} />
+                        </span>
+                      </td>
                     ))}
                     <td className="border-b border-line px-3 py-2 text-sm">{r.actionBy ?? ""}</td>
                   </tr>
@@ -693,7 +700,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {r.gates.slice(0, gateCount).map((g, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 text-sm text-muted">{step}{i + 1}<GateStatus value={g} compact /></span>
+                      <span key={i} className="inline-flex items-center gap-1 text-sm text-muted">{step}{i + 1}<GateStatus value={g} compact /><GateDocMark status={r.gateDocuments?.[i]} label={`${step}${i + 1}`} /></span>
                     ))}
                   </div>
                 </>
@@ -720,6 +727,31 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 /** Electrical items (discipline Electrical) whose E7 is Completed without a complete IR / winding test sheet. */
 export function e7TestMissing(r: RegisterRow) {
   return r.discipline.trim().toLowerCase() === "electrical" && /^\s*completed/i.test(r.gates[6] ?? "") && !r.e7Tested;
+}
+
+/**
+ * Documentation filter.
+ * - No gate chosen: the whole asset (pending = any gate document pending; ready = has documents and none pending).
+ * - Gates chosen: only those gates (pending = a chosen gate's document is pending; ready = every chosen gate's document is received or N/A).
+ *   So "E7 + Completed + Documentation pending" lists the items whose E7 document is still missing, whatever E1–E6 say.
+ */
+export function docsMatch(r: RegisterRow, docs: string, gates: number[], gateCount: number) {
+  if (!docs) return true;
+  const chosen = gates.filter((g) => g <= gateCount);
+  if (chosen.length === 0 || !r.gateDocuments) return docs === "pending" ? r.documentsPending > 0 : r.documentsPending === 0 && (r.documentsDone ?? 0) > 0;
+  const status = (g: number) => r.gateDocuments?.[g - 1] ?? null;
+  return docs === "pending" ? chosen.some((g) => status(g) === "Pending") : chosen.every((g) => status(g) !== null && status(g) !== "Pending");
+}
+
+/**
+ * Documentation of one gate, as a small mark beside its status: ✓ received, amber dot pending, – not applicable.
+ * Nothing when the gate has no documentation row. The meaning is in the tooltip and for screen readers.
+ */
+function GateDocMark({ status, label }: { status: GateDocStatus | null | undefined; label: string }) {
+  if (!status) return null;
+  const text = `${label} document ${status === "Received" ? "received" : status === "Pending" ? "pending" : "not applicable"}`;
+  if (status === "Pending") return <span role="img" aria-label={text} title={text} className="inline-block size-2 shrink-0 rounded-full bg-ongoing" />;
+  return <span role="img" aria-label={text} title={text} className={`shrink-0 text-[13px] leading-none font-bold ${status === "Received" ? "text-done" : "text-na"}`}>{status === "Received" ? "✓" : "–"}</span>;
 }
 
 export function gateMatch(r: RegisterRow, gates: number[], status: string, gateCount: number) {

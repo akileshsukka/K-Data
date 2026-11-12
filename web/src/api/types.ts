@@ -164,7 +164,11 @@ export interface RegisterRow {
   documentsDone?: number;
   /** E&I register only: the item has a complete E7 IR / winding test sheet. */
   e7Tested?: boolean | null;
+  /** Documentation of each gate / step 1–8; null = no documentation row for that gate. */
+  gateDocuments?: (GateDocStatus | null)[] | null;
 }
+
+export type GateDocStatus = "Pending" | "Received" | "NotApplicable";
 
 export type CustomFieldType = "Text" | "Number" | "Date" | "List" | "YesNo";
 

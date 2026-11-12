@@ -5,7 +5,8 @@ public sealed record UnitRef(int Id, string Name, int Number, string Plant);
 
 /// <summary>One row of a register table (light: only what the table shows and filters on).
 /// DocumentsPending / DocumentsDone: gate documents still pending / received or not applicable.
-/// E7Tested (E&amp;I register only): the item has a complete E7 IR / winding test sheet; null on the other registers.</summary>
+/// E7Tested (E&amp;I register only): the item has a complete E7 IR / winding test sheet; null on the other registers.
+/// GateDocuments: documentation of each gate / step 1–8 (Pending, Received, NotApplicable; null = no documentation row for that gate).</summary>
 public sealed record RegisterRow(
     Guid Id, string Code, string? Tag, string? Description, string Discipline, string? Priority,
     string CurrentGate, IReadOnlyList<string?> Gates, string? AssetAvailability, string? PreservationStatus,
@@ -13,7 +14,7 @@ public sealed record RegisterRow(
     string? CurrentActivity, string? PreservationRemarks, DateOnly? LastFieldActionDate, DateTime? PreservedAtUtc,
     int DocumentsPending, bool IsActive, DateTime UpdatedAtUtc, LineInfo? Line, IReadOnlyList<string>? Groups = null, string? Circuit = null,
     IReadOnlyDictionary<string, string?>? Custom = null, string? BulkLiquidDrained = null, string? ReadyForPreservation = null,
-    int DocumentsDone = 0, bool? E7Tested = null);
+    int DocumentsDone = 0, bool? E7Tested = null, IReadOnlyList<string?>? GateDocuments = null);
 
 /// <summary>Pipeline columns of the register.</summary>
 /// <param name="GroupKey">Size group of the line (LineNumber.GroupKey), for the grouped view of the register. Null: the line is on its own.</param>

@@ -154,6 +154,27 @@ public sealed class EiDashboardTests : IClassFixture<TestApp>
         Assert.All(equipment.EnumerateArray(), r => Assert.Equal(JsonValueKind.Null, r.GetProperty("e7Tested").ValueKind));
     }
 
+    [Fact]
+    public async Task The_register_gives_the_documentation_of_each_step()
+    {
+        var unitId = await UnitIdAsync("Unit 41");
+        var withTest = await CreateEiAsync(unitId, "41-EM-20");
+        var noDocs = await CreateEiAsync(unitId, "41-EM-21");
+        // E1–E7 completed on both: each completed step gets its own pending documentation row.
+        foreach (var id in new[] { withTest, noDocs }) await PatchAsync(id, Enumerable.Range(1, 7).Select(g => ($"G{g}Status", "Completed")).ToArray());
+        // 41-EM-20: the E7 test sheet arrived; E3 does not apply.
+        foreach (var (gate, status) in new[] { (7, "Received"), (3, "NotApplicable") })
+        {
+            var doc = await admin.PutAsJsonAsync($"/api/assets/{withTest}/gates/{gate}/documentation", new { status, receivedOn = (string?)null, reference = (string?)null, note = (string?)null });
+            Assert.True(doc.IsSuccessStatusCode, await doc.Content.ReadAsStringAsync());
+        }
+
+        var rows = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=ElectricalInstrument"))
+            .EnumerateArray().ToDictionary(r => r.GetProperty("id").GetGuid(), r => r.GetProperty("gateDocuments").EnumerateArray().Select(d => d.GetString()).ToList());
+        Assert.Equal(["Pending", "Pending", "NotApplicable", "Pending", "Pending", "Pending", "Received", null], rows[withTest]);
+        Assert.Equal([.. Enumerable.Repeat("Pending", 7), null], rows[noDocs]);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private Task<int> UnitIdAsync(string unit) => app.WithDbAsync(db => db.Units.Where(u => u.Name == unit).Select(u => u.Id).FirstAsync());
