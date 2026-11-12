@@ -285,6 +285,27 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         return await queries.ProfileAsync(id, ct);
     }
 
+    public const int MaxSetActiveAssets = 1000;
+
+    /// <summary>
+    /// Deactivates (or reactivates) the selected assets at once, as the button of the asset page does one by one.
+    /// Nothing is deleted: a deactivated asset keeps all its data and can be reactivated later. Assets already in the
+    /// requested state are counted as unchanged. One save, so the change log rows share one batch.
+    /// </summary>
+    public async Task<SetActiveResult> SetActiveManyAsync(SetActiveRequest request, CancellationToken ct)
+    {
+        var ids = (request.AssetIds ?? []).Distinct().ToList();
+        if (ids.Count == 0) throw ApiProblem.Invalid("Select at least one asset.");
+        if (ids.Count > MaxSetActiveAssets) throw ApiProblem.Invalid($"At most {MaxSetActiveAssets} assets can be changed at once.");
+        var assets = await db.Assets.Where(a => ids.Contains(a.Id)).ToListAsync(ct);
+        if (assets.Count != ids.Count) throw ApiProblem.NotFound("Some of the selected assets no longer exist. Reload the page.");
+
+        var changing = assets.Where(a => a.IsActive != request.Active).ToList();
+        foreach (var a in changing) a.IsActive = request.Active;
+        await db.SaveChangesAsync(ct);
+        return new SetActiveResult(changing.Count, assets.Count - changing.Count);
+    }
+
     // ------------------------------------------------------------------ lines in bulk
 
     /// <summary>

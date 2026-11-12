@@ -61,6 +61,10 @@ public static class AssetEndpoints
         app.MapPost("/api/assets/{id:guid}/active", (Guid id, bool active, AssetEditor e, CancellationToken ct) =>
             e.SetActiveAsync(id, active, ct)).RequirePermission(Permissions.AssetsManage);
 
+        // Deactivate or reactivate several assets at once (register selection). Nothing is deleted.
+        app.MapPost("/api/assets/active", (SetActiveRequest request, AssetEditor e, CancellationToken ct) =>
+            e.SetActiveManyAsync(request, ct)).RequirePermission(Permissions.AssetsManage);
+
         // Permanent deletion of assets created by mistake: preview (what can go and why not), then delete with the typed word.
         app.MapPost("/api/assets/delete/preview", (DeleteAssetsRequest request, AssetDeletion d, CancellationToken ct) =>
             d.PreviewAsync(request.AssetIds, ct)).RequirePermission(Permissions.AssetsDelete);

@@ -843,6 +843,12 @@ export interface DeletionResult {
   notDeleted: DeletionItem[];
 }
 
+/** Bulk deactivate / reactivate: assets switched, and assets already in that state. */
+export interface SetActiveResult {
+  changed: number;
+  unchanged: number;
+}
+
 /** How a unit shows its lines by default: one row per line, or sizes of a line grouped. */
 export interface PipingView {
   grouped: boolean;

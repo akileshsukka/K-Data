@@ -80,6 +80,12 @@ public sealed record HistoryEntry(DateTime AtUtc, Guid? AssetId, string? AssetCo
 public sealed record SearchHit(Guid Id, string Code, string? Tag, string? Description, string Unit, string Type, bool IsActive);
 
 public sealed record BulkRequest(IReadOnlyList<Guid> AssetIds, string Field, string? Value);
+
+/// <summary>Deactivate (Active = false) or reactivate the selected assets.</summary>
+public sealed record SetActiveRequest(IReadOnlyList<Guid>? AssetIds, bool Active);
+
+/// <summary>Assets switched, and assets that were already in the requested state.</summary>
+public sealed record SetActiveResult(int Changed, int Unchanged);
 public sealed record BulkRow(Guid AssetId, string Code, string? Tag, string? Current, string? New, string Outcome, string? Reason);
 public sealed record BulkResult(int Changed, int Unchanged, int Skipped, IReadOnlyList<BulkRow> Rows);
 

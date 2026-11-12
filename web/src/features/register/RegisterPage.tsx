@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type PipingView, type RegisterRow } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type PipingView, type RegisterRow, type SetActiveResult } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -247,15 +247,41 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   // Rows can be selected for bulk edit, groups and (E&I register) the E7 report of the selected motors.
-  // Roles that may delete can also select inactive rows (an asset loaded by mistake may already be deactivated).
+  // Roles that may delete or reactivate can also select inactive rows (an asset loaded by mistake may already be deactivated).
   const canDelete = session.can(Perm.assetsDelete);
-  const canBulk = canDelete || session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
-  const selectable = (r: RegisterRow) => r.isActive || canDelete;
+  const canManage = session.can(Perm.assetsManage);
+  const canBulk = canDelete || canManage || session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
+  const selectable = (r: RegisterRow) => r.isActive || canDelete || canManage;
   const groupCodes = [...new Set(all.flatMap((r) => r.groups ?? []))].sort();
   const allSelected = filtered.some(selectable) && filtered.filter(selectable).every((r) => selected.has(r.id));
   // Bulk edit, groups and the E7 report work on the active ones only.
   const activeSelected = all.filter((r) => r.isActive && selected.has(r.id)).map((r) => r.id);
+  const inactiveSelected = all.filter((r) => !r.isActive && selected.has(r.id)).map((r) => r.id);
   const [deleting, setDeleting] = useState(false);
+
+  // Deactivate / reactivate in bulk: nothing is deleted, the assets come back with "Show inactive" + Reactivate.
+  const setActive = useMutation({
+    mutationFn: ({ ids, active }: { ids: string[]; active: boolean }) =>
+      api<SetActiveResult>("/api/assets/active", { method: "POST", body: { assetIds: ids, active } }),
+    onSuccess: (r, { active }) => {
+      queryClient.invalidateQueries({ queryKey: ["register"] });
+      queryClient.invalidateQueries({ queryKey: ["unit-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-card"] });
+      queryClient.invalidateQueries({ queryKey: ["piping-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["asset"] });
+      setSelected(new Set());
+      toast(`${r.changed} asset${r.changed === 1 ? "" : "s"} ${active ? "reactivated" : "deactivated"}${r.unchanged > 0 ? `; ${r.unchanged} already ${active ? "active" : "inactive"}` : ""}.`);
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
+
+  function deactivateSelected() {
+    const n = activeSelected.length;
+    if (!window.confirm(`Deactivate ${n} asset${n === 1 ? "" : "s"}? They disappear from the registers, dashboards and the Excel, but nothing is deleted: tick "Show inactive", select them and reactivate them at any time.`)) return;
+    setActive.mutate({ ids: activeSelected, active: false });
+  }
 
   function toggleAll() {
     const next = new Set(selected);
@@ -296,6 +322,18 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             {session.can(Perm.excelExport) && type === "ElectricalInstrument" && activeSelected.length > 0 && (
               <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} body={{ assetIds: activeSelected }}
                 label={`E7 report (${activeSelected.length} selected)`} />
+            )}
+            {canManage && activeSelected.length > 0 && (
+              <Button variant="secondary" busy={setActive.isPending && setActive.variables?.active === false} disabled={setActive.isPending} onClick={deactivateSelected}
+                title="Hides them until reactivated; nothing is deleted.">
+                Deactivate {activeSelected.length} selected
+              </Button>
+            )}
+            {canManage && inactiveSelected.length > 0 && (
+              <Button variant="secondary" busy={setActive.isPending && setActive.variables?.active === true} disabled={setActive.isPending}
+                onClick={() => setActive.mutate({ ids: inactiveSelected, active: true })}>
+                Reactivate {inactiveSelected.length} selected
+              </Button>
             )}
             {canDelete && selected.size > 0 && (
               <Button variant="danger" onClick={() => setDeleting(true)}>Delete {selected.size} selected</Button>

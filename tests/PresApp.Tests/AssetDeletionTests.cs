@@ -29,6 +29,33 @@ public sealed class AssetDeletionTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Admin_deactivates_several_assets_at_once_and_reactivates_them_later()
+    {
+        var (a, _) = await CreateAsync("32-V-OFF1");
+        var (b, _) = await CreateAsync("32-V-OFF2");
+
+        var off = await admin.PostAsJsonAsync("/api/assets/active", new { assetIds = new[] { a, b }, active = false });
+        off.EnsureSuccessStatusCode();
+        var result = await off.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(2, result.GetProperty("changed").GetInt32());
+        Assert.Equal(0, result.GetProperty("unchanged").GetInt32());
+        Assert.False(await app.WithDbAsync(db => db.Assets.AnyAsync(x => (x.Id == a || x.Id == b) && x.IsActive)));
+        // Nothing deleted, and the change is in the history.
+        Assert.Equal(2, await app.WithDbAsync(db => db.Assets.CountAsync(x => x.Id == a || x.Id == b)));
+        Assert.True(await app.WithDbAsync(db => db.ChangeLogs.AnyAsync(c => c.AssetId == a && c.Field == "IsActive")));
+
+        // Reactivating one already active counts it as unchanged.
+        var on = await admin.PostAsJsonAsync("/api/assets/active", new { assetIds = new[] { a }, active = true });
+        on.EnsureSuccessStatusCode();
+        var again = await (await admin.PostAsJsonAsync("/api/assets/active", new { assetIds = new[] { a, b }, active = true })).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, again.GetProperty("changed").GetInt32());
+        Assert.Equal(1, again.GetProperty("unchanged").GetInt32());
+        Assert.Equal(2, await app.WithDbAsync(db => db.Assets.CountAsync(x => (x.Id == a || x.Id == b) && x.IsActive)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/assets/active", new { assetIds = Array.Empty<Guid>(), active = false })).StatusCode);
+    }
+
+    [Fact]
     public async Task Admin_deletes_an_asset_with_the_typed_word_and_its_id_is_given_again()
     {
         var (id, code) = await CreateAsync("32-V-DEL1");
