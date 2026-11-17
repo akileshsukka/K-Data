@@ -30,6 +30,7 @@ export function useAdminItems(): NavItem[] {
     ...(session.can(Perm.catalogManage)
       ? [
           { to: "/admin/excel-templates", label: "Excel templates", short: "Templates" },
+          { to: "/admin/gate-forms", label: "Gate forms", short: "Gate forms" },
           { to: "/admin/lists", label: "Lists", short: "Lists" },
           { to: "/admin/custom-fields", label: "Custom fields", short: "Fields" },
           { to: "/admin/pipe-specs", label: "Pipe specs", short: "Pipe specs" },

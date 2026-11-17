@@ -2,6 +2,7 @@ using PresApp.Domain.Assets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PresApp.Domain.Catalog;
+using PresApp.Domain.GateForms;
 using PresApp.Domain.Groups;
 using PresApp.Domain.Security;
 using PresApp.Infrastructure.Data;
@@ -26,6 +27,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         await SeedGroupTypesAsync(ct);
         await SeedSettingsAsync(ct);
         await db.SaveChangesAsync(ct);
+        await SeedGateFormSettingsAsync(ct);
         await SeedPipingFieldsAsync(ct);
         await SeedBootstrapAdminAsync(bootstrapAdminEmail, ct);
     }
@@ -202,6 +204,20 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
                 plant.Units.Add(new Unit { Name = unitName, Number = number, SimproLocationId = unitId });
             }
         }
+    }
+
+    /// <summary>Source references and Unit ID known when the gate forms were added; only for units without settings yet.</summary>
+    private async Task SeedGateFormSettingsAsync(CancellationToken ct)
+    {
+        var withSettings = await db.GateFormUnitSettings.Select(s => s.UnitId).ToListAsync(ct);
+        var units = await db.Units.Select(u => new { u.Id, u.Number }).ToListAsync(ct);
+        foreach (var (number, source, unitIdText) in GateFormDefaults.Units)
+        {
+            var unit = units.FirstOrDefault(u => u.Number == number);
+            if (unit is null || withSettings.Contains(unit.Id)) continue;
+            db.GateFormUnitSettings.Add(new GateFormUnitSetting { UnitId = unit.Id, MechanicalSource = source, DefaultUnitId = unitIdText });
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task SeedMeasurementsAsync(CancellationToken ct)

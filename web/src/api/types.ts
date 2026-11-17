@@ -826,6 +826,68 @@ export interface PipingTemplateInfo {
   notes: string[];
 }
 
+/** Printable section acceptance gate form: G1–G8 (equipment and lines) or E1–E8 (electrical motors). */
+export type GateFormKind = "Mechanical" | "Electrical";
+
+/** Field markers a gate form template can hold (server: GateFormDocument). */
+export type GateFormField = "UNIT" | "SOURCE" | "RECORD_NO" | "DATE" | "SECTION" | "WORKPACK" | "UNIT_ID";
+
+export interface GateFormRow {
+  assetId: string;
+  code: string;
+  tag: string | null;
+  description: string | null;
+  recordNo: string | null;
+  /** yyyy-MM-dd */
+  date: string | null;
+  section: string;
+  sectionDefault: string;
+  workPack: string | null;
+  workPackDefault: string | null;
+  unitId: string | null;
+  unitIdDefault: string | null;
+}
+
+export interface GateFormPrepared {
+  kind: GateFormKind;
+  templateName: string;
+  isBuiltIn: boolean;
+  fields: GateFormField[];
+  source: string | null;
+  canSave: boolean;
+  rows: GateFormRow[];
+  skipped: { code: string; tag: string | null; reason: string }[];
+}
+
+export interface GateFormUnitSetting {
+  unitId: number;
+  unitName: string;
+  plantName: string;
+  mechanicalSource: string | null;
+  electricalSource: string | null;
+  defaultUnitId: string | null;
+}
+
+export interface GateFormTemplateVersion {
+  id: number;
+  fileName: string;
+  uploadedAtUtc: string;
+  uploadedBy: string;
+  isActive: boolean;
+  fields: GateFormField[];
+}
+
+export interface GateFormTemplateSlot {
+  plantId: number;
+  plantName: string;
+  kind: GateFormKind;
+  units: string;
+  isBuiltIn: boolean;
+  fileName: string;
+  fields: GateFormField[];
+  versions: GateFormTemplateVersion[];
+}
+
 /** One asset selected for permanent deletion; `blocked` says why it cannot be deleted (null: it can). */
 export interface DeletionItem {
   id: string;

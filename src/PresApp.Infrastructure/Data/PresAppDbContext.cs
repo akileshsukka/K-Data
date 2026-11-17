@@ -3,6 +3,7 @@ using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
 using PresApp.Domain.Documents;
+using PresApp.Domain.GateForms;
 using PresApp.Domain.Groups;
 using PresApp.Domain.Imports;
 using PresApp.Domain.Monitoring;
@@ -59,6 +60,9 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<ImportFile> ImportFiles => Set<ImportFile>();
     public DbSet<ExcelTemplate> ExcelTemplates => Set<ExcelTemplate>();
     public DbSet<WorkbookTemplate> WorkbookTemplates => Set<WorkbookTemplate>();
+    public DbSet<GateFormTemplate> GateFormTemplates => Set<GateFormTemplate>();
+    public DbSet<GateFormUnitSetting> GateFormUnitSettings => Set<GateFormUnitSetting>();
+    public DbSet<GateFormEntry> GateFormEntries => Set<GateFormEntry>();
     public DbSet<SimproSyncRun> SimproSyncRuns => Set<SimproSyncRun>();
     public DbSet<SimproSyncItem> SimproSyncItems => Set<SimproSyncItem>();
     public DbSet<SimproBeforeImage> SimproBeforeImages => Set<SimproBeforeImage>();

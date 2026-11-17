@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="ClosedXML" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="PresApp.Tests" />
@@ -20,5 +21,7 @@
   <ItemGroup>
     <!-- Client E7 electrical test sheet (empty), filled by the E7 report. -->
     <EmbeddedResource Include="Excel\Resources\E7_Electrical_Test_Template.xlsx" LogicalName="E7_Electrical_Test_Template.xlsx" />
+    <!-- Built-in gate forms (Word): the client forms with {{MARKERS}} in place of the blanks. -->
+    <EmbeddedResource Include="GateForms\Resources\*.docx" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

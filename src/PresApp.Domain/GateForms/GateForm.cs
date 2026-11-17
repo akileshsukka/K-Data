@@ -1,0 +1,84 @@
+using PresApp.Domain.Assets;
+using PresApp.Domain.Catalog;
+using PresApp.Domain.Common;
+
+namespace PresApp.Domain.GateForms;
+
+/// <summary>
+/// Printable section acceptance gate form (Word): <see cref="Mechanical"/> (G1–G8, Equipment and Pipeline registers) or
+/// <see cref="Electrical"/> (E1–E8, electrical motors of the E&amp;I register).
+/// </summary>
+public enum GateFormKind
+{
+    Mechanical = 1,
+    Electrical = 2
+}
+
+/// <summary>
+/// A Word template of a gate form uploaded for one plant. Every upload is kept as a version; at most one version per
+/// plant and kind is active, and without an active one the app uses its built-in template.
+/// </summary>
+public class GateFormTemplate
+{
+    public int Id { get; set; }
+    public GateFormKind Kind { get; set; }
+    public int PlantId { get; set; }
+    public Plant Plant { get; set; } = null!;
+    public string FileName { get; set; } = "";
+    public byte[] Content { get; set; } = [];
+    public bool IsActive { get; set; }
+    public DateTime UploadedAtUtc { get; set; }
+    public string UploadedBy { get; set; } = "";
+}
+
+/// <summary>Starting values, taken from the client forms of Nov 2026. An admin changes them in Admin → Gate forms.</summary>
+public static class GateFormDefaults
+{
+    /// <summary>
+    /// Plant whose built-in mechanical form has the "Unit ID" field instead of "Work pack / P&amp;ID rev." (Habshan 5, unit 541).
+    /// Every other plant, and the electrical form everywhere, starts from the work pack layout.
+    /// </summary>
+    public const string UnitIdLayoutPlant = "Habshan - 5";
+
+    /// <summary>Unit settings created once when the unit has none (an admin's later changes, emptying included, are kept).</summary>
+    public static readonly (int UnitNumber, string? MechanicalSource, string? DefaultUnitId)[] Units =
+    [
+        (39, "DOD-52618-H2-39-69-00-156", null),
+        (541, "DOD-52618-H5-541-69-00-156", "541"),
+    ];
+}
+
+/// <summary>Values of the gate forms that belong to a unit (the source document reference changes per unit).</summary>
+public class GateFormUnitSetting
+{
+    public int UnitId { get; set; }
+    public Unit Unit { get; set; } = null!;
+
+    /// <summary>Source document of the mechanical form, e.g. "DOD-52618-H2-39-69-00-156". Empty = not known yet.</summary>
+    public string? MechanicalSource { get; set; }
+
+    /// <summary>Source document of the electrical form. Empty = not known yet.</summary>
+    public string? ElectricalSource { get; set; }
+
+    /// <summary>Unit ID printed on forms that have that field (Habshan 5: "541") when the asset has none of its own.</summary>
+    public string? DefaultUnitId { get; set; }
+}
+
+/// <summary>
+/// The values typed for an asset's gate form, kept so the next print starts from them. Section, work pack and unit ID
+/// are stored only when they differ from what the app fills by itself (tag, P&amp;ID number, the unit's Unit ID).
+/// </summary>
+public class GateFormEntry : AuditableEntity, IFieldAudited
+{
+    public const int TextMaxLength = 200;
+
+    public Guid AssetId { get; set; }
+    public Asset Asset { get; set; } = null!;
+    public string? RecordNo { get; set; }
+    public DateOnly? Date { get; set; }
+    public string? Section { get; set; }
+    public string? WorkPack { get; set; }
+    public string? UnitIdText { get; set; }
+
+    Guid? IFieldAudited.AuditAssetId => AssetId;
+}

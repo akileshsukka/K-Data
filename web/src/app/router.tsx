@@ -23,6 +23,7 @@ import { RolesPage } from "../features/admin/RolesPage";
 import { LoginsPage } from "../features/admin/LoginsPage";
 import { ImportIssuesPage } from "../features/admin/ImportIssuesPage";
 import { ExcelTemplatesPage } from "../features/admin/ExcelTemplatesPage";
+import { GateFormsPage } from "../features/admin/GateFormsPage";
 import { ExcelPage } from "../features/excel/ExcelPage";
 import { ImportPage } from "../features/excel/ImportPage";
 import { CategoriesPage } from "../features/units/CategoriesPage";
@@ -87,6 +88,7 @@ export const router = createBrowserRouter([
         element: <RequirePermission permission={Perm.catalogManage} />,
         children: [
           { path: "admin/excel-templates", element: <ExcelTemplatesPage /> },
+          { path: "admin/gate-forms", element: <GateFormsPage /> },
           { path: "admin/line-codes", element: <LineCodesPage /> },
           { path: "admin/pipe-specs", element: <PipeSpecsPage /> },
           { path: "admin/custom-fields", element: <CustomFieldsPage /> },

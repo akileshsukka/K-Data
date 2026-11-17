@@ -48,6 +48,7 @@ builder.Services.AddScoped<PresApp.Api.Piping.PipingViewSettings>();
 builder.Services.AddScoped<PresApp.Api.Excel.ExcelImportService>();
 builder.Services.AddScoped<PresApp.Api.Excel.OnboardingService>();
 builder.Services.AddScoped<PresApp.Api.Excel.ExcelTemplateService>();
+builder.Services.AddScoped<PresApp.Api.GateForms.GateFormService>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitDashboard>();
 builder.Services.AddScoped<PresApp.Api.Monitoring.MonitoringService>();
 builder.Services.AddScoped<PresApp.Api.Groups.GroupService>();
@@ -114,6 +115,7 @@ app.MapMonitoringEndpoints();
 app.MapCustomFieldEndpoints();
 app.MapOptionSetEndpoints();
 app.MapDocumentEndpoints();
+app.MapGateFormEndpoints();
 
 // Unknown /api routes are 404; everything else is the React app.
 app.MapFallback("/api/{**path}", () => Results.NotFound());

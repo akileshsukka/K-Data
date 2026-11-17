@@ -114,6 +114,15 @@ Each gate of each asset can hold signed documents (PDF or photos: JPG, PNG, HEIC
 - `install-service.ps1` creates the folder, gives the service access and registers the scheduled task "PresApp - Documents backup" (daily 02:30, copies new files to `C:\PresApp_backup\documents` and `C:\secondary_backup\documents`). The SQL backups do not include these files.
 - Permissions: `documents.view` (every role, Viewer included), `documents.upload`, `documents.delete` (Admin).
 
+## Gate forms (Word)
+
+Printable section acceptance gate forms, one page per selected asset: select rows in the Equipment or Pipeline Register (form G1–G8) or electrical items (discipline Electrical) in the E&I Register (form E1–E8) and click **Gate forms**.
+
+- Each row starts from what was saved for the asset; System / circuit / section is the tag (line number for lines), Work pack / P&ID rev. the P&ID number of a line, Unit ID the unit's default. Record No. and date can be set for all rows at once or row by row. Dates print as 25/11/2026; an empty field prints the blank line of the form.
+- Generating saves the values with the assets (roles with `assets.edit`; they show in the asset history). Downloading needs `excel.export`.
+- **Admin → Gate forms**: source document of each unit (mechanical and electrical), default Unit ID, and the Word template of each plant and form. A unit without a source prints its forms with the source empty after a warning.
+- Templates are the client forms with markers: `{{UNIT}}`, `{{SOURCE}}` (the only ones allowed in headers/footers), `{{RECORD_NO}}`, `{{DATE}}`, `{{SECTION}}` (required), `{{WORKPACK}}`, `{{UNIT_ID}}`. An upload is checked and kept as a version; download its sample, then activate it. Without an active version the built-in template is used (`src/PresApp.Api/GateForms/Resources`: work pack layout for Habshan 0, Unit ID layout for Habshan 5, electrical form for all).
+
 ## Server installation (once)
 
 1. **Database.** In SSMS on EM-L-5236, run `deploy/sql/01-create-database.sql`. It creates the empty `PresApp` database. PresApp creates the tables on its first start; the service login is created by the install script (step 4), because the Windows account `NT SERVICE\PresApp` only exists once the service is installed.

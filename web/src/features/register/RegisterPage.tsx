@@ -22,6 +22,7 @@ import { useToast } from "../../components/Toast";
 import { AddToGroupDialog } from "../groups/AddToGroupDialog";
 import { DeleteAssetsDialog } from "./DeleteAssetsDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
+import { GateFormDialog } from "../gateforms/GateFormDialog";
 import { groupLines } from "../lines/lineGroups";
 
 const titles: Record<AssetType, string> = {
@@ -167,6 +168,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   }, [key, searchParams]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState(false);
+  const [gateForms, setGateForms] = useState(false);
   const text = useDebounced(f.text.trim().toLowerCase(), 300);
 
   const rows = useQuery({
@@ -249,17 +251,22 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
-  // Rows can be selected for bulk edit, groups and (E&I register) the E7 report of the selected motors.
+  // Rows can be selected for bulk edit, groups, gate forms and (E&I register) the E7 report of the selected motors.
   // Roles that may delete or reactivate can also select inactive rows (an asset loaded by mistake may already be deactivated).
   const canDelete = session.can(Perm.assetsDelete);
   const canManage = session.can(Perm.assetsManage);
-  const canBulk = canDelete || canManage || session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || (type === "ElectricalInstrument" && session.can(Perm.excelExport));
+  const canBulk = canDelete || canManage || session.can(Perm.bulkEdit) || session.can(Perm.groupsManage) || session.can(Perm.excelExport);
   const selectable = (r: RegisterRow) => r.isActive || canDelete || canManage;
   const groupCodes = [...new Set(all.flatMap((r) => r.groups ?? []))].sort();
   const allSelected = filtered.some(selectable) && filtered.filter(selectable).every((r) => selected.has(r.id));
   // Bulk edit, groups and the E7 report work on the active ones only.
   const activeSelected = all.filter((r) => r.isActive && selected.has(r.id)).map((r) => r.id);
   const inactiveSelected = all.filter((r) => !r.isActive && selected.has(r.id)).map((r) => r.id);
+  // Gate verification forms: G1–G8 for equipment and lines; on the E&I register, E1–E8 for the electrical items (motors) only.
+  const formKind = type === "ElectricalInstrument" ? "Electrical" : "Mechanical";
+  const formIds = type === "ElectricalInstrument"
+    ? all.filter((r) => r.isActive && selected.has(r.id) && r.discipline.toLowerCase() === "electrical").map((r) => r.id)
+    : activeSelected;
   const [deleting, setDeleting] = useState(false);
 
   // Deactivate / reactivate in bulk: nothing is deleted, the assets come back with "Inactive only" + Reactivate.
@@ -325,6 +332,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             {session.can(Perm.excelExport) && type === "ElectricalInstrument" && activeSelected.length > 0 && (
               <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/electrical-tests/export`} body={{ assetIds: activeSelected }}
                 label={`E7 report (${activeSelected.length} selected)`} />
+            )}
+            {session.can(Perm.excelExport) && formIds.length > 0 && (
+              <Button variant="secondary" onClick={() => setGateForms(true)}
+                title={type === "ElectricalInstrument" ? "Printable gate forms (E1–E8) of the selected electrical items, one page each" : "Printable gate forms (G1–G8), one page per selected asset"}>
+                Gate forms ({formIds.length})
+              </Button>
             )}
             {canManage && activeSelected.length > 0 && (
               <Button variant="secondary" busy={setActive.isPending && setActive.variables?.active === false} disabled={setActive.isPending} onClick={deactivateSelected}
@@ -559,6 +572,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
       )}
 
       <AddToGroupDialog open={grouping} onClose={() => setGrouping(false)} unitId={unitId} assetIds={activeSelected} onDone={() => setSelected(new Set())} />
+      <GateFormDialog open={gateForms} onClose={() => setGateForms(false)} unitId={unitId} kind={formKind} assetIds={formIds} />
       <DeleteAssetsDialog open={deleting} onClose={() => setDeleting(false)} assetIds={[...selected]} onDone={() => setSelected(new Set())} />
 
       {(rows.isPending || (f.card && card.isPending)) && <p className="mt-6 text-muted">Loading…</p>}

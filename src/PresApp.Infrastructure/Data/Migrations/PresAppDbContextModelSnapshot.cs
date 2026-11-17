@@ -1245,6 +1245,122 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.ToTable("Document", (string)null);
                 });
 
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormEntry", b =>
+                {
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateOnly?>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("RecordNo")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Section")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("UnitIdText")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("WorkPack")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("AssetId");
+
+                    b.ToTable("GateFormEntry", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("PlantId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlantId", "Kind", "IsActive");
+
+                    b.ToTable("GateFormTemplate", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormUnitSetting", b =>
+                {
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DefaultUnitId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ElectricalSource")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("MechanicalSource")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("UnitId");
+
+                    b.ToTable("GateFormUnitSetting", (string)null);
+                });
+
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -2296,6 +2412,39 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Navigation("Asset");
 
                     b.Navigation("Document");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormEntry", b =>
+                {
+                    b.HasOne("PresApp.Domain.Assets.Asset", "Asset")
+                        .WithOne()
+                        .HasForeignKey("PresApp.Domain.GateForms.GateFormEntry", "AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormTemplate", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Plant", "Plant")
+                        .WithMany()
+                        .HasForeignKey("PlantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Plant");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.GateFormUnitSetting", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
+                        .WithOne()
+                        .HasForeignKey("PresApp.Domain.GateForms.GateFormUnitSetting", "UnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Unit");
                 });
 
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>

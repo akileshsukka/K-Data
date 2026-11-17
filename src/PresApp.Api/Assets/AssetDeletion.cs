@@ -55,6 +55,7 @@ public sealed partial class AssetDeletion(PresAppDbContext db, AuditContext audi
         // Links removed earlier still point at the asset; the forced-sync mark too.
         db.DocumentLinks.RemoveRange(await db.DocumentLinks.Where(l => deletable.Contains(l.AssetId)).ToListAsync(ct));
         db.SimproForcedAssets.RemoveRange(await db.SimproForcedAssets.Where(f => deletable.Contains(f.AssetId)).ToListAsync(ct));
+        db.GateFormEntries.RemoveRange(await db.GateFormEntries.Where(f => deletable.Contains(f.AssetId)).ToListAsync(ct));
 
         var batch = Guid.NewGuid();
         var now = clock.GetUtcNow().UtcDateTime;
