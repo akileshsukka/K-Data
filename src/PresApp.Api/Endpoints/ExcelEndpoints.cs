@@ -72,6 +72,11 @@ public static class ExcelEndpoints
                 await s.GetAsync(unitId, ct, await view.ResolveAsync(unitId, grouped, ct)))
             .RequirePermission(Permissions.AssetsView);
 
+        // The lines behind one piping card (walkdown, drained, inspected, scope, cleaned, or "{card}-pending"), for the Pipeline Register.
+        app.MapGet("/api/units/{unitId:int}/piping-summary/cards/{card}", async (int unitId, string card, bool? grouped, Piping.PipingSummaryService s, Piping.PipingViewSettings view, CancellationToken ct) =>
+                await s.CardAsync(unitId, card, await view.ResolveAsync(unitId, grouped, ct), ct))
+            .RequirePermission(Permissions.AssetsView);
+
         // How the unit shows its lines by default (individual or grouped by size).
         app.MapGet("/api/units/{unitId:int}/piping-view", async (int unitId, Piping.PipingViewSettings view, CancellationToken ct) =>
             new Piping.PipingViewDto(await view.GroupedAsync(unitId, ct))).RequirePermission(Permissions.AssetsView);

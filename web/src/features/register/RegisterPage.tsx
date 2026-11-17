@@ -178,10 +178,29 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   });
 
   const all = rows.data ?? [];
+  const lines = type === "Pipeline";
+
+  // Grouped view (lines only): sections of one line that change size shown as one row; only the view changes.
+  // The page opens as the unit's default (set per unit); the switch changes only this visit until saved as the default.
+  const view = useQuery({
+    queryKey: ["piping-view", unitId],
+    queryFn: ({ signal }) => api<PipingView>(`/api/units/${unitId}/piping-view`, { signal }),
+    enabled: lines,
+  });
+  const [override, setOverride] = useState<boolean | null>(null);
+  const unitDefault = view.data?.grouped ?? false;
+  const groupedOn = override ?? unitDefault;
+  const grouped = lines && groupedOn;
+
+  // A figure of the Unit overview (equipment, E&I) or a piping card (piping-walkdown, piping-walkdown-pending…). A piping card is
+  // counted grouped or not like the cards above the register, so it waits for the view and follows the switch.
+  const pipingCard = lines && f.card.startsWith("piping-");
   const card = useQuery({
-    queryKey: ["dashboard-card", unitId, f.card],
-    queryFn: ({ signal }) => api<DashboardCard>(`/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}`, { signal }),
-    enabled: !!f.card,
+    queryKey: ["dashboard-card", unitId, f.card, pipingCard ? grouped : null],
+    queryFn: ({ signal }) => api<DashboardCard>(pipingCard
+      ? `/api/units/${unitId}/piping-summary/cards/${encodeURIComponent(f.card.slice("piping-".length))}?grouped=${grouped}`
+      : `/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}`, { signal }),
+    enabled: !!f.card && (!pipingCard || !!view.data),
   });
   const cardIds = useMemo(() => (card.data ? new Set(card.data.assetIds) : null), [card.data]);
   const outsideCard = card.data ? card.data.assetIds.filter((id) => !all.some((r) => r.id === id)).length : 0;
@@ -193,7 +212,6 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   // With gates chosen, the documentation filter looks at those gates only ("E7 document pending").
   const docGates = f.gates.filter((g) => g <= gateCount).sort((a, b) => a - b).map((g) => `${step}${g}`).join(" + ");
 
-  const lines = type === "Pipeline";
   const tagSet = useMemo(() => new Set(tagList(f.tags)), [f.tags]);
   const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => tagKey(r.tag ?? "") === t || tagKey(r.code) === t));
   const filtered = useMemo(
@@ -221,17 +239,6 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     [all, text, f, gateCount, codes, cardIds, tagSet, type],
   );
 
-  // Grouped view (lines only): sections of one line that change size shown as one row; only the view changes.
-  // The page opens as the unit's default (set per unit); the switch changes only this visit until saved as the default.
-  const view = useQuery({
-    queryKey: ["piping-view", unitId],
-    queryFn: ({ signal }) => api<PipingView>(`/api/units/${unitId}/piping-view`, { signal }),
-    enabled: lines,
-  });
-  const [override, setOverride] = useState<boolean | null>(null);
-  const unitDefault = view.data?.grouped ?? false;
-  const groupedOn = override ?? unitDefault;
-  const grouped = lines && groupedOn;
   const saveDefault = useMutation({
     mutationFn: (on: boolean) => api<PipingView>(`/api/units/${unitId}/piping-view`, { method: "PUT", body: { grouped: on } }),
     onSuccess: (r) => {
@@ -542,6 +549,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           <div className="min-w-0">
             <p className="font-semibold text-ink">
               {active === 1 ? "1 filter applied" : `${active} filters applied`} · showing {filtered.length} of {all.length}
+              {grouped && ` lines in ${shown.length} grouped row${shown.length === 1 ? "" : "s"}`}
             </p>
             {tagSet.size > 0 && (
               <p className="mt-0.5 text-sm text-muted">
@@ -552,9 +560,10 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             )}
             {f.card && (
               <p className="mt-0.5 text-sm text-muted">
-                From the dashboard: <span className="font-semibold text-ink">{card.data?.label ?? (card.isError ? "figure not found" : "loading…")}</span>
-                {card.data && ` (${card.data.count})`}
-                {" · "}<Link to={`/u/${unitId}`} className="font-semibold text-violet">Back to dashboard</Link>
+                {pipingCard ? "From the piping cards" : "From the dashboard"}: <span className="font-semibold text-ink">{card.data?.label ?? (card.isError ? "figure not found" : "loading…")}</span>
+                {/* A grouped piping card counts groups: the same number as the grouped rows shown. */}
+                {card.data && ` (${card.data.count}${pipingCard ? (grouped ? " grouped rows" : " lines") : ""})`}
+                {!pipingCard && <>{" · "}<Link to={`/u/${unitId}`} className="font-semibold text-violet">Back to dashboard</Link></>}
                 {" · "}<button type="button" className="font-semibold text-violet" onClick={() => set("card", "")}>Remove this filter</button>
               </p>
             )}

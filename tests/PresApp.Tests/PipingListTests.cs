@@ -452,6 +452,84 @@ public sealed class PipingListTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Each_piping_card_opens_exactly_the_lines_it_counts_grouped_or_not()
+    {
+        var unitId = await UnitIdAsync("Unit 42");
+        // One line in three sizes (walkdown done on two only; all in scope, one cleaned), and one line on its own.
+        const string a2 = "42-7701-HC-2\"-61055-N", a4 = "42-7701-HC-4\"-61055-N", a6 = "42-7701-HC-6\"-61055-N", alone = "42-7702-LS-2\"-61055-N";
+        await ApplyAsync(await PostAsync($"/api/units/{unitId}/excel/onboarding", EngineerList(
+            [1, a2, null, "HC", "", null, "Completed", "Yes", "Yes", "Hydromilling", "Yes"],
+            [2, a4, null, "HC", "", null, "Completed", "Yes", "Not Applicable", "Hydromilling", null],
+            [3, a6, null, "HC", "", null, "Ongoing", "Yes", "No", "Hydromilling", null],
+            [4, alone, null, "LS", "", null, "Completed", null, "Not Applicable", "TBC", null])));
+        var register = (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=Pipeline")).EnumerateArray().ToList();
+        var tagOf = register.ToDictionary(r => r.GetProperty("id").GetGuid(), r => r.GetProperty("tag").GetString()!);
+        var groupOf = register.ToDictionary(r => r.GetProperty("id").GetGuid(), r => r.GetProperty("line").GetProperty("groupKey").GetString() ?? r.GetProperty("id").GetString()!);
+
+        async Task<(int Count, List<Guid> Ids)> Card(string card, bool grouped)
+        {
+            var c = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary/cards/{card}?grouped={grouped}");
+            Assert.Equal("piping-" + card, c.GetProperty("card").GetString());
+            return (c.GetProperty("count").GetInt32(), c.GetProperty("assetIds").EnumerateArray().Select(i => i.GetGuid()).ToList());
+        }
+
+        foreach (var grouped in new[] { false, true })
+        {
+            var s = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/piping-summary?grouped={grouped}");
+            var scope = s.GetProperty("cleaning").EnumerateArray().Where(c => c.GetProperty("inScope").GetBoolean()).Sum(c => c.GetProperty("lines").GetInt32());
+            var expected = new (string Card, int Count)[]
+            {
+                ("walkdown", s.GetProperty("walkdown").GetProperty("done").GetInt32()),
+                ("walkdown-pending", s.GetProperty("walkdown").GetProperty("total").GetInt32() - s.GetProperty("walkdown").GetProperty("done").GetInt32()),
+                ("drained", s.GetProperty("drained").GetProperty("done").GetInt32()),
+                ("drained-pending", s.GetProperty("drained").GetProperty("total").GetInt32() - s.GetProperty("drained").GetProperty("done").GetInt32()),
+                ("inspected", s.GetProperty("inspected").GetProperty("done").GetInt32()),
+                ("inspected-pending", s.GetProperty("inspected").GetProperty("total").GetInt32() - s.GetProperty("inspected").GetProperty("done").GetInt32()),
+                ("scope", scope),
+                ("cleaned", s.GetProperty("cleaned").GetProperty("done").GetInt32()),
+                ("cleaned-pending", s.GetProperty("cleaned").GetProperty("total").GetInt32() - s.GetProperty("cleaned").GetProperty("done").GetInt32()),
+            };
+            Assert.Equal(scope, s.GetProperty("cleaned").GetProperty("total").GetInt32());
+            foreach (var (card, count) in expected)
+            {
+                var (n, ids) = await Card(card, grouped);
+                Assert.Equal(count, n);                                       // the number on the card
+                Assert.All(ids, id => Assert.Contains(id, tagOf.Keys));       // only active lines of the register
+                Assert.Equal(ids.Count, ids.Distinct().Count());
+                if (!grouped) Assert.Equal(count, ids.Count);                 // one line per counted line
+                else
+                {
+                    // The register's grouped rows: exactly Count groups, each with all its lines.
+                    var groups = ids.Select(id => groupOf[id]).Distinct().ToList();
+                    Assert.Equal(count, groups.Count);
+                    Assert.Equal(groupOf.Where(g => groups.Contains(g.Value)).Select(g => g.Key).Order(), ids.Order());
+                }
+            }
+            // Done and pending never overlap.
+            foreach (var card in new[] { "walkdown", "drained", "inspected", "cleaned" })
+                Assert.Empty((await Card(card, grouped)).Ids.Intersect((await Card(card + "-pending", grouped)).Ids));
+        }
+
+        async Task<string[]> Tags(string card, bool grouped) => (await Card(card, grouped)).Ids.Select(i => tagOf[i]).Where(t => t.StartsWith("42-770")).Order().ToArray();
+        // One by one: each line on its own.
+        Assert.Equal([a2, a4, alone], await Tags("walkdown", false));
+        Assert.Equal([a6], await Tags("walkdown-pending", false));
+        Assert.Equal([a2], await Tags("inspected", false));
+        Assert.Equal([a6], await Tags("inspected-pending", false));          // N/A left out
+        Assert.Equal([a2, a4, a6], await Tags("scope", false));                // TBC is not scope
+        Assert.Equal([a4, a6], await Tags("cleaned-pending", false));
+        // Grouped: the line is done only when all its sizes are, and then comes with all of them.
+        Assert.Equal([alone], await Tags("walkdown", true));
+        Assert.Equal([a2, a4, a6], await Tags("walkdown-pending", true));
+        Assert.Equal([a2, a4, a6], await Tags("drained", true));
+        Assert.Empty(await Tags("inspected", true));                           // Yes, N/A and No: not all Yes
+        Assert.Equal([a2, a4, a6], await Tags("inspected-pending", true));
+        Assert.Equal([a2, a4, a6], await Tags("cleaned-pending", true));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/units/{unitId}/piping-summary/cards/nothing")).StatusCode);
+    }
+
+    [Fact]
     public void Sections_of_one_line_share_a_group_key_by_unit_sequence_and_service()
     {
         var key = LineNumber.GroupKey("541-2089-RF-2\"-31376-C");

@@ -580,7 +580,7 @@ export interface CategoryOption {
   section: CategorySection;
 }
 
-/** Equipment behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}; E&I: ei-tags, ei-preserved, ei-hold, ei-na, ei-available). */
+/** Assets behind one dashboard figure (card: tags, preserved, ready, hold, na, available, category-{id}; E&I: ei-tags, ei-preserved, ei-hold, ei-na, ei-available; lines: piping-walkdown, piping-drained, piping-inspected, piping-scope, piping-cleaned and their -pending). For a grouped piping card, count = groups and assetIds = all their lines. */
 export interface DashboardCard {
   card: string;
   label: string;

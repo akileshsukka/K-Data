@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { PipingCount, PipingSummary } from "../../api/types";
 
 const pct = (c: PipingCount) => (c.total > 0 ? Math.round((c.done / c.total) * 100) : 0);
+
+/** Card of the piping summary that opens the Pipeline Register on its lines (with "pending": the ones not done yet). */
+export type PipingCard = "walkdown" | "drained" | "inspected" | "scope" | "cleaned";
+
+/** Pipeline Register showing exactly the lines behind one card (?card=piping-walkdown, piping-walkdown-pending…). */
+export const pipingCardLink = (unitId: number, card: PipingCard, pending = false) =>
+  `/u/${unitId}/lines?card=piping-${card}${pending ? "-pending" : ""}`;
 
 /**
  * The piping Summary of the line list as cards: walkdown, draining, inspection, cleaning scope and cleaning done
@@ -27,7 +35,7 @@ export function PipingSummaryCards({ unitId, title = "Piping status", grouped }:
         <button className="text-sm font-semibold text-violet" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide by service" : "Show by service"}</button>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <PipingCards s={s} />
+        <PipingCards s={s} unitId={unitId} />
       </div>
       {s.grouped && (
         <p className="mt-2 text-sm text-muted">Sizes of one line count as one; a line is done when all its sizes are.</p>
@@ -41,9 +49,15 @@ export function PipingSummaryCards({ unitId, title = "Piping status", grouped }:
   );
 }
 
-/** The six cards (lines, walkdown, drained, inspected, cleaning scope, cleaned); the caller sets the grid. Also used by the PDF export. */
-export function PipingCards({ s }: { s: PipingSummary }) {
+/**
+ * The six cards (lines, walkdown, drained, inspected, cleaning scope, cleaned); the caller sets the grid. With a unit, a card opens the
+ * Pipeline Register on its lines and "N pending" on the ones not done yet; the API lists them with the same rule that counts them.
+ * Also used by the PDF export (no unit: plain figures).
+ */
+export function PipingCards({ s, unitId }: { s: PipingSummary; unitId?: number }) {
   const scope = s.cleaning.filter((c) => c.inScope).reduce((a, c) => a + c.lines, 0);
+  const link = (card: PipingCard, total: number) =>
+    unitId !== undefined && total > 0 ? (pending = false) => pipingCardLink(unitId, card, pending) : undefined;
   return (
     <>
       <div className="rounded-lg border border-line bg-panel p-4">
@@ -53,18 +67,19 @@ export function PipingCards({ s }: { s: PipingSummary }) {
           {[s.grouped && s.sections !== s.lines && `${s.sections} sizes`, s.lengthM > 0 && `${Math.round(s.lengthM).toLocaleString("en")} m`].filter(Boolean).join(" · ") || "Active lines"}
         </p>
       </div>
-      <Progress label="Walkdown" count={s.walkdown} detail="EM walkdown completed" />
-      <Progress label="Drained" count={s.drained} detail="Bulk liquid drained" />
-      <Progress label="Inspected" count={s.inspected} detail="Inspection done" />
-      <div className="rounded-lg border border-line bg-panel p-4">
+      <Progress label="Walkdown" count={s.walkdown} detail="EM walkdown completed" to={link("walkdown", s.walkdown.total)} />
+      <Progress label="Drained" count={s.drained} detail="Bulk liquid drained" to={link("drained", s.drained.total)} />
+      <Progress label="Inspected" count={s.inspected} detail="Inspection done" pendingNote="N/A left out" to={link("inspected", s.inspected.total)} />
+      <Card to={link("scope", scope)?.()} title={`Open the ${scope} lines of the cleaning scope in the Pipeline Register`}>
         <p className="text-sm font-semibold text-muted">Cleaning scope</p>
         <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">{scope}</p>
         <p className="mt-1 text-sm text-muted">
           {s.cleaning.map((c) => `${c.lines} ${c.value}`).join(" · ") || "No values"}
           {s.noCleaningSet > 0 && ` · ${s.noCleaningSet} not set`}
         </p>
-      </div>
-      <Progress label="Cleaned" count={s.cleaned} detail={s.cleaned.total > 0 ? "of the cleaning scope" : "No lines to clean yet"} emphasis />
+      </Card>
+      <Progress label="Cleaned" count={s.cleaned} detail={s.cleaned.total > 0 ? "of the cleaning scope" : "No lines to clean yet"} pendingNote="in scope, not cleaned" emphasis
+        to={link("cleaned", s.cleaned.total)} />
     </>
   );
 }
@@ -100,10 +115,32 @@ export function PipingServiceTable({ rows, className = "" }: { rows: PipingSumma
   );
 }
 
-function Progress({ label, count, detail, emphasis = false }: { label: string; count: PipingCount; detail: string; emphasis?: boolean }) {
-  const p = pct(count);
+/**
+ * A card. With a link, the whole card opens it: a stretched link behind the content, so a second link ("N pending") can sit on top
+ * (links cannot be nested).
+ */
+function Card({ to, title, emphasis = false, children }: { to?: string; title?: string; emphasis?: boolean; children: ReactNode }) {
+  const look = `rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`;
+  if (!to) return <div className={look}>{children}</div>;
   return (
-    <div className={`rounded-lg border p-4 ${emphasis ? "border-violet/30 bg-violet-soft" : "border-line bg-panel"}`}>
+    <div className={`${look} relative transition hover:border-violet hover:shadow-sm has-[.card-main:focus-visible]:outline-2 has-[.card-main:focus-visible]:outline-violet`}>
+      <Link to={to} title={title} aria-label={title} className="card-main absolute inset-0 rounded-lg focus-visible:outline-none" />
+      {children}
+    </div>
+  );
+}
+
+function Progress({ label, count, detail, emphasis = false, to, pendingNote }: {
+  label: string; count: PipingCount; detail: string; emphasis?: boolean;
+  /** Register link of the card (lines done) and, with pending = true, of the ones not done yet. */
+  to?: (pending?: boolean) => string;
+  /** What "pending" leaves out, said in its tooltip (e.g. "N/A left out"). */
+  pendingNote?: string;
+}) {
+  const p = pct(count);
+  const pending = count.total - count.done;
+  return (
+    <Card to={to?.()} title={`Open the ${count.done} lines done (${label}) in the Pipeline Register`} emphasis={emphasis}>
       <p className="text-sm font-semibold text-muted">{label}</p>
       <p className="font-display text-[2.25rem] leading-none font-bold text-ink tabular-nums">
         {count.total > 0 ? `${p}%` : "—"}
@@ -112,7 +149,13 @@ function Progress({ label, count, detail, emphasis = false }: { label: string; c
         <span className="block h-1.5 rounded-full bg-done" style={{ width: `${p}%` }} />
       </div>
       <p className="mt-1 text-sm text-muted tabular-nums">{count.done} of {count.total} · {detail}</p>
-    </div>
+      {to && pending > 0 && (
+        <Link to={to(true)} className="relative mt-1 inline-block text-sm font-semibold text-violet hover:underline"
+          title={`Open the ${pending} lines still pending (${label}) in the Pipeline Register${pendingNote ? `: ${pendingNote}` : ""}`}>
+          {pending} pending →
+        </Link>
+      )}
+    </Card>
   );
 }
 

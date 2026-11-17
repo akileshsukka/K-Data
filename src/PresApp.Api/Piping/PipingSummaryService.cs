@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using PresApp.Api.Hosting;
+using PresApp.Api.Reporting;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Rules;
@@ -22,12 +24,82 @@ public sealed record PipingSummary(int Lines, decimal LengthM, PipingCount Walkd
 /// and lines cleaned (Cleaned = Yes) against the scope.
 /// Grouped, each size group counts once, as the Summary of the grouped line list counts its rows: an activity is done
 /// when every line of the group has it, and a group whose lines have different Cleaning Required values is "Mixed" (not scope).
+/// Each card can also list its lines (<see cref="CardAsync"/>) for the Pipeline Register; the figure and the list use the same rule
+/// (<see cref="Cards"/>), so the register always shows exactly the number on the card.
 /// </summary>
 public sealed class PipingSummaryService(PresAppDbContext db)
 {
-    private sealed record Row(string Service, decimal? Length, bool Walkdown, bool Drained, bool Inspected, bool InspectionNa, string? Cleaning, bool InScope, bool Cleaned);
+    /// <param name="Ids">The lines of the row: one, or every line of the size group.</param>
+    private sealed record Row(IReadOnlyList<Guid> Ids, string Service, decimal? Length, bool Walkdown, bool Drained, bool Inspected, bool InspectionNa,
+        string? Cleaning, bool InScope, bool Cleaned);
+
+    /// <summary>
+    /// The rule of each card and of its "pending" link. The figures of <see cref="GetAsync"/> are counted with these same rules:
+    /// done + pending = the card's total (Inspected: lines without N/A; Cleaned: the cleaning scope).
+    /// </summary>
+    private static readonly Dictionary<string, (string Label, Func<Row, bool> Match)> Cards = new(StringComparer.Ordinal)
+    {
+        ["walkdown"] = ("Walkdown completed", r => r.Walkdown),
+        ["walkdown-pending"] = ("Walkdown pending", r => !r.Walkdown),
+        ["drained"] = ("Drained", r => r.Drained),
+        ["drained-pending"] = ("Drained pending", r => !r.Drained),
+        ["inspected"] = ("Inspected", r => r.Inspected),
+        ["inspected-pending"] = ("Inspection pending (N/A left out)", r => !r.Inspected && !r.InspectionNa),
+        ["scope"] = ("Cleaning scope", r => r.InScope),
+        ["cleaned"] = ("Cleaned", r => r.InScope && r.Cleaned),
+        ["cleaned-pending"] = ("Cleaning pending (in scope, not cleaned)", r => r.InScope && !r.Cleaned),
+    };
+
+    private static int Count(List<Row> rows, string card) => rows.Count(Cards[card].Match);
 
     public async Task<PipingSummary> GetAsync(int unitId, CancellationToken ct, bool grouped = false)
+    {
+        var (rows, sections, defs) = await RowsAsync(unitId, grouped, ct);
+        var codes = await LineCodeMeanings.LoadAsync(db, ct);
+
+        // Every value of the list, in its order, plus values still used but no longer in the list.
+        var listed = defs.TryGetValue(PipingFieldKeys.CleaningRequired, out var cr)
+            ? cr.OptionSet?.Values.Where(v => v.IsActive).OrderBy(v => v.SortOrder).Select(v => v.Value).ToList() ?? []
+            : [];
+        var used = rows.Where(r => r.Cleaning is not null).Select(r => r.Cleaning!).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(u => !listed.Contains(u, StringComparer.OrdinalIgnoreCase));
+        var cleaningRows = listed.Concat(used)
+            .Select(v => new CleaningScopeRow(v, rows.Count(r => string.Equals(r.Cleaning, v, StringComparison.OrdinalIgnoreCase)),
+                v != Excel.PipingLayout.Mixed && !Excel.PipingTemplate.NotScope(v)))
+            .ToList();
+        var scope = Count(rows, "scope");
+
+        return new PipingSummary(
+            rows.Count, rows.Sum(r => r.Length ?? 0),
+            new PipingCount(Count(rows, "walkdown"), rows.Count),
+            new PipingCount(Count(rows, "drained"), rows.Count),
+            new PipingCount(Count(rows, "inspected"), rows.Count(r => !r.InspectionNa)),
+            new PipingCount(Count(rows, "cleaned"), scope),
+            rows.Count(r => r.Cleaning is null),
+            cleaningRows,
+            rows.GroupBy(r => r.Service).OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => g.ToList())
+                .Select(g => new PipingServiceRow(g[0].Service, codes.Service(g[0].Service, unitId), g.Count, Count(g, "walkdown"), Count(g, "drained"),
+                    Count(g, "inspected"), Count(g, "scope"), Count(g, "cleaned"), g.Count(r => !r.InspectionNa)))
+                .ToList(),
+            grouped, sections);
+    }
+
+    /// <summary>
+    /// The lines behind one card (walkdown, drained, inspected, scope, cleaned) or its "-pending" link. Count is what the card counts
+    /// (groups when grouped); AssetIds are all the lines of those rows, so the grouped register shows exactly Count rows.
+    /// </summary>
+    public async Task<DashboardCardDto> CardAsync(int unitId, string card, bool grouped, CancellationToken ct)
+    {
+        var key = (card ?? "").Trim().ToLowerInvariant();
+        if (!Cards.TryGetValue(key, out var rule)) throw ApiProblem.NotFound("Piping figure not found.");
+        var (rows, _, _) = await RowsAsync(unitId, grouped, ct);
+        var matching = rows.Where(rule.Match).ToList();
+        return new DashboardCardDto("piping-" + key, rule.Label, matching.Count, matching.SelectMany(r => r.Ids).ToList());
+    }
+
+    /// <summary>The active lines of the unit as rows of the summary (one per line, or one per size group), the number of lines, and the piping fields.</summary>
+    private async Task<(List<Row> Rows, int Sections, Dictionary<string, FieldDefinition> Defs)> RowsAsync(int unitId, bool grouped, CancellationToken ct)
     {
         var lines = await db.Assets.AsNoTracking()
             .Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline)
@@ -41,12 +113,12 @@ public sealed class PipingSummaryService(PresAppDbContext db)
                 .Select(v => new { v.AssetId, v.FieldDefinitionId, v.ValueText }).ToListAsync(ct))
             .ToLookup(v => v.AssetId);
         string? Value(Guid asset, string key) => defs.TryGetValue(key, out var d) ? values[asset].FirstOrDefault(v => v.FieldDefinitionId == d.Id)?.ValueText : null;
-        var codes = await LineCodeMeanings.LoadAsync(db, ct);
 
         var perLine = lines.Select(l =>
         {
             var cleaning = Value(l.Id, PipingFieldKeys.CleaningRequired);
             return (l.Tag, Row: new Row(
+                [l.Id],
                 (l.Service ?? LineNumber.Parse(l.Tag)?.Service ?? "").ToUpperInvariant(),
                 l.Length,
                 AssetPreservation.IsCompleted(l.Walkdown),
@@ -57,35 +129,11 @@ public sealed class PipingSummaryService(PresAppDbContext db)
                 cleaning is not null && !Excel.PipingTemplate.NotScope(cleaning),
                 string.Equals(Value(l.Id, PipingFieldKeys.Cleaned), "Yes", StringComparison.OrdinalIgnoreCase)));
         }).ToList();
+        // Same group key as the register's grouped view (RegisterRow.Line.GroupKey), so a grouped card is the register's grouped rows.
         var rows = grouped
             ? perLine.Select((x, i) => (Key: LineNumber.GroupKey(x.Tag) ?? "#" + i, x.Row)).GroupBy(x => x.Key).Select(g => Merge(g.Select(x => x.Row).ToList())).ToList()
             : perLine.Select(x => x.Row).ToList();
-
-        // Every value of the list, in its order, plus values still used but no longer in the list.
-        var listed = defs.TryGetValue(PipingFieldKeys.CleaningRequired, out var cr)
-            ? cr.OptionSet?.Values.Where(v => v.IsActive).OrderBy(v => v.SortOrder).Select(v => v.Value).ToList() ?? []
-            : [];
-        var used = rows.Where(r => r.Cleaning is not null).Select(r => r.Cleaning!).Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(u => !listed.Contains(u, StringComparer.OrdinalIgnoreCase));
-        var cleaningRows = listed.Concat(used)
-            .Select(v => new CleaningScopeRow(v, rows.Count(r => string.Equals(r.Cleaning, v, StringComparison.OrdinalIgnoreCase)),
-                v != Excel.PipingLayout.Mixed && !Excel.PipingTemplate.NotScope(v)))
-            .ToList();
-        var scope = rows.Count(r => r.InScope);
-
-        return new PipingSummary(
-            rows.Count, rows.Sum(r => r.Length ?? 0),
-            new PipingCount(rows.Count(r => r.Walkdown), rows.Count),
-            new PipingCount(rows.Count(r => r.Drained), rows.Count),
-            new PipingCount(rows.Count(r => r.Inspected), rows.Count(r => !r.InspectionNa)),
-            new PipingCount(rows.Count(r => r.Cleaned && r.InScope), scope),
-            rows.Count(r => r.Cleaning is null),
-            cleaningRows,
-            rows.GroupBy(r => r.Service).OrderBy(g => g.Key, StringComparer.Ordinal)
-                .Select(g => new PipingServiceRow(g.Key, codes.Service(g.Key, unitId), g.Count(), g.Count(r => r.Walkdown), g.Count(r => r.Drained),
-                    g.Count(r => r.Inspected), g.Count(r => r.InScope), g.Count(r => r.Cleaned && r.InScope), g.Count(r => !r.InspectionNa)))
-                .ToList(),
-            grouped, perLine.Count);
+        return (rows, perLine.Count, defs);
     }
 
     /// <summary>One row for a size group: done when all its lines are; one Cleaning Required value, or Mixed.</summary>
@@ -94,7 +142,7 @@ public sealed class PipingSummaryService(PresAppDbContext db)
         if (g.Count == 1) return g[0];
         var cleaning = g.All(r => string.Equals(r.Cleaning ?? "", g[0].Cleaning ?? "", StringComparison.OrdinalIgnoreCase)) ? g[0].Cleaning : Excel.PipingLayout.Mixed;
         var inScope = cleaning is not null && cleaning != Excel.PipingLayout.Mixed && !Excel.PipingTemplate.NotScope(cleaning);
-        return new Row(g[0].Service, g.Any(r => r.Length is not null) ? g.Sum(r => r.Length ?? 0) : null,
+        return new Row(g.SelectMany(r => r.Ids).ToList(), g[0].Service, g.Any(r => r.Length is not null) ? g.Sum(r => r.Length ?? 0) : null,
             g.All(r => r.Walkdown), g.All(r => r.Drained), g.All(r => r.Inspected), g.All(r => r.InspectionNa), cleaning, inScope, g.All(r => r.Cleaned));
     }
 }
