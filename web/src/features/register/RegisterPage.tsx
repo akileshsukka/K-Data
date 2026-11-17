@@ -7,6 +7,7 @@ import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { SelectInput, TextInput } from "../../components/Field";
+import { MultiSelect, type MultiOption } from "../../components/MultiSelect";
 import { CurrentGateChip, GateStatus, gatePrefix, gateText } from "../../components/GateStatus";
 import { PageHeader } from "../../components/PageHeader";
 import { TagListFilter, tagKey, tagList } from "../../components/TagListFilter";
@@ -31,54 +32,75 @@ const titles: Record<AssetType, string> = {
   Pipeline: "Pipeline Register",
 };
 
+/**
+ * Filters of a register. Different filters all apply (AND). In a filter with several values ticked (string[]), a row matches
+ * any of them (OR); nothing ticked = any.
+ */
 interface Filters {
   text: string;
-  discipline: string;
-  currentGate: string;
+  discipline: string[];
+  currentGate: string[];
   /** Gates to check (1–8). Several gates = all of them must match (AND). */
   gates: number[];
-  gateStatus: string;
-  actionBy: string;
-  emWalkdown: string;
-  ready: string;
+  /** Statuses: a gate matches when it has one of them ("(empty)" = no status). */
+  gateStatus: string[];
+  actionBy: string[];
+  emWalkdown: string[];
+  ready: string[];
+  /** Two values only (drained or not): ticking both would be "any", so it stays a single choice. */
   drained: string;
-  inspection: string;
-  cleaning: string;
-  activity: string;
-  /** Gate documentation: "pending" (some still pending) or "ready" (has documents, none pending). */
+  inspection: string[];
+  cleaning: string[];
+  activity: string[];
+  /** Gate documentation: "pending" (some still pending) or "ready" (has documents, none pending). One or the other. */
   docs: string;
   /** E&I register: "missing" = Electrical items with E7 Completed but no complete IR / winding test sheet. */
   e7: string;
   inactive: boolean;
-  group: string;
+  group: string[];
   /** Internal control of lines (lines.nonStandard): "nonstandard" or "standard" line numbers. */
   numberCheck: string;
-  /** Dashboard figure the register was opened from (tags, preserved, ready, hold, na, available, category-{id}). */
+  /** Dashboard figure the register was opened from (tags, preserved, ready, hold, na, available, category-{id}, piping-…). */
   card: string;
   /** Tags pasted from Excel (lower case, comma separated): only those rows are shown. */
   tags: string;
 }
 
-const empty: Filters = { text: "", discipline: "", currentGate: "", gates: [], gateStatus: "", actionBy: "", emWalkdown: "", ready: "", drained: "", inspection: "", cleaning: "", activity: "", numberCheck: "", docs: "", e7: "", inactive: false, group: "", card: "", tags: "" };
+/** The filters where several values can be ticked. */
+type ListKey = { [K in keyof Filters]: Filters[K] extends string[] ? K : never }[keyof Filters];
+const listKeys: ListKey[] = ["discipline", "currentGate", "gateStatus", "actionBy", "emWalkdown", "ready", "inspection", "cleaning", "activity", "group"];
 
-/** Name of each filter in the page address (?status=Ongoing&gates=1,2…). */
+const empty: Filters = {
+  text: "", discipline: [], currentGate: [], gates: [], gateStatus: [], actionBy: [], emWalkdown: [], ready: [], drained: "", inspection: [],
+  cleaning: [], activity: [], numberCheck: "", docs: "", e7: "", inactive: false, group: [], card: "", tags: "",
+};
+
+/** Name of each filter in the page address (?status=Ongoing&status=Hold&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
   numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags",
 };
 
-/** Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were. */
+/**
+ * Filters live in the page address, so Back (e.g. after opening an equipment) brings them back as they were.
+ * A filter with several values repeats its name (?cleaning=TBC&cleaning=Hydromilling): values may contain commas, and links with
+ * one value (older links, dashboard links) read the same as before.
+ */
 function readFilters(sp: URLSearchParams): Filters {
-  const f: Filters = { ...empty, gates: [] };
+  const f: Filters = { ...empty };
   for (const key of Object.keys(param) as (keyof Filters)[]) {
+    if ((listKeys as string[]).includes(key)) {
+      f[key as ListKey] = [...new Set(sp.getAll(param[key]).filter(Boolean))];
+      continue;
+    }
     const v = sp.get(param[key]);
     if (v === null) continue;
     if (key === "gates") f.gates = v.split(",").map(Number).filter((g) => g >= 1 && g <= 8);
-    else if (key === "inactive") f[key] = v === "1";
+    else if (key === "inactive") f.inactive = v === "1";
     // "docs=1" was the old "Documentation pending" checkbox: older links keep working.
     else if (key === "docs") f.docs = v === "1" ? "pending" : v === "pending" || v === "ready" ? v : "";
-    else f[key] = v;
+    else (f as unknown as Record<string, string>)[key] = v;
   }
   return f;
 }
@@ -87,12 +109,16 @@ function writeFilters(f: Filters): URLSearchParams {
   const sp = new URLSearchParams();
   for (const key of Object.keys(param) as (keyof Filters)[]) {
     const v = f[key];
-    if (Array.isArray(v)) { if (v.length) sp.set(param[key], v.join(",")); }
+    if (key === "gates") { if (f.gates.length) sp.set(param[key], f.gates.join(",")); }
+    else if (Array.isArray(v)) { for (const x of v) sp.append(param[key], String(x)); }
     else if (typeof v === "boolean") { if (v) sp.set(param[key], "1"); }
     else if (v) sp.set(param[key], v);
   }
   return sp;
 }
+
+/** A filter with several values: nothing ticked = any row; otherwise the row must match one of them. */
+const anyOf = (values: string[], match: (value: string) => boolean) => values.length === 0 || values.some(match);
 
 /** Last filters of each register (per unit and type) for this browser tab, restored when the register is opened again from the menu. */
 const memoryKey = (unitId: number, type: AssetType) => `kdata.register.${unitId}.${type}`;
@@ -219,22 +245,22 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
       all.filter(
         (r) =>
           (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service, unitId) ?? ""}`.toLowerCase().includes(text)) &&
-          (!f.discipline || r.discipline === f.discipline) &&
-          (!f.currentGate || r.currentGate === f.currentGate) &&
+          anyOf(f.discipline, (v) => r.discipline === v) &&
+          anyOf(f.currentGate, (v) => r.currentGate === v) &&
           gateMatch(r, f.gates, f.gateStatus, gateCount) &&
-          (!f.actionBy || r.actionBy === f.actionBy) &&
-          (!f.emWalkdown || (f.emWalkdown === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === f.emWalkdown.toLowerCase())) &&
-          (!f.ready || (f.ready === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === f.ready.toLowerCase())) &&
+          anyOf(f.actionBy, (v) => r.actionBy === v) &&
+          anyOf(f.emWalkdown, (v) => (v === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === v.toLowerCase())) &&
+          anyOf(f.ready, (v) => (v === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === v.toLowerCase())) &&
           (!f.drained || (f.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
-          (!f.inspection || ({ Yes: "done", No: "missing", NA: "na" } as Record<string, string>)[f.inspection] === yesTick(r.custom?.[PipingFieldKeys.inspectionDone])) &&
-          (!f.cleaning || (f.cleaning === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === f.cleaning)) &&
-          (!f.activity || (f.activity === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(f.activity))) &&
+          anyOf(f.inspection, (v) => ({ Yes: "done", No: "missing", NA: "na" } as Record<string, string>)[v] === yesTick(r.custom?.[PipingFieldKeys.inspectionDone])) &&
+          anyOf(f.cleaning, (v) => (v === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === v)) &&
+          anyOf(f.activity, (v) => (v === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(v))) &&
           (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
           docsMatch(r, f.docs, f.gates, gateCount) &&
           (!f.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
           (!f.card || !!cardIds?.has(r.id)) &&
           (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
-          (!f.group || (f.group === "(none)" ? !r.groups?.length : !!r.groups?.includes(f.group))),
+          anyOf(f.group, (v) => (v === "(none)" ? !r.groups?.length : !!r.groups?.includes(v))),
       ),
     [all, text, f, gateCount, codes, cardIds, tagSet, type],
   );
@@ -396,16 +422,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
         ? "lg:grid-cols-3 2xl:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(21rem,2fr)_minmax(8rem,1fr)]"
         : "lg:grid-cols-[minmax(14rem,2fr)_repeat(2,minmax(8rem,1fr))_minmax(19rem,1.6fr)_minmax(8rem,1fr)]"}`}>
         <TextInput type="search" placeholder={lines ? "Search line number, ID, spec, P&ID, service or remarks" : "Search tag, ID, description or remarks"} value={f.text} onChange={(e) => set("text", e.target.value)} aria-label="Search" className="mt-0" />
-        <SelectInput value={f.discipline} onChange={(e) => set("discipline", e.target.value)} aria-label="Discipline" className="mt-0">
-          <option value="">All disciplines</option>
-          {distinct((r) => r.discipline).map((d) => <option key={d}>{d}</option>)}
-        </SelectInput>
-        <SelectInput value={f.currentGate} onChange={(e) => set("currentGate", e.target.value)} aria-label="Current Gate" className="mt-0">
-          <option value="">Any Current Gate</option>
-          {distinct((r) => r.currentGate).map((d) => <option key={d} value={d}>{gateText(d, type)}</option>)}
-        </SelectInput>
+        <MultiSelect label="Discipline" anyLabel="All disciplines" prefix="Discipline" value={f.discipline} onChange={(v) => set("discipline", v)}
+          options={distinct((r) => r.discipline).map((d) => ({ value: d }))} />
+        <MultiSelect label="Current Gate" anyLabel="Any Current Gate" prefix="Current Gate" value={f.currentGate} onChange={(v) => set("currentGate", v)}
+          options={distinct((r) => r.currentGate).map((d) => ({ value: d, label: gateText(d, type) }))} />
         <div className={`flex min-w-0 flex-wrap gap-2 ${gateCount > 4 ? "sm:col-span-2 2xl:col-span-1" : ""}`}>
-          <div role="group" aria-label="Gates (several = all must match)" title="Choose one or more gates. With several, every chosen gate must have the status." className="inline-flex shrink-0 overflow-hidden rounded-md border border-line">
+          <div role="group" aria-label="Gates (several = all must match)" title="Choose one or more gates. With several, every chosen gate must have one of the chosen statuses." className="inline-flex shrink-0 overflow-hidden rounded-md border border-line">
             {Array.from({ length: gateCount }, (_, i) => i + 1).map((g) => (
               <button
                 key={g}
@@ -418,41 +440,29 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
               </button>
             ))}
           </div>
-          <SelectInput value={f.gateStatus} onChange={(e) => set("gateStatus", e.target.value)} aria-label="Gate status" className="mt-0 min-w-[8rem] flex-1">
-            <option value="">Any status</option>
-            {["Completed", "Ongoing", "Hold", "Not Applicable", "(empty)"].map((s) => <option key={s}>{s}</option>)}
-          </SelectInput>
+          <MultiSelect label="Gate status" anyLabel="Any status" prefix="Status" value={f.gateStatus} onChange={(v) => set("gateStatus", v)} className="min-w-[8rem] flex-1"
+            title={f.gates.length > 0 ? "Each chosen gate must have one of the ticked statuses." : "Any shown gate has one of the ticked statuses."}
+            options={["Completed", "Ongoing", "Hold", "Not Applicable"].map((s): MultiOption => ({ value: s })).concat({ value: "(empty)", label: "Empty" })} />
         </div>
-        <SelectInput value={f.actionBy} onChange={(e) => set("actionBy", e.target.value)} aria-label="Action By" className="mt-0">
-          <option value="">Any Action By</option>
-          {distinct((r) => r.actionBy).map((d) => <option key={d}>{d}</option>)}
-        </SelectInput>
+        <MultiSelect label="Action By" anyLabel="Any Action By" prefix="Action By" value={f.actionBy} onChange={(v) => set("actionBy", v)}
+          options={distinct((r) => r.actionBy).map((d) => ({ value: d }))} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-[15px]">
         {groupCodes.length > 0 && (
           <div className="w-full sm:w-52">
-            <SelectInput value={f.group} onChange={(e) => set("group", e.target.value)} aria-label="Workpack or group" className="mt-0">
-              <option value="">Any workpack</option>
-              {groupCodes.map((c) => <option key={c}>{c}</option>)}
-              <option value="(none)">Not in a group</option>
-            </SelectInput>
+            <MultiSelect label="Workpack or group" anyLabel="Any workpack" prefix="Workpack" value={f.group} onChange={(v) => set("group", v)}
+              options={[...groupCodes.map((c) => ({ value: c })), { value: "(none)", label: "Not in a group" }]} />
           </div>
         )}
         <div className="w-full sm:w-52">
-            <SelectInput value={f.emWalkdown} onChange={(e) => set("emWalkdown", e.target.value)} aria-label="EM Walkdown" className="mt-0">
-              <option value="">Any EM Walkdown</option>
-              {[...walkdownStatuses, ...distinct((r) => r.emWalkdown).filter((v) => !walkdownStatuses.some((s) => s.toLowerCase() === v.toLowerCase()))].map((s) => <option key={s} value={s}>EM Walkdown: {s}</option>)}
-              <option value="(not set)">EM Walkdown: not set</option>
-            </SelectInput>
-          </div>
+          <MultiSelect label="EM Walkdown" anyLabel="Any EM Walkdown" prefix="EM Walkdown" value={f.emWalkdown} onChange={(v) => set("emWalkdown", v)}
+            options={[...walkdownStatuses, ...distinct((r) => r.emWalkdown).filter((v) => !walkdownStatuses.some((s) => s.toLowerCase() === v.toLowerCase()))]
+              .map((s): MultiOption => ({ value: s })).concat({ value: "(not set)", label: "Not set" })} />
+        </div>
         {!lines && (
           <div className="w-full sm:w-60">
-            <SelectInput value={f.ready} onChange={(e) => set("ready", e.target.value)} aria-label="Ready For Preservation" className="mt-0">
-              <option value="">Any Ready for preservation</option>
-              <option value="Yes">Ready for preservation: Yes</option>
-              <option value="No">Ready for preservation: No</option>
-              <option value="(not set)">Ready for preservation: not set</option>
-            </SelectInput>
+            <MultiSelect label="Ready For Preservation" anyLabel="Any Ready for preservation" prefix="Ready" value={f.ready} onChange={(v) => set("ready", v)}
+              options={[{ value: "Yes" }, { value: "No" }, { value: "(not set)", label: "Not set" }]} />
           </div>
         )}
         {lines && (
@@ -465,26 +475,17 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
               </SelectInput>
             </div>
             <div className="w-full sm:w-48">
-              <SelectInput value={f.inspection} onChange={(e) => set("inspection", e.target.value)} aria-label="Inspection Done" className="mt-0">
-                <option value="">Any inspection</option>
-                <option value="Yes">Inspection done</option>
-                <option value="No">Inspection not done</option>
-                <option value="NA">Inspection N/A</option>
-              </SelectInput>
+              <MultiSelect label="Inspection Done" anyLabel="Any inspection" prefix="Inspection" value={f.inspection} onChange={(v) => set("inspection", v)}
+                options={[{ value: "Yes", label: "Done" }, { value: "No", label: "Not done" }, { value: "NA", label: "N/A" }]} />
             </div>
             <div className="w-full sm:w-52">
-              <SelectInput value={f.cleaning} onChange={(e) => set("cleaning", e.target.value)} aria-label="Cleaning Required" className="mt-0">
-                <option value="">Any cleaning</option>
-                {distinct((r) => r.custom?.[PipingFieldKeys.cleaningRequired] ?? null).map((v) => <option key={v} value={v}>Cleaning: {v}</option>)}
-                <option value="(not set)">Cleaning: not set</option>
-              </SelectInput>
+              <MultiSelect label="Cleaning Required" anyLabel="Any cleaning" prefix="Cleaning" value={f.cleaning} onChange={(v) => set("cleaning", v)}
+                options={distinct((r) => r.custom?.[PipingFieldKeys.cleaningRequired] ?? null).map((v): MultiOption => ({ value: v })).concat({ value: "(not set)", label: "Not set" })} />
             </div>
             <div className="w-full sm:w-60">
-              <SelectInput value={f.activity} onChange={(e) => set("activity", e.target.value)} aria-label="Current Activity" className="mt-0">
-                <option value="">Any activity</option>
-                {[...new Set(all.flatMap((r) => (r.currentActivity ?? "").split("\n").filter(Boolean)))].sort().map((v) => <option key={v} value={v}>{v}</option>)}
-                <option value="(none)">No activity</option>
-              </SelectInput>
+              <MultiSelect label="Current Activity" anyLabel="Any activity" prefix="Activity" value={f.activity} onChange={(v) => set("activity", v)}
+                options={[...new Set(all.flatMap((r) => (r.currentActivity ?? "").split("\n").filter(Boolean)))].sort().map((v): MultiOption => ({ value: v }))
+                  .concat({ value: "(none)", label: "No activity" })} />
             </div>
             {seesNumberCheck && (
               <div className="w-full sm:w-60">
@@ -777,10 +778,11 @@ function GateDocMark({ status, label }: { status: GateDocStatus | null | undefin
   return <span role="img" aria-label={text} title={text} className={`shrink-0 text-[13px] leading-none font-bold ${status === "Received" ? "text-done" : "text-na"}`}>{status === "Received" ? "✓" : "–"}</span>;
 }
 
-export function gateMatch(r: RegisterRow, gates: number[], status: string, gateCount: number) {
+export function gateMatch(r: RegisterRow, gates: number[], statuses: string[], gateCount: number) {
   const chosen = gates.filter((g) => g <= gateCount);
-  if (chosen.length === 0 && !status) return true;
-  const test = (v: string | null | undefined) => (!status ? !!v : status === "(empty)" ? !v : v === status);
+  if (chosen.length === 0 && statuses.length === 0) return true;
+  // A gate matches when it has one of the statuses ticked ("(empty)" = no status); with none ticked, when it is filled in.
+  const test = (v: string | null | undefined) => (statuses.length === 0 ? !!v : statuses.some((s) => (s === "(empty)" ? !v : v === s)));
   if (chosen.length === 0) return r.gates.slice(0, gateCount).some(test);
   return chosen.every((g) => test(r.gates[g - 1]));
 }
