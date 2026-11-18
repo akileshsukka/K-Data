@@ -90,7 +90,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
             {
                 var mine = versions.Where(v => v.PlantId == plant.Id && v.Kind == kind).ToList();
                 var active = mine.FirstOrDefault(v => v.IsActive);
-                var (name, content) = active is null ? BuiltIn(kind, plant.Name) : (active.FileName, active.Content);
+                var (name, content) = active is null ? BuiltIn(kind) : (active.FileName, active.Content);
                 result.Add(new GateFormTemplateSlotDto(plant.Id, plant.Name, kind.ToString(), string.Join(", ", plant.Units), active is null, name,
                     GateFormDocument.Inspect(content).Fields, mine.Select(ToDto).ToList()));
             }
@@ -294,22 +294,21 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
 
     private async Task<(bool IsBuiltIn, string FileName, byte[] Content)> TemplateAsync(int plantId, GateFormKind kind, int? versionId, CancellationToken ct)
     {
-        var plant = await db.Plants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == plantId, ct) ?? throw ApiProblem.NotFound("Plant");
+        if (!await db.Plants.AnyAsync(p => p.Id == plantId, ct)) throw ApiProblem.NotFound("Plant");
         var query = db.GateFormTemplates.AsNoTracking().Where(t => t.PlantId == plantId && t.Kind == kind);
         var t = versionId is { } v
             ? await query.FirstOrDefaultAsync(x => x.Id == v, ct) ?? throw ApiProblem.NotFound("Template version")
             : await query.FirstOrDefaultAsync(x => x.IsActive, ct);
         if (t is not null) return (false, t.FileName, t.Content);
-        var (name, content) = BuiltIn(kind, plant.Name);
+        var (name, content) = BuiltIn(kind);
         return (true, name, content);
     }
 
     /// <summary>Built-in template: the client's forms of Nov 2026 with markers in place of the blanks.</summary>
-    internal static (string FileName, byte[] Content) BuiltIn(GateFormKind kind, string plantName)
+    internal static (string FileName, byte[] Content) BuiltIn(GateFormKind kind)
     {
-        var resource = kind == GateFormKind.Electrical ? "GateForm_Electrical.docx"
-            : string.Equals(plantName, GateFormDefaults.UnitIdLayoutPlant, StringComparison.OrdinalIgnoreCase) ? "GateForm_UnitId.docx"
-            : "GateForm_WorkPack.docx";
+        // Every plant (unit 541 of Habshan 5 included) uses the work pack layout; {{UNIT_ID}} is only in uploaded templates.
+        var resource = kind == GateFormKind.Electrical ? "GateForm_Electrical.docx" : "GateForm_WorkPack.docx";
         var content = BuiltInCache.GetOrAdd(resource, r =>
         {
             using var stream = typeof(GateFormService).Assembly.GetManifestResourceStream(r) ?? throw new InvalidOperationException($"Missing resource {r}.");

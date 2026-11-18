@@ -25,16 +25,15 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     }
 
     [Theory]
-    [InlineData(GateFormKind.Mechanical, "Habshan - 0", "GateForm_WorkPack.docx", "WORKPACK")]
-    [InlineData(GateFormKind.Mechanical, "Habshan - 5", "GateForm_UnitId.docx", "UNIT_ID")]
-    [InlineData(GateFormKind.Electrical, "Habshan - 5", "GateForm_Electrical.docx", "WORKPACK")]
-    public void Built_in_templates_hold_every_field_of_the_client_form(GateFormKind kind, string plant, string resource, string fourthField)
+    [InlineData(GateFormKind.Mechanical, "GateForm_WorkPack.docx")]
+    [InlineData(GateFormKind.Electrical, "GateForm_Electrical.docx")]
+    public void Built_in_templates_hold_every_field_of_the_client_form(GateFormKind kind, string resource)
     {
-        var (name, content) = GateFormService.BuiltIn(kind, plant);
+        var (name, content) = GateFormService.BuiltIn(kind);
         Assert.Equal(resource, name);
         var check = GateFormDocument.Inspect(content);
         Assert.Empty(check.Errors);
-        Assert.Equal(["UNIT", "SOURCE", "RECORD_NO", "DATE", "SECTION", fourthField], check.Fields);
+        Assert.Equal(["UNIT", "SOURCE", "RECORD_NO", "DATE", "SECTION", "WORKPACK"], check.Fields);
     }
 
     [Fact]
@@ -87,18 +86,24 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task Unit_541_prints_its_unit_id_and_source()
+    public async Task Unit_541_prints_the_work_pack_like_every_other_unit_and_its_source()
     {
         var unitId = await UnitAsync("Unit 541");
-        var pump = await CreateAsync(unitId, "Equipment", "Static", "541-P-901");
-        var doc = await GenerateAsync(admin, unitId, "Mechanical", new { assetId = pump, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+        var line = await CreateAsync(unitId, "Pipeline", "Piping", "541-0901-HC-4\"-77010-P", pid: "541-00-30-201");
+
+        var prepared = await PrepareAsync(admin, unitId, "Mechanical", line);
+        var fields = prepared.GetProperty("fields").EnumerateArray().Select(f => f.GetString()).ToList();
+        Assert.Contains("WORKPACK", fields);
+        Assert.DoesNotContain("UNIT_ID", fields);
+
+        var doc = await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
 
         Assert.Single(doc.Pages);
         Assert.Contains("UNIT 541 PRESERVATION", doc.Header);
         Assert.Contains("DOD-52618-H5-541-69-00-156 Rev 01", doc.Pages[0]);
-        Assert.Contains("Unit ID 541", doc.Pages[0]);
-        Assert.Contains("System / circuit / section 541-P-901", doc.Pages[0]);
-        Assert.DoesNotContain("Work pack", doc.Pages[0]);
+        Assert.Contains("System / circuit / section 541-0901-HC-4\"-77010-P", doc.Pages[0]);
+        Assert.Contains("Work pack / P&ID rev. 541-00-30-201", doc.Pages[0]);
+        Assert.DoesNotContain("Unit ID", doc.Pages[0]);
     }
 
     [Fact]
@@ -148,7 +153,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     {
         var unitId = await UnitAsync("Unit 32");
         var plantId = await app.WithDbAsync(db => db.Units.Where(u => u.Id == unitId).Select(u => u.PlantId).FirstAsync());
-        var (_, builtIn) = GateFormService.BuiltIn(GateFormKind.Mechanical, "Habshan - 0");
+        var (_, builtIn) = GateFormService.BuiltIn(GateFormKind.Mechanical);
 
         // Word split the marker in two pieces and the client changed the revision: still a valid template.
         var revised = Edit(builtIn, body =>
@@ -193,7 +198,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     public async Task Templates_with_wrong_markers_are_refused()
     {
         var plantId = await app.WithDbAsync(db => db.Plants.Where(p => p.Name == "Habshan - 0").Select(p => p.Id).FirstAsync());
-        var (_, builtIn) = GateFormService.BuiltIn(GateFormKind.Mechanical, "Habshan - 0");
+        var (_, builtIn) = GateFormService.BuiltIn(GateFormKind.Mechanical);
 
         var unknown = Edit(builtIn, body => body.Descendants<Text>().First(t => t.Text == "Date {{DATE}}").Text = "Date {{FECHA}}");
         Assert.Contains("{{FECHA}} is not a known field", await ErrorAsync(await UploadAsync(plantId, unknown, "a.docx")));

@@ -121,7 +121,7 @@ Printable section acceptance gate forms, one page per selected asset: select row
 - Each row starts from what was saved for the asset; System / circuit / section is the tag (line number for lines), Work pack / P&ID rev. the P&ID number of a line, Unit ID the unit's default. Record No. and date can be set for all rows at once or row by row. Dates print as 25/11/2026; an empty field prints the blank line of the form.
 - Generating saves the values with the assets (roles with `assets.edit`; they show in the asset history). Downloading needs `excel.export`.
 - **Admin → Gate forms**: source document of each unit (mechanical and electrical), default Unit ID, and the Word template of each plant and form. A unit without a source prints its forms with the source empty after a warning.
-- Templates are the client forms with markers: `{{UNIT}}`, `{{SOURCE}}` (the only ones allowed in headers/footers), `{{RECORD_NO}}`, `{{DATE}}`, `{{SECTION}}` (required), `{{WORKPACK}}`, `{{UNIT_ID}}`. An upload is checked and kept as a version; download its sample, then activate it. Without an active version the built-in template is used (`src/PresApp.Api/GateForms/Resources`: work pack layout for Habshan 0, Unit ID layout for Habshan 5, electrical form for all).
+- Templates are the client forms with markers: `{{UNIT}}`, `{{SOURCE}}` (the only ones allowed in headers/footers), `{{RECORD_NO}}`, `{{DATE}}`, `{{SECTION}}` (required), `{{WORKPACK}}`, `{{UNIT_ID}}`. An upload is checked and kept as a version; download its sample, then activate it. Without an active version the built-in template is used (`src/PresApp.Api/GateForms/Resources`: work pack layout for the mechanical form of every plant, electrical form for all).
 
 ## Server installation (once)
 

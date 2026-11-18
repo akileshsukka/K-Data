@@ -34,12 +34,6 @@ public class GateFormTemplate
 /// <summary>Starting values, taken from the client forms of Nov 2026. An admin changes them in Admin → Gate forms.</summary>
 public static class GateFormDefaults
 {
-    /// <summary>
-    /// Plant whose built-in mechanical form has the "Unit ID" field instead of "Work pack / P&amp;ID rev." (Habshan 5, unit 541).
-    /// Every other plant, and the electrical form everywhere, starts from the work pack layout.
-    /// </summary>
-    public const string UnitIdLayoutPlant = "Habshan - 5";
-
     /// <summary>Unit settings created once when the unit has none (an admin's later changes, emptying included, are kept).</summary>
     public static readonly (int UnitNumber, string? MechanicalSource, string? DefaultUnitId)[] Units =
     [
