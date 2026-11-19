@@ -241,6 +241,78 @@ public sealed class AssetSplitTests : IClassFixture<TestApp>
         Assert.DoesNotContain(changes, c => c.GetProperty("outcome").GetString() == "Created");
     }
 
+    private async Task<(Guid A, Guid B)> CreateSplitAsync(string tag, string tagA, string tagB)
+    {
+        var id = await CreateAsync(tag);
+        var preview = await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{id}/split");
+        var response = await admin.PostAsJsonAsync($"/api/assets/{id}/split", new
+        {
+            stamp = preview.GetProperty("stamp").GetString(),
+            parts = new object[] { new { tag = tagA, gates = Gates(preview) }, new { tag = tagB, gates = Gates(preview) } },
+            readings = Array.Empty<object>(),
+        });
+        response.EnsureSuccessStatusCode();
+        return (id, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("parts")[1].GetProperty("id").GetGuid());
+    }
+
+    private static List<(string? Tag, string? Field, string? Outcome, string? Reason)> Changes(JsonElement preview) =>
+        preview.GetProperty("changes").EnumerateArray()
+            .Select(c => (c.GetProperty("assetTag").GetString(), c.GetProperty("field").GetString(), c.GetProperty("outcome").GetString(), c.GetProperty("reason").GetString()))
+            .ToList();
+
+    [Fact]
+    public async Task A_readings_file_with_the_client_tag_says_which_parts_to_use()
+    {
+        await CreateSplitAsync("32-P-701A/B", "32-P-701A", "32-P-701B");
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 32").Select(u => u.Id).FirstAsync());
+        var template = await (await admin.GetAsync($"/api/units/{unitId}/monitoring/readings-template")).Content.ReadAsByteArrayAsync();
+        var yesterday = DateTime.UtcNow.AddHours(4).Date.AddDays(-1);
+        var file = TestWorkbooks.Edit(template, wb =>
+        {
+            var ws = wb.Worksheet(1);
+            ws.Cell(5, 1).Value = "32-P-701A/B"; ws.Cell(5, 2).Value = yesterday; ws.Cell(5, 3).Value = 0.5;
+            ws.Cell(6, 1).Value = "32-P-701B"; ws.Cell(6, 2).Value = yesterday; ws.Cell(6, 3).Value = 0.6;
+        });
+        var response = await admin.PostAsync($"/api/units/{unitId}/monitoring/readings-import", File(file, "readings.xlsx"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var changes = Changes(await response.Content.ReadFromJsonAsync<JsonElement>());
+
+        var grouped = Assert.Single(changes, c => c.Tag == "32-P-701A/B");
+        Assert.Equal("Rejected", grouped.Outcome);
+        Assert.Contains("was split into 32-P-701A", grouped.Reason);
+        Assert.Contains("(32-P-701A or 32-P-701B)", grouped.Reason);
+        Assert.Contains(changes, c => c is { Tag: "32-P-701B", Outcome: "Applied" });
+    }
+
+    [Fact]
+    public async Task An_E7_sheet_with_the_client_tag_says_which_parts_to_use()
+    {
+        var (a, _) = await CreateSplitAsync("32-PM-702A/B", "32-PM-702A", "32-PM-702B");
+        (await admin.PutAsJsonAsync($"/api/assets/{a}/electrical-test", new { required = true, testedOn = (string?)null, values = new Dictionary<string, decimal?>(), expected = (DateTime?)null })).EnsureSuccessStatusCode();
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 32").Select(u => u.Id).FirstAsync());
+        var sheet = await (await admin.GetAsync($"/api/units/{unitId}/electrical-tests/export")).Content.ReadAsByteArrayAsync();
+        var edited = TestWorkbooks.Edit(sheet, wb =>
+        {
+            var ws = wb.Worksheet(1);
+            Assert.Equal("32-PM-702A", ws.Cell("A4").GetString());
+            ws.Cell("A4").Value = "32-PM-702A/B";
+            ws.Cell("C4").Value = 0.3;
+        });
+        var response = await admin.PostAsync($"/api/units/{unitId}/electrical-tests/import", File(edited, "e7.xlsx"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var row = Assert.Single(Changes(await response.Content.ReadFromJsonAsync<JsonElement>()), c => c.Tag == "32-PM-702A/B");
+        Assert.Equal("Rejected", row.Outcome);
+        Assert.Contains("was split into 32-PM-702A", row.Reason);
+    }
+
+    [Fact]
+    public async Task Searching_the_client_tag_finds_every_part()
+    {
+        var (a, b) = await CreateSplitAsync("32-P-703A/B", "32-P-703A", "32-P-703B");
+        var hits = await admin.GetFromJsonAsync<JsonElement>($"/api/assets/search?q={Uri.EscapeDataString("32-P-703A/B")}");
+        Assert.Equal(new[] { a, b }.Order(), hits.EnumerateArray().Select(h => h.GetProperty("id").GetGuid()).Order());
+    }
+
     private static MultipartFormDataContent File(byte[] bytes, string name)
     {
         var file = new ByteArrayContent(bytes);

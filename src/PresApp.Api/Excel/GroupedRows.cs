@@ -31,6 +31,19 @@ public static class GroupedRows
             .Select(g => (IReadOnlyList<Asset>)g.Select(x => x.Asset).ToList())
             .ToList();
 
+    /// <summary>
+    /// Why a row of a file that is read per asset (readings, E7 test) with a split client tag is not loaded: the value
+    /// belongs to one part, and the file does not say which one.
+    /// </summary>
+    public static string SplitTagReason(string clientTag, IEnumerable<(string? Tag, string Code)> parts, string what)
+    {
+        var list = parts.OrderBy(p => p.Tag ?? p.Code, NaturalComparer.Instance).ToList();
+        var tags = list.Select(p => p.Tag ?? p.Code).ToList();
+        var or = tags.Count <= 1 ? tags.FirstOrDefault() ?? clientTag : $"{string.Join(", ", tags.SkipLast(1))} or {tags[^1]}";
+        return $"{clientTag} was split into {string.Join(", ", list.Select(p => $"{p.Tag ?? p.Code} ({p.Code})"))}: {what} belong to one of them. "
+             + $"Not loaded: write the row with the tag of its part ({or}).";
+    }
+
     /// <summary>The tag of the row: the client tag of a split item, otherwise the asset's tag.</summary>
     public static string? RowTag(IReadOnlyList<Asset> row) => row[0].ClientTag ?? row[0].Tag;
 

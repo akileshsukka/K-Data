@@ -134,18 +134,21 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
         // LIKE is case-insensitive on both SQL Server (CI collation) and SQLite (tests).
         var pattern = "%" + term.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
         var query = db.Assets.AsNoTracking()
-            .Where(a => EF.Functions.Like(a.Code, pattern) || EF.Functions.Like(a.Tag!, pattern) || EF.Functions.Like(a.Description!, pattern));
+            .Where(a => EF.Functions.Like(a.Code, pattern) || EF.Functions.Like(a.Tag!, pattern) || EF.Functions.Like(a.Description!, pattern)
+                        // The client tag of a split item (P-101A/B) finds all its parts.
+                        || EF.Functions.Like(a.ClientTag!, pattern));
         if (unitId is not null) query = query.Where(a => a.UnitId == unitId);
         if (type is not null) query = query.Where(a => a.Type == type);
 
         var hits = await query
-            .Select(a => new { a.Id, a.Code, a.Tag, a.Description, Unit = a.Unit.Name, a.Type, a.IsActive })
+            .Select(a => new { a.Id, a.Code, a.Tag, a.ClientTag, a.Description, Unit = a.Unit.Name, a.Type, a.IsActive })
             .Take(200)
             .ToListAsync(ct);
 
         // Best matches first: tag/ID starting with the term, then active ones.
         return hits
-            .OrderByDescending(h => (h.Tag ?? "").StartsWith(term, StringComparison.OrdinalIgnoreCase) || h.Code.StartsWith(term, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(h => (h.Tag ?? "").StartsWith(term, StringComparison.OrdinalIgnoreCase) || h.Code.StartsWith(term, StringComparison.OrdinalIgnoreCase)
+                                    || (h.ClientTag ?? "").StartsWith(term, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(h => h.IsActive)
             .ThenBy(h => h.Tag ?? h.Code, NaturalComparer.Instance)
             .Take(Math.Clamp(take, 1, 50))

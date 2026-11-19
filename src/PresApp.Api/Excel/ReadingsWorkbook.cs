@@ -222,11 +222,14 @@ public sealed partial class ReadingsWorkbook(PresAppDbContext db, AssetEditor ed
     private async Task<List<ImportChange>> AnalyseAsync(List<SourceRow> rows, int unitId, ClaimsPrincipal? user, CancellationToken ct)
     {
         var assets = await db.Assets.AsNoTracking().Where(a => a.UnitId == unitId && a.IsActive)
-            .Select(a => new { a.Id, a.Code, a.Tag, P = a.Preservation }).ToListAsync(ct);
+            .Select(a => new { a.Id, a.Code, a.Tag, a.ClientTag, P = a.Preservation }).ToListAsync(ct);
         var byKey = new Dictionary<string, List<Guid>>(StringComparer.Ordinal);
         foreach (var a in assets)
             foreach (var key in new[] { a.Tag, a.Code }.Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => TagKey(k!)).Distinct())
                 (byKey.TryGetValue(key, out var list) ? list : byKey[key] = []).Add(a.Id);
+        // The client tag of a split item (P-101A/B): a reading belongs to one of its parts, never to both.
+        var split = assets.Where(a => a.ClientTag != null).GroupBy(a => TagKey(a.ClientTag!))
+            .ToDictionary(g => g.Key, g => (Tag: g.First().ClientTag!, Parts: g.Select(a => (a.Tag, a.Code)).ToList()));
         var byId = assets.ToDictionary(a => a.Id);
 
         var types = await db.MeasurementTypes.AsNoTracking().Where(t => t.IsActive).ToListAsync(ct);
@@ -259,7 +262,9 @@ public sealed partial class ReadingsWorkbook(PresAppDbContext db, AssetEditor ed
             var ids = byKey.GetValueOrDefault(TagKey(row.Tag));
             if (ids is null)
             {
-                changes.Add(Change(null, RowField, ImportOutcome.Rejected, "No active item of this unit has this tag or Equipment ID.", row.Tag));
+                changes.Add(Change(null, RowField, ImportOutcome.Rejected, split.TryGetValue(TagKey(row.Tag), out var item)
+                    ? GroupedRows.SplitTagReason(item.Tag, item.Parts, "readings")
+                    : "No active item of this unit has this tag or Equipment ID.", row.Tag));
                 continue;
             }
             if (ids.Count > 1)

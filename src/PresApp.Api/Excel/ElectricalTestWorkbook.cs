@@ -255,6 +255,9 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         var query = db.Assets.Include(a => a.ElectricalTest).Where(a => a.UnitId == unitId && a.IsActive && a.Tag != null);
         var assets = await (apply ? query : query.AsNoTracking()).ToListAsync(ct);
         var byTag = assets.GroupBy(a => a.Tag!.Trim(), StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        // The client tag of a split item (P-101A/B): each motor has its own E7 test, on its part.
+        var split = assets.Where(a => a.ClientTag != null).GroupBy(a => a.ClientTag!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(a => (a.Tag, a.Code)).ToList(), StringComparer.OrdinalIgnoreCase);
         var nameplateField = PreservationFields.Find(nameof(Asset.NameplateData))!;
         var changes = new List<ImportChange>();
         var seen = new HashSet<Guid>();
@@ -269,7 +272,9 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
 
             if (!byTag.TryGetValue(row.Tag, out var matches))
             {
-                changes.Add(Change(null, RowField, ImportOutcome.Rejected, "No active equipment of this unit has this tag. Create it first (or load it with Onboarding)."));
+                changes.Add(Change(null, RowField, ImportOutcome.Rejected, split.TryGetValue(row.Tag.Trim(), out var parts)
+                    ? GroupedRows.SplitTagReason(row.Tag.Trim(), parts, "E7 test values")
+                    : "No active equipment of this unit has this tag. Create it first (or load it with Onboarding)."));
                 continue;
             }
             if (matches.Count > 1)
