@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using PresApp.Api.Assets;
+using PresApp.Api.Excel;
 using PresApp.Api.Hosting;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Reporting;
@@ -32,7 +33,7 @@ public sealed record DashboardDto(
     List<CategoryRow> Hold, int TotalHold, List<CategoryRow> NotApplicable, int TotalNotApplicable,
     int GrandTotal, int AvailableForPreservation, int Preserved, int ReadyForPreservation,
     Dictionary<string, int> ByCurrentGate, int DocumentsPending, int ElectricalInstrumentCount, int InactiveCount,
-    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource);
+    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource, bool Grouped = false);
 
 /// <summary>
 /// One category in the editor. Code is assigned by the app. Keywords and priority are optional: they only feed the
@@ -80,19 +81,24 @@ public sealed class UnitDashboard(PresAppDbContext db)
 
     public const string EiCardPrefix = "ei-";
 
-    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct, CategoryScope scope = CategoryScope.Mechanical) =>
-        (await ComputeAsync(unitId, scope, ct)).Dashboard;
+    /// <param name="grouped">"As the client": the parts of a split item are one tag, with the values of its client Excel row (GroupedRows).</param>
+    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct, CategoryScope scope = CategoryScope.Mechanical, bool grouped = false) =>
+        (await ComputeAsync(unitId, scope, grouped, ct)).Dashboard;
 
-    /// <summary>Equipment counted by one dashboard figure; same computation as the dashboard, so the counts always agree.</summary>
-    public async Task<DashboardCardDto> CardAsync(int unitId, string card, CancellationToken ct)
+    /// <summary>
+    /// Equipment counted by one dashboard figure; same computation as the dashboard, so the counts always agree.
+    /// Grouped, a split item counts once and its figure lists all its parts.
+    /// </summary>
+    public async Task<DashboardCardDto> CardAsync(int unitId, string card, CancellationToken ct, bool grouped = false)
     {
         var key = (card ?? "").Trim().ToLowerInvariant();
         var scope = key.StartsWith(EiCardPrefix, StringComparison.Ordinal) ? CategoryScope.ElectricalInstrument : CategoryScope.Mechanical;
         if (key.StartsWith("category-", StringComparison.Ordinal) && int.TryParse(key["category-".Length..], out var categoryId))
             scope = await db.DashboardCategories.Where(c => c.Id == categoryId && c.UnitId == unitId).Select(c => (CategoryScope?)c.Scope).FirstOrDefaultAsync(ct)
                     ?? throw ApiProblem.NotFound("Dashboard figure not found.");
-        var (dashboard, cards) = await ComputeAsync(unitId, scope, ct);
-        if (!cards.TryGetValue(key, out var ids)) throw ApiProblem.NotFound("Dashboard figure not found.");
+        var (dashboard, cards) = await ComputeAsync(unitId, scope, grouped, ct);
+        if (!cards.TryGetValue(key, out var items)) throw ApiProblem.NotFound("Dashboard figure not found.");
+        var ids = items.SelectMany(i => i.Ids).ToList();
         var ei = scope == CategoryScope.ElectricalInstrument;
         var label = (ei ? key[EiCardPrefix.Length..] : key) switch
         {
@@ -105,13 +111,17 @@ public sealed class UnitDashboard(PresAppDbContext db)
             _ => dashboard.Hold.Concat(dashboard.NotApplicable).Where(c => $"category-{c.Id}" == key)
                 .Select(c => $"{(c.Section == "Hold" ? "Hold" : "N/A")} {c.Code}: {c.Label}".Replace("  ", " ")).FirstOrDefault() ?? "Category"
         };
-        return new DashboardCardDto(key, label, ids.Count, ids);
+        return new DashboardCardDto(key, label, items.Count, ids);
     }
 
-    /// <summary>Statuses of one asset, in the order of the activities of its dashboard.</summary>
-    private sealed record Item(Guid Id, string Code, string? Tag, string Discipline, string? Eu, string? Ready, string? Remarks, int? CategoryId, string?[] Steps);
+    /// <summary>
+    /// Statuses of one tag, in the order of the activities of its dashboard: one asset, or (grouped) a split item whose
+    /// <see cref="Ids"/> are all its parts and whose values are those of its client Excel row.
+    /// </summary>
+    private sealed record Item(Guid Id, string Code, string? Tag, string Discipline, string? Eu, string? Ready, string? Remarks, int? CategoryId, string?[] Steps,
+        IReadOnlyList<Guid> Ids);
 
-    private async Task<(DashboardDto Dashboard, Dictionary<string, List<Guid>> Cards)> ComputeAsync(int unitId, CategoryScope scope, CancellationToken ct)
+    private async Task<(DashboardDto Dashboard, Dictionary<string, List<Item>> Cards)> ComputeAsync(int unitId, CategoryScope scope, bool grouped, CancellationToken ct)
     {
         var unit = await db.Units.AsNoTracking().Include(u => u.Plant).FirstOrDefaultAsync(u => u.Id == unitId, ct)
                    ?? throw ApiProblem.NotFound("Unit not found.");
@@ -119,7 +129,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var all = await db.Assets.AsNoTracking().Where(a => a.UnitId == unitId && a.Type != AssetType.Pipeline)
             .Select(a => new
             {
-                a.Id, a.Code, a.Tag, a.IsActive, a.Type, Discipline = a.Discipline.Name,
+                a.Id, a.Code, a.Tag, a.ClientTag, a.IsActive, a.Type, Discipline = a.Discipline.Name,
                 Walkdown = a.Preservation!.EmWalkdownStatus, Ready = a.Preservation.ReadyForPreservation, a.Preservation.G1Status, a.Preservation.G2Status, a.Preservation.G3Status,
                 a.Preservation.G4Status, a.Preservation.G5Status, a.Preservation.G6Status, a.Preservation.G7Status, a.Preservation.G8Status,
                 Eu = a.Preservation.PreservedByEu, Remarks = a.Preservation.PreservationRemarks,
@@ -133,10 +143,13 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var scope0 = all.Where(a => a.IsActive && !string.IsNullOrWhiteSpace(a.Tag)
                                    && (ei ? a.Type == AssetType.ElectricalInstrument : a.Type != AssetType.ElectricalInstrument && !Excluded.Contains(a.Discipline.Trim())))
             .ToList();
-        var items = scope0.Select(a => new Item(a.Id, a.Code, a.Tag, a.Discipline, a.Eu, a.Ready, a.Remarks, a.CategoryId, ei
+        var single = scope0.Select(a => new Item(a.Id, a.Code, a.Tag, a.Discipline, a.Eu, a.Ready, a.Remarks, a.CategoryId, ei
                 ? [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status, a.G5Status, a.G6Status, a.G7Status, a.G8Status]
-                : [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status]))
+                : [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status], [a.Id]))
             .ToList();
+        // "As the client": the parts of a split item are one tag, with the values of its row in the client Excel.
+        var clientTags = scope0.Where(a => a.ClientTag is not null).ToDictionary(a => a.Id, a => (a.ClientTag!, a.Type));
+        var items = grouped ? Join(single, clientTags, categories) : single;
         var total = items.Count;
 
         (string Code, string Label)[] activityNames = ei
@@ -169,51 +182,84 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var byCategory = items
             .Select(a => (Asset: a, CategoryId: assigned ? (a.CategoryId is { } id && activeIds.Contains(id) ? id : (int?)null) : matcher.Match(a.Remarks)?.Id))
             .Where(x => x.CategoryId is not null)
-            .GroupBy(x => x.CategoryId!.Value).ToDictionary(g => g.Key, g => g.Select(x => new CategoryAsset(x.Asset.Id, x.Asset.Code, x.Asset.Tag))
-                .OrderBy(x => x.Tag ?? x.Code, NaturalComparer.Instance).ToList());
+            .GroupBy(x => x.CategoryId!.Value).ToDictionary(g => g.Key, g => g.Select(x => x.Asset).OrderBy(x => x.Tag ?? x.Code, NaturalComparer.Instance).ToList());
         List<CategoryRow> Section(CategorySection s) => categories.Where(c => c.Section == s).OrderBy(c => c.SortOrder).ThenBy(c => c.Priority)
-            .Select(c => ToRow(c, byCategory.GetValueOrDefault(c.Id) ?? [])).ToList();
+            .Select(c => ToRow(c, (byCategory.GetValueOrDefault(c.Id) ?? []).Select(x => new CategoryAsset(x.Id, x.Code, x.Tag)).ToList())).ToList();
         var hold = Section(CategorySection.Hold);
         var na = Section(CategorySection.NotApplicable);
         var totalHold = hold.Sum(c => c.Count);
         var totalNa = na.Sum(c => c.Count);
 
         var active = all.Where(a => a.IsActive).ToList();
-        var equipment = active.Where(a => a.Type == (ei ? AssetType.ElectricalInstrument : AssetType.Equipment)).ToList();
+        // Grouped, a split item is one tag here too (its highest Current Gate).
+        string KeyOf(Guid id, AssetType type, string? clientTag) => grouped && clientTag is not null ? $"{type}|{ValueNormalizer.ListKey(clientTag)}" : id.ToString();
+        var gateField = PreservationFields.Find(nameof(AssetPreservation.CurrentGate))!;
+        var gates = active.Where(a => a.Type == (ei ? AssetType.ElectricalInstrument : AssetType.Equipment))
+            .GroupBy(a => KeyOf(a.Id, a.Type, a.ClientTag))
+            .Select(g => GroupedRows.Combine(gateField, g.Select(a => (a.Tag ?? a.Code, (string?)FieldValues.CurrentGateText(a.Gate ?? CurrentGate.New))).ToList())!)
+            .ToList();
         // Lines stay out of the Excel dashboard figures; the unit page shows them on their own.
         var lines = await db.Assets.AsNoTracking().Where(a => a.UnitId == unitId && a.IsActive && a.Type == AssetType.Pipeline)
             .Select(a => new { Length = a.Pipeline == null ? null : a.Pipeline.LengthM, a.Preservation!.G4Status }).ToListAsync(ct);
         var pendingDocs = await db.GateDocuments.CountAsync(d => d.Asset.UnitId == unitId && d.Asset.IsActive && d.Status == DocumentationStatus.Pending, ct);
 
-        // Equipment behind each key figure (the register filters on these; counts equal the figures by construction).
-        var holdIds = hold.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
-        var naIds = na.SelectMany(c => c.Assets).Select(a => a.Id).ToList();
-        var categorized = holdIds.Concat(naIds).ToHashSet();
-        var ready = items.Where(a => Is(a.Ready, "Yes")).Select(a => a.Id).ToList();
-        var preserved = items.Where(a => ei ? AllStepsClosed(a.Steps[1..]) : IsCompleted(a.Steps[4])).Select(a => a.Id).ToList();
+        // Tags behind each key figure (the register filters on their assets; counts equal the figures by construction).
+        var holdItems = hold.SelectMany(c => byCategory.GetValueOrDefault(c.Id) ?? []).ToList();
+        var naItems = na.SelectMany(c => byCategory.GetValueOrDefault(c.Id) ?? []).ToList();
+        var categorized = holdItems.Concat(naItems).Select(a => a.Id).ToHashSet();
+        var ready = items.Where(a => Is(a.Ready, "Yes")).ToList();
+        var preserved = items.Where(a => ei ? AllStepsClosed(a.Steps[1..]) : IsCompleted(a.Steps[4])).ToList();
         var prefix = ei ? EiCardPrefix : "";
-        var cards = new Dictionary<string, List<Guid>>
+        var cards = new Dictionary<string, List<Item>>
         {
-            [prefix + "tags"] = items.Select(a => a.Id).ToList(),
+            [prefix + "tags"] = items,
             [prefix + "preserved"] = preserved,
-            [prefix + "hold"] = holdIds,
-            [prefix + "na"] = naIds,
-            [prefix + "available"] = items.Where(a => !categorized.Contains(a.Id)).Select(a => a.Id).ToList(),
+            [prefix + "hold"] = holdItems,
+            [prefix + "na"] = naItems,
+            [prefix + "available"] = items.Where(a => !categorized.Contains(a.Id)).ToList(),
         };
         if (!ei) cards["ready"] = ready;
-        foreach (var c in hold.Concat(na)) cards[$"category-{c.Id}"] = c.Assets.Select(a => a.Id).ToList();
+        foreach (var c in hold.Concat(na)) cards[$"category-{c.Id}"] = byCategory.GetValueOrDefault(c.Id) ?? [];
 
         // Ready for preservation = the "Ready For Preservation" column = Yes, like the Excel Dashboard sheet.
         var dto = new DashboardDto(unit.Id, unit.Name, unit.Plant.Name, CategoryScopes.Key(scope), total, activities, disciplines,
             hold, totalHold, na, totalNa, totalHold + totalNa, total - totalHold - totalNa,
             preserved.Count, ready.Count,
-            equipment.GroupBy(a => FieldValues.CurrentGateText(a.Gate ?? CurrentGate.New))
+            gates.GroupBy(g => g)
                 .OrderBy(g => g.Key == "New" ? 0 : g.Key == "Removed from Site" ? 99 : g.Key[1] - '0')
                 .ToDictionary(g => g.Key, g => g.Count()),
-            pendingDocs, active.Count(a => a.Type == AssetType.ElectricalInstrument), all.Count(a => !a.IsActive),
+            pendingDocs, active.Where(a => a.Type == AssetType.ElectricalInstrument).Select(a => KeyOf(a.Id, a.Type, a.ClientTag)).Distinct().Count(), all.Count(a => !a.IsActive),
             lines.Count, lines.Sum(l => l.Length ?? 0), lines.Count(l => IsCompleted(l.G4Status)),
-            assigned ? "Assigned" : "Keywords");
+            assigned ? "Assigned" : "Keywords", grouped);
         return (dto, cards);
+    }
+
+    /// <summary>
+    /// "As the client": the parts of a split item (same client tag and type) become one item with the values of its row
+    /// in the client Excel (GroupedRows): the most advanced status of each activity, the category of the row, the
+    /// remarks joined. Any other asset stays as it is. In the order given (a split item where its first part is).
+    /// </summary>
+    private static List<Item> Join(List<Item> items, Dictionary<Guid, (string ClientTag, AssetType Type)> clientTags, List<DashboardCategory> categories)
+    {
+        var byId = categories.ToDictionary(c => c.Id);
+        var remarks = PreservationFields.Find(nameof(AssetPreservation.PreservationRemarks))!;
+        return items
+            .GroupBy(i => clientTags.TryGetValue(i.Id, out var c) ? $"{c.Type}|{ValueNormalizer.ListKey(c.ClientTag)}" : i.Id.ToString())
+            .Select(g =>
+            {
+                var parts = g.ToList();
+                if (parts.Count == 1) return parts[0];
+                var first = parts[0];
+                var category = GroupedRows.Category(parts.Select(p => p.CategoryId is { } id ? byId.GetValueOrDefault(id) : null).ToList(),
+                    c => c.Section == CategorySection.Hold);
+                return new Item(first.Id, first.Code, clientTags[first.Id].ClientTag, first.Discipline,
+                    GroupedRows.Status(parts.Select(p => p.Eu).ToList()), GroupedRows.Status(parts.Select(p => p.Ready).ToList()),
+                    GroupedRows.Combine(remarks, parts.Select(p => (p.Tag ?? p.Code, p.Remarks)).ToList()),
+                    category?.Id,
+                    first.Steps.Select((_, i) => GroupedRows.Status(parts.Select(p => p.Steps[i]).ToList())).ToArray(),
+                    parts.SelectMany(p => p.Ids).ToList());
+            })
+            .ToList();
     }
 
     /// <summary>E&amp;I preserved: every step Completed or Not Applicable, at least one Completed (same rule as the Preservation Date).</summary>

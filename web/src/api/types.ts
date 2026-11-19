@@ -166,6 +166,8 @@ export interface RegisterRow {
   e7Tested?: boolean | null;
   /** Documentation of each gate / step 1–8; null = no documentation row for that gate. */
   gateDocuments?: (GateDocStatus | null)[] | null;
+  /** The client's tag when this asset is one part of a split item (e.g. P-101A/B). */
+  clientTag?: string | null;
 }
 
 export type GateDocStatus = "Pending" | "Received" | "NotApplicable";
@@ -616,7 +618,10 @@ export interface Dashboard {
   linesBlanketed: number;
   inactiveCount: number;
   /** "Assigned": categories chosen per equipment (template v4). "Keywords": found in the Preservation Remarks (v3). */
-  categorySource: "Assigned" | "Keywords";}
+  categorySource: "Assigned" | "Keywords";
+  /** Counted "As the client": the parts of a split item count once, like the client Excel. */
+  grouped?: boolean;
+}
 
 // ---------------------------------------------------------------- Simpro
 
@@ -920,6 +925,12 @@ export interface SetActiveResult {
 }
 
 /** How a unit shows its lines by default: one row per line, or sizes of a line grouped. */
+/** How a unit shows the parts of a split item by default (false: by equipment; true: as the client), and how many it has. */
+export interface ClientView {
+  grouped: boolean;
+  splitItems: number;
+}
+
 export interface PipingView {
   grouped: boolean;
 }

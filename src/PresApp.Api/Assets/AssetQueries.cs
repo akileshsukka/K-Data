@@ -18,7 +18,7 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
             .Where(a => a.UnitId == unitId && a.Type == type && a.IsActive != inactiveOnly)
             .Select(a => new
             {
-                a.Id, a.Code, a.Tag, a.Description, Discipline = a.Discipline.Name, a.Priority, a.IsActive, a.UpdatedAtUtc,
+                a.Id, a.Code, a.Tag, a.ClientTag, a.Description, Discipline = a.Discipline.Name, a.Priority, a.IsActive, a.UpdatedAtUtc,
                 P = a.Preservation,
                 L = a.Pipeline,
                 Groups = a.GroupMemberships.Where(m => m.Group.IsActive).Select(m => m.Group.Code).ToList(),
@@ -58,7 +58,7 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 r.L == null ? null : new LineInfo(r.L.SizeIn, r.L.PipeSpec, specs.Class(r.L.PipeSpec), specs.Flange(r.L.PipeSpec), specs.Gasket(r.L.PipeSpec), r.L.Service, r.L.PidNumber, r.L.LengthM,
                     showCheck ? new LineNumberCheck(r.L.NonStandardNumber, r.L.NumberNote) : null, LineNumber.GroupKey(r.Tag)), r.Groups, r.Circuit, custom.GetValueOrDefault(r.Id),
                 r.P?.G1BulkLiquidDrained, r.P?.ReadyForPreservation, r.DocsDone, tested?.Contains(r.Id),
-                Enumerable.Range(1, 8).Select(g => r.Docs.FirstOrDefault(d => d.Gate == g)?.Status.ToString()).ToList()))
+                Enumerable.Range(1, 8).Select(g => r.Docs.FirstOrDefault(d => d.Gate == g)?.Status.ToString()).ToList(), r.ClientTag))
             .ToList();
     }
 

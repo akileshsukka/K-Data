@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type DashboardCard, type GateDocStatus, type PipingView, type RegisterRow, type SetActiveResult } from "../../api/types";
+import { Perm, PipingFieldKeys, pipingFixedKeys, type AssetType, type ClientView, type DashboardCard, type GateDocStatus, type PipingView, type RegisterRow, type SetActiveResult } from "../../api/types";
 import { useCustomFields, useLineCodes, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
@@ -25,6 +25,7 @@ import { DeleteAssetsDialog } from "./DeleteAssetsDialog";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 import { GateFormDialog } from "../gateforms/GateFormDialog";
 import { groupLines } from "../lines/lineGroups";
+import { groupByClientTag } from "./clientGroups";
 
 const titles: Record<AssetType, string> = {
   Equipment: "Equipment Register",
@@ -64,6 +65,8 @@ interface Filters {
   card: string;
   /** Tags pasted from Excel (lower case, comma separated): only those rows are shown. */
   tags: string;
+  /** Split items: "1" as the client (one row), "0" by equipment, "" the unit default. A view, not a filter. */
+  client: string;
 }
 
 /** The filters where several values can be ticked. */
@@ -72,14 +75,14 @@ const listKeys: ListKey[] = ["discipline", "currentGate", "gateStatus", "actionB
 
 const empty: Filters = {
   text: "", discipline: [], currentGate: [], gates: [], gateStatus: [], actionBy: [], emWalkdown: [], ready: [], drained: "", inspection: [],
-  cleaning: [], activity: [], numberCheck: "", docs: "", e7: "", inactive: false, group: [], card: "", tags: "",
+  cleaning: [], activity: [], numberCheck: "", docs: "", e7: "", inactive: false, group: [], card: "", tags: "", client: "",
 };
 
 /** Name of each filter in the page address (?status=Ongoing&status=Hold&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags",
+  numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags", client: "client",
 };
 
 /**
@@ -218,15 +221,28 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const groupedOn = override ?? unitDefault;
   const grouped = lines && groupedOn;
 
-  // A figure of the Unit overview (equipment, E&I) or a piping card (piping-walkdown, piping-walkdown-pending…). A piping card is
-  // counted grouped or not like the cards above the register, so it waits for the view and follows the switch.
+  // "As the client" (equipment, E&I): the parts of a split item (P-101A, P-101B of the client's P-101A/B) in one row with the
+  // values of the client Excel. Opens as the unit's default; ?client=1/0 (the switch, a dashboard link) overrides it.
+  // Only offered when the unit has split items: otherwise both views are the same.
+  const clientView = useQuery({
+    queryKey: ["client-view", unitId],
+    queryFn: ({ signal }) => api<ClientView>(`/api/units/${unitId}/client-view`, { signal }),
+    enabled: !lines,
+  });
+  const clientDefault = clientView.data?.grouped ?? false;
+  const clientOn = f.client === "1" ? true : f.client === "0" ? false : clientDefault;
+  const hasSplit = (clientView.data?.splitItems ?? 0) > 0;
+  const asClient = !lines && clientOn && hasSplit;
+
+  // A figure of the Unit overview (equipment, E&I) or a piping card (piping-walkdown, piping-walkdown-pending…). Both are
+  // counted like the view on screen (grouped lines, split items as the client), so they wait for it and follow the switch.
   const pipingCard = lines && f.card.startsWith("piping-");
   const card = useQuery({
-    queryKey: ["dashboard-card", unitId, f.card, pipingCard ? grouped : null],
+    queryKey: ["dashboard-card", unitId, f.card, pipingCard ? grouped : asClient],
     queryFn: ({ signal }) => api<DashboardCard>(pipingCard
       ? `/api/units/${unitId}/piping-summary/cards/${encodeURIComponent(f.card.slice("piping-".length))}?grouped=${grouped}`
-      : `/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}`, { signal }),
-    enabled: !!f.card && (!pipingCard || !!view.data),
+      : `/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}?grouped=${asClient}`, { signal }),
+    enabled: !!f.card && (pipingCard ? !!view.data : lines || !!clientView.data),
   });
   const cardIds = useMemo(() => (card.data ? new Set(card.data.assetIds) : null), [card.data]);
   const outsideCard = card.data ? card.data.assetIds.filter((id) => !all.some((r) => r.id === id)).length : 0;
@@ -239,11 +255,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   const docGates = f.gates.filter((g) => g <= gateCount).sort((a, b) => a - b).map((g) => `${step}${g}`).join(" + ");
 
   const tagSet = useMemo(() => new Set(tagList(f.tags)), [f.tags]);
-  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => tagKey(r.tag ?? "") === t || tagKey(r.code) === t));
-  const filtered = useMemo(
-    () =>
-      all.filter(
-        (r) =>
+  // A pasted client tag (P-101A/B) finds its parts, in either view.
+  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => tagKey(r.tag ?? "") === t || tagKey(r.code) === t || (!!r.clientTag && tagKey(r.clientTag) === t)));
+  // As the client, the filters look at the row the client sees (its combined values) and keep all its parts.
+  const clientRows = useMemo(() => (asClient ? groupByClientTag(all) : null), [asClient, all]);
+  const matches = useCallback(
+    (r: RegisterRow, members: RegisterRow[] = [r]) =>
           (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service, unitId) ?? ""}`.toLowerCase().includes(text)) &&
           anyOf(f.discipline, (v) => r.discipline === v) &&
           anyOf(f.currentGate, (v) => r.currentGate === v) &&
@@ -259,11 +276,23 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           docsMatch(r, f.docs, f.gates, gateCount) &&
           (!f.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
           (!f.card || !!cardIds?.has(r.id)) &&
-          (tagSet.size === 0 || tagSet.has(tagKey(r.tag ?? "")) || tagSet.has(tagKey(r.code))) &&
+          (tagSet.size === 0 || members.some((m) => tagSet.has(tagKey(m.tag ?? "")) || tagSet.has(tagKey(m.code)) || (!!m.clientTag && tagSet.has(tagKey(m.clientTag))))) &&
           anyOf(f.group, (v) => (v === "(none)" ? !r.groups?.length : !!r.groups?.includes(v))),
-      ),
-    [all, text, f, gateCount, codes, cardIds, tagSet, type],
+    [text, f, gateCount, codes, cardIds, tagSet, type, unitId],
   );
+  const clientShown = useMemo(() => clientRows?.filter((g) => matches(g.row, g.members)) ?? null, [clientRows, matches]);
+  const filtered = useMemo(() => (clientShown ? clientShown.flatMap((g) => g.members) : all.filter((r) => matches(r))), [clientShown, all, matches]);
+
+  const saveClientDefault = useMutation({
+    mutationFn: (on: boolean) => api<ClientView>(`/api/units/${unitId}/client-view`, { method: "PUT", body: { grouped: on } }),
+    onSuccess: (r) => {
+      queryClient.setQueryData(["client-view", unitId], r);
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      set("client", "");
+      toast(`${unit?.name ?? "This unit"} now opens with split items ${r.grouped ? "as the client lists them" : "by equipment"} (registers, Unit overview and PDF).`);
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
 
   const saveDefault = useMutation({
     mutationFn: (on: boolean) => api<PipingView>(`/api/units/${unitId}/piping-view`, { method: "PUT", body: { grouped: on } }),
@@ -280,10 +309,16 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     for (const r of all) if (r.line?.groupKey) size.set(r.line.groupKey, (size.get(r.line.groupKey) ?? 0) + 1);
     return size;
   }, [all]);
-  const shown = useMemo(() => (grouped ? groupLines(filtered) : filtered.map((r) => ({ key: r.id, members: [r], row: r }))), [grouped, filtered]);
+  const shown = useMemo(
+    () => clientShown ?? (grouped ? groupLines(filtered) : filtered.map((r) => ({ key: r.id, members: [r], row: r }))),
+    [clientShown, grouped, filtered],
+  );
+  /** Rows on screen are groups (sizes of a line, or parts of a split item). */
+  const rowsGrouped = grouped || asClient;
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
-  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
+  // The view (inactive, as the client) is not a filter.
+  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && k !== "client" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   // Rows can be selected for bulk edit, groups, gate forms and (E&I register) the E7 report of the selected motors.
   // Roles that may delete or reactivate can also select inactive rows (an asset loaded by mistake may already be deactivated).
   const canDelete = session.can(Perm.assetsDelete);
@@ -351,7 +386,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     <div>
       <PageHeader
         title={titles[type]}
-        description={unit ? `${unit.name} — ${filtered.length} of ${all.length}${f.inactive ? " inactive" : ""} shown${grouped ? ` in ${shown.length} grouped rows` : ""}${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
+        description={unit ? `${unit.name} — ${filtered.length} of ${all.length}${f.inactive ? " inactive" : ""} shown${rowsGrouped ? ` in ${shown.length} ${lines ? "grouped" : "client"} row${shown.length === 1 ? "" : "s"}` : ""}${lines && totalLength > 0 ? ` · ${totalLength.toLocaleString("en", { maximumFractionDigits: 1 })} m` : ""}` : undefined}
         actions={
           <>
             {session.can(Perm.groupsManage) && activeSelected.length > 0 && (
@@ -538,10 +573,32 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
             Make {groupedOn ? "grouped" : "one by one"} the default for {unit?.name ?? "this unit"}
           </Button>
         )}
+        {!lines && hasSplit && (
+          <label className="inline-flex items-center gap-2" title="Split items (e.g. P-101A and P-101B of the client's P-101A/B) in one row with the values the client Excel shows. Each part keeps its own values and is edited on its own.">
+            <button type="button" role="switch" aria-checked={clientOn} onClick={() => set("client", !clientOn === clientDefault ? "" : !clientOn ? "1" : "0")}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${clientOn ? "bg-violet" : "bg-line"}`}>
+              <span className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${clientOn ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+            As the client
+            {clientOn === clientDefault && <span className="text-sm text-muted">(unit default)</span>}
+          </label>
+        )}
+        {!lines && hasSplit && clientOn !== clientDefault && session.can(Perm.assetsManage) && (
+          <Button variant="quiet" busy={saveClientDefault.isPending} onClick={() => saveClientDefault.mutate(clientOn)}
+            title="The Equipment and E&I registers, the Unit overview and the PDF of this unit will open this way for everyone. The client Excel always shows split items in one row.">
+            Make {clientOn ? "“as the client”" : "“by equipment”"} the default for {unit?.name ?? "this unit"}
+          </Button>
+        )}
       </div>
       {grouped && (
         <p className="mt-2 text-sm text-muted">
           Grouped view: a change to a group (tick it and use Bulk edit) is written to each of its lines. “Mixed” means its lines do not have the same value.
+        </p>
+      )}
+      {asClient && (
+        <p className="mt-2 text-sm text-muted">
+          As the client: each split item is one row with what the client Excel shows (the most advanced status of its parts). Open a part to edit it;
+          ticking the row selects all its parts.
         </p>
       )}
 
@@ -550,7 +607,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
           <div className="min-w-0">
             <p className="font-semibold text-ink">
               {active === 1 ? "1 filter applied" : `${active} filters applied`} · showing {filtered.length} of {all.length}
-              {grouped && ` lines in ${shown.length} grouped row${shown.length === 1 ? "" : "s"}`}
+              {rowsGrouped && ` ${lines ? "lines" : "assets"} in ${shown.length} ${lines ? "grouped" : "client"} row${shown.length === 1 ? "" : "s"}`}
             </p>
             {tagSet.size > 0 && (
               <p className="mt-0.5 text-sm text-muted">
@@ -635,11 +692,21 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                     {canBulk && (
                       <td className="border-b border-line px-3 py-2">
                         <input type="checkbox" className="size-4 accent-violet" checked={ids.length > 0 && ids.every((id) => selected.has(id))} disabled={ids.length === 0} onChange={() => toggle(ids)}
-                          aria-label={`Select ${members.length > 1 ? `the ${members.length} lines of ` : ""}${members[0].tag ?? members[0].code}`} />
+                          aria-label={`Select ${members.length > 1 ? `the ${members.length} ${lines ? "lines" : "parts"} of ` : ""}${members.length > 1 && !lines ? r.tag : members[0].tag ?? members[0].code}`} />
                       </td>
                     )}
                     <td className="border-b border-line px-3 py-2">
-                      {members.length > 1 ? (
+                      {members.length > 1 && !lines ? (
+                        <>
+                          {/* A split item as the client: its tag, then each part (each opens on its own). */}
+                          <span className="block font-semibold whitespace-pre text-ink">{r.tag}</span>
+                          {members.map((m) => (
+                            <Link key={m.id} to={`/assets/${m.id}`} className={`block text-sm whitespace-nowrap hover:text-violet ${m.isActive ? "text-violet" : "text-muted"}`}>
+                              {m.tag ?? m.code} <span className="text-muted">· {m.code}</span>
+                            </Link>
+                          ))}
+                        </>
+                      ) : members.length > 1 ? (
                         <>
                           {members.map((m) => (
                             <Link key={m.id} to={`/assets/${m.id}`} className={`block font-semibold whitespace-pre hover:text-violet ${m.isActive ? "text-ink" : "text-muted"}`}>{m.tag ?? m.code}</Link>
@@ -706,8 +773,9 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 <>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
+                      {members.length > 1 && !lines && <p className="font-semibold break-words text-ink">{r.tag}</p>}
                       {members.length > 1
-                        ? members.map((m) => <Link key={m.id} to={`/assets/${m.id}`} className="block font-semibold break-words text-ink hover:text-violet">{m.tag ?? m.code}</Link>)
+                        ? members.map((m) => <Link key={m.id} to={`/assets/${m.id}`} className={`block break-words hover:text-violet ${lines ? "font-semibold text-ink" : "text-sm text-violet"}`}>{m.tag ?? m.code}</Link>)
                         : <p className="font-semibold break-words whitespace-pre-line text-ink">{r.tag ?? r.code}</p>}
                       {r.line?.numberCheck?.nonStandard && <NonStandardBadge note={r.line.numberCheck.note} />}
                       <p className="truncate text-sm text-muted">{lines ? [formatSize(r.line?.sizeIn), codes.describe("Service", r.line?.service, unitId) ?? r.line?.service, r.circuit, r.custom?.[PipingFieldKeys.cleaningRequired] && `Cleaning: ${r.custom[PipingFieldKeys.cleaningRequired]}`].filter(Boolean).join(" · ") : r.description}</p>

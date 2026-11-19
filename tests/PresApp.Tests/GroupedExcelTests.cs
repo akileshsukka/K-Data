@@ -109,6 +109,50 @@ public sealed class GroupedExcelTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task The_unit_dashboard_counts_a_split_item_once_as_the_client()
+    {
+        var unitId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 39").Select(u => u.Id).FirstAsync());
+        var a = await CreateAsync(unitId, "39-P-801A/B");
+        await CreateAsync(unitId, "39-V-802");
+        await PatchAsync(a, "G1Status", "Completed");
+        await PatchAsync(a, "ReadyForPreservation", "No");
+        var b = await SplitAsync(a, "39-P-801A", "39-P-801B", (g, s) => g == 1 ? "Ongoing" : s);
+        await PatchAsync(b, "ReadyForPreservation", "Yes");
+
+        // The unit has one split item and opens "By equipment" until someone changes the default.
+        var view = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/client-view");
+        Assert.False(view.GetProperty("grouped").GetBoolean());
+        Assert.Equal(1, view.GetProperty("splitItems").GetInt32());
+
+        static int G1(JsonElement d, string what) => d.GetProperty("activities").EnumerateArray().First(x => x.GetProperty("code").GetString() == "G1").GetProperty(what).GetInt32();
+        var byEquipment = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard");
+        Assert.False(byEquipment.GetProperty("grouped").GetBoolean());
+        var asClient = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard?grouped=true");
+        Assert.True(asClient.GetProperty("grouped").GetBoolean());
+
+        // One tag less; its G1 is the most advanced of the parts (Completed), its Ready is Yes (B).
+        Assert.Equal(byEquipment.GetProperty("totalTags").GetInt32() - 1, asClient.GetProperty("totalTags").GetInt32());
+        Assert.Equal(G1(byEquipment, "completed"), G1(asClient, "completed"));
+        Assert.Equal(G1(byEquipment, "pending") - 1, G1(asClient, "pending"));
+        Assert.Equal(byEquipment.GetProperty("readyForPreservation").GetInt32(), asClient.GetProperty("readyForPreservation").GetInt32());
+        Assert.Equal(byEquipment.GetProperty("byCurrentGate").EnumerateObject().Sum(p => p.Value.GetInt32()) - 1,
+            asClient.GetProperty("byCurrentGate").EnumerateObject().Sum(p => p.Value.GetInt32()));
+
+        // The figure counts the tag once and lists both parts, so the register can show them.
+        var tags = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard/cards/tags?grouped=true");
+        Assert.Equal(asClient.GetProperty("totalTags").GetInt32(), tags.GetProperty("count").GetInt32());
+        var ids = tags.GetProperty("assetIds").EnumerateArray().Select(x => x.GetGuid()).ToList();
+        Assert.Contains(a, ids);
+        Assert.Contains(b, ids);
+
+        // As the unit default, the dashboard (and the PDF, which asks without a view) is grouped.
+        (await admin.PutAsJsonAsync($"/api/units/{unitId}/client-view", new { grouped = true })).EnsureSuccessStatusCode();
+        Assert.True((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard")).GetProperty("grouped").GetBoolean());
+        Assert.Equal("39-P-801A/B", (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=Equipment"))
+            .EnumerateArray().First(r => r.GetProperty("id").GetGuid() == b).GetProperty("clientTag").GetString());
+    }
+
+    [Fact]
     public async Task A_changed_cell_of_a_grouped_row_is_not_applied_and_waits_for_a_decision()
     {
         var unitId = await PrepareUnitAsync("Unit 41");

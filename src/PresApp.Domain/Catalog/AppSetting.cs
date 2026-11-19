@@ -24,4 +24,11 @@ public static class AppSettingKeys
     /// piping cards of the Unit overview, the PDF and the line list Excel. Missing = individual.
     /// </summary>
     public static string PipingGrouped(int unitId) => $"Piping.Grouped.{unitId}";
+
+    /// <summary>
+    /// "Yes" when the unit opens "As the client" by default: the parts of a split item (P-101A, P-101B of the client's
+    /// P-101A/B) are one row in the Equipment and E&amp;I registers and count once in the Unit overview and the PDF,
+    /// like the client Excel. Missing = by equipment.
+    /// </summary>
+    public static string ClientTagsGrouped(int unitId) => $"ClientTags.Grouped.{unitId}";
 }

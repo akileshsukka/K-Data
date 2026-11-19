@@ -92,18 +92,22 @@ public static class GroupedRows
         return field.MaxLength > 0 && text.Length > field.MaxLength ? text[..field.MaxLength] : text;
     }
 
-    /// <summary>The most advanced status: Completed &gt; Ongoing &gt; any other value &gt; Hold &gt; empty; N/A only when all are N/A.</summary>
+    /// <summary>
+    /// The most advanced status: Completed (or Yes) &gt; Ongoing &gt; any other value &gt; Hold (or No) &gt; empty;
+    /// N/A only when all are N/A. Between equal ranks, the first part's.
+    /// </summary>
     public static string? Status(IReadOnlyList<string?> values)
     {
         var applicable = values.Where(v => v is null || !ValueNormalizer.IsNotApplicable(v)).ToList();
-        if (applicable.Count == 0) return values[0];
+        if (applicable.Count == 0) return values.Count == 0 ? null : values[0];
         return applicable.OrderByDescending(Rank).First();
 
         static int Rank(string? v) => v is null ? 0
-            : AssetPreservation.IsCompleted(v) ? 4
-            : string.Equals(v.Trim(), "Ongoing", StringComparison.OrdinalIgnoreCase) ? 3
-            : string.Equals(v.Trim(), "Hold", StringComparison.OrdinalIgnoreCase) ? 1
+            : AssetPreservation.IsCompleted(v) || Is(v, "Yes") ? 4
+            : Is(v, "Ongoing") ? 3
+            : Is(v, "Hold") || Is(v, "No") ? 1
             : 2;
+        static bool Is(string v, string word) => string.Equals(v.Trim(), word, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

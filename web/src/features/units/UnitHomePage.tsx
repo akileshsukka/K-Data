@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, type ActivityRow, type CategoryRow, type Dashboard, type DashboardScope } from "../../api/types";
+import { Perm, type ActivityRow, type CategoryRow, type ClientView, type Dashboard, type DashboardScope } from "../../api/types";
 import { lastUnit, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
@@ -17,7 +17,13 @@ export const scopeNames: Record<DashboardScope, { tab: string; title: string; re
 };
 
 /** Dashboard of one scope, shared by the overview and the PDF. */
-export const dashboardUrl = (unitId: number, scope: DashboardScope) => `/api/units/${unitId}/dashboard${scope === "ei" ? "?scope=ei" : ""}`;
+/** Without grouped: the unit's default view of split items (by equipment or as the client). */
+export const dashboardUrl = (unitId: number, scope: DashboardScope, grouped?: boolean) => {
+  const q = new URLSearchParams();
+  if (scope === "ei") q.set("scope", "ei");
+  if (grouped !== undefined) q.set("grouped", String(grouped));
+  return `/api/units/${unitId}/dashboard${q.size ? `?${q}` : ""}`;
+};
 
 /**
  * Unit overview = the client dashboards, computed by the API exactly like the dashboard sheets of the unit Excel, so
@@ -30,11 +36,26 @@ export function UnitHomePage() {
   const session = useSession();
   const [params, setParams] = useSearchParams();
   const scope: DashboardScope = params.get("view") === "ei" ? "ei" : "mechanical";
-  const dashboard = useQuery({
-    queryKey: ["dashboard", unitId, scope],
-    queryFn: ({ signal }) => api<Dashboard>(dashboardUrl(unitId, scope), { signal }),
+  // Split items (P-101A, P-101B of the client's P-101A/B): counted by equipment or once, as the client Excel. Opens as the
+  // unit's default; ?client=1/0 overrides it for this visit (the switch is only shown when the unit has split items).
+  const clientView = useQuery({
+    queryKey: ["client-view", unitId],
+    queryFn: ({ signal }) => api<ClientView>(`/api/units/${unitId}/client-view`, { signal }),
     enabled: !!unit,
   });
+  const asked = params.get("client");
+  const grouped = asked === "1" ? true : asked === "0" ? false : clientView.data?.grouped;
+  const dashboard = useQuery({
+    queryKey: ["dashboard", unitId, scope, grouped],
+    queryFn: ({ signal }) => api<Dashboard>(dashboardUrl(unitId, scope, grouped), { signal }),
+    enabled: !!unit && grouped !== undefined,
+  });
+  const setGrouped = (on: boolean) =>
+    setParams((p) => {
+      if (on === (clientView.data?.grouped ?? false)) p.delete("client");
+      else p.set("client", on ? "1" : "0");
+      return p;
+    }, { replace: true });
 
   useEffect(() => {
     if (unit) lastUnit.set(unit.id);
@@ -66,7 +87,7 @@ export function UnitHomePage() {
         description={`${plantName} · preservation dashboard`}
         actions={
           <>
-            <ExportPdfButton unitId={unit.id} unitName={unit.name} plantName={plantName ?? ""} />
+            <ExportPdfButton unitId={unit.id} unitName={unit.name} plantName={plantName ?? ""} grouped={grouped} />
             {session.can(Perm.excelExport) && <DownloadExcelButton unitId={unit.id} variant="secondary" />}
             {session.can(Perm.assetsManage) && (
               <Link to={`/u/${unit.id}/new`} className="inline-flex min-h-10 items-center rounded-md bg-violet px-4 font-semibold text-white hover:bg-violet-dark">New equipment</Link>
@@ -83,6 +104,20 @@ export function UnitHomePage() {
           </button>
         ))}
       </div>
+      {(clientView.data?.splitItems ?? 0) > 0 && grouped !== undefined && (
+        <label className="mt-3 inline-flex items-center gap-2 sm:ml-4"
+          title="Split items (e.g. P-101A and P-101B of the client's P-101A/B) counted once, with the values the client Excel shows, so the figures match the client's dashboard.">
+          <button type="button" role="switch" aria-checked={grouped} onClick={() => setGrouped(!grouped)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${grouped ? "bg-violet" : "bg-line"}`}>
+            <span className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${grouped ? "translate-x-5" : "translate-x-0.5"}`} />
+          </button>
+          As the client
+          <span className="text-sm text-muted">
+            {grouped ? `${clientView.data!.splitItems} split item${clientView.data!.splitItems === 1 ? "" : "s"} counted once, like the client Excel` : "each part of a split item counted"}
+            {grouped === clientView.data!.grouped && " (unit default)"}
+          </span>
+        </label>
+      )}
 
       {dashboard.isPending && <p className="mt-6 text-muted">Loading dashboard…</p>}
       {dashboard.isError && <p className="mt-6 text-hold">{dashboard.error.message}</p>}
@@ -145,16 +180,16 @@ function ScopeDashboard({ d, unitId, canEdit }: { d: Dashboard; unitId: number; 
       </section>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <CategoryPanel title="Hold categories" card={`${prefix}hold`} rows={d.hold} total={d.totalHold} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} />
-        <CategoryPanel title="Not applicable categories" card={`${prefix}na`} rows={d.notApplicable} total={d.totalNotApplicable} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} />
+        <CategoryPanel title="Hold categories" card={`${prefix}hold`} rows={d.hold} total={d.totalHold} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} />
+        <CategoryPanel title="Not applicable categories" card={`${prefix}na`} rows={d.notApplicable} total={d.totalNotApplicable} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} />
       </div>
     </>
   );
 }
 
 /** Register (Equipment or E&I) showing exactly the equipment behind one dashboard figure. */
-export const cardLink = (unitId: number, card: string, scope: DashboardScope = "mechanical") =>
-  `/u/${unitId}/${scopeNames[scope].path}?card=${encodeURIComponent(card)}`;
+export const cardLink = (unitId: number, card: string, scope: DashboardScope = "mechanical", grouped?: boolean) =>
+  `/u/${unitId}/${scopeNames[scope].path}?card=${encodeURIComponent(card)}${grouped === undefined ? "" : `&client=${grouped ? 1 : 0}`}`;
 
 /** Category editor of one catalogue. */
 export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${unitId}/categories${scope === "ei" ? "?scope=ei" : ""}`;
@@ -165,7 +200,7 @@ export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${u
  */
 export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
   const register = scopeNames[d.scope].register;
-  const to = (card: string) => (unitId ? cardLink(unitId, card, d.scope) : undefined);
+  const to = (card: string) => (unitId ? cardLink(unitId, card, d.scope, d.grouped) : undefined);
   if (d.scope === "ei") {
     return (
       <>
@@ -301,8 +336,10 @@ export function ActivityBar({ row, scope = "mechanical" }: { row: ActivityRow; s
   );
 }
 
-function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKeyword }: {
+function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKeyword, grouped }: {
   title: string; card: string; rows: CategoryRow[]; total: number; unitId: number; scope: DashboardScope; canEdit: boolean; byKeyword: boolean;
+  /** Counted as the client: the register opens the same way. */
+  grouped?: boolean;
 }) {
   const [open, setOpen] = useState<number | null>(null);
   const register = scopeNames[scope].register;
@@ -338,7 +375,7 @@ function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKey
               {open === c.id && (
                 <div className="px-5 pb-4">
                   {c.assets.length > 0 && (
-                    <Link to={cardLink(unitId, `category-${c.id}`, scope)} className="mb-2 inline-block text-sm font-semibold text-violet">
+                    <Link to={cardLink(unitId, `category-${c.id}`, scope, grouped)} className="mb-2 inline-block text-sm font-semibold text-violet">
                       Open these {c.count} in the {register} →
                     </Link>
                   )}
@@ -361,7 +398,7 @@ function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKey
             </li>
           ))}
           <li className="border-t border-line">
-            <Link to={cardLink(unitId, card, scope)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title={`Open in the ${register}`}>
+            <Link to={cardLink(unitId, card, scope, grouped)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title={`Open in the ${register}`}>
               <span>Total</span>
               <span className="tabular-nums">{total}</span>
             </Link>

@@ -34,12 +34,14 @@ interface ReportInput {
   unitId: number;
   unitName: string;
   plantName: string;
+  /** Split items counted as the client (once) or by equipment; not given = the unit default. */
+  grouped?: boolean;
 }
 
 /** Builds the PDF of the Unit overview and saves it in the browser's downloads. Returns the file name. */
-export async function exportUnitPdf({ unitId, unitName, plantName }: ReportInput): Promise<string> {
+export async function exportUnitPdf({ unitId, unitName, plantName, grouped }: ReportInput): Promise<string> {
   // Every discipline of the unit, whichever dashboard is on screen.
-  const [mechanical, ei] = await Promise.all([api<Dashboard>(dashboardUrl(unitId, "mechanical")), api<Dashboard>(dashboardUrl(unitId, "ei"))]);
+  const [mechanical, ei] = await Promise.all([api<Dashboard>(dashboardUrl(unitId, "mechanical", grouped)), api<Dashboard>(dashboardUrl(unitId, "ei", grouped))]);
   const piping = mechanical.lineCount > 0 ? await api<PipingSummary>(`/api/units/${unitId}/piping-summary`) : null;
   if (mechanical.totalTags + ei.totalTags === 0 && !piping?.lines) throw new Error("This unit has no equipment, E&I items or lines yet: there is nothing to put in the PDF.");
   const now = new Date();
@@ -206,6 +208,7 @@ function ScopeSection({ d, newPage }: { d: Dashboard; newPage: boolean }) {
     <>
       <Block newPage={newPage}>
         <h2 className="mb-3 border-l-4 border-ink pl-3 text-2xl font-semibold">{scopeNames[d.scope].title}</h2>
+        {d.grouped && <p className="-mt-2 mb-3 text-sm text-muted">As the client: the parts of a split item (e.g. P-101A/B) count as one tag with its most advanced status, like the client Excel.</p>}
         <div className={`grid gap-3 ${d.scope === "ei" ? "grid-cols-5" : "grid-cols-6"}`}><KeyFigures d={d} /></div>
       </Block>
 

@@ -83,6 +83,12 @@ public static class ExcelEndpoints
         app.MapPut("/api/units/{unitId:int}/piping-view", (int unitId, Piping.PipingViewDto request, Piping.PipingViewSettings view, CancellationToken ct) =>
             view.SetAsync(unitId, request.Grouped, ct)).RequirePermission(Permissions.AssetsManage);
 
+        // How the unit shows the parts of a split item by default ("By equipment" or "As the client"), and how many it has.
+        app.MapGet("/api/units/{unitId:int}/client-view", (int unitId, Assets.ClientViewSettings view, CancellationToken ct) =>
+            view.GetAsync(unitId, ct)).RequirePermission(Permissions.AssetsView);
+        app.MapPut("/api/units/{unitId:int}/client-view", (int unitId, Assets.ClientViewDto request, Assets.ClientViewSettings view, CancellationToken ct) =>
+            view.SetAsync(unitId, request.Grouped, ct)).RequirePermission(Permissions.AssetsManage);
+
         // Notes under the Summary of the piping line list.
         app.MapGet("/api/units/{unitId:int}/piping-notes", (int unitId, Piping.PipingNoteService s, CancellationToken ct) => s.ListAsync(unitId, ct))
             .RequirePermission(Permissions.AssetsView);
@@ -226,10 +232,13 @@ public static class ExcelEndpoints
         }).RequirePermission(Permissions.CatalogManage);
 
         // ---------------------------------------------------------------- dashboard and categories
-        app.MapGet("/api/units/{unitId:int}/dashboard", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.GetAsync(unitId, ct, CategoryScopes.Parse(scope)))
+        // grouped=true: "As the client" (the parts of a split item count once); not given: the unit's default view.
+        app.MapGet("/api/units/{unitId:int}/dashboard", async (int unitId, string? scope, bool? grouped, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
+                await d.GetAsync(unitId, ct, CategoryScopes.Parse(scope), await view.ResolveAsync(unitId, grouped, ct)))
             .RequirePermission(Permissions.AssetsView);
 
-        app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", (int unitId, string card, UnitDashboard d, CancellationToken ct) => d.CardAsync(unitId, card, ct))
+        app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", async (int unitId, string card, bool? grouped, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
+                await d.CardAsync(unitId, card, ct, await view.ResolveAsync(unitId, grouped, ct)))
             .RequirePermission(Permissions.AssetsView);
 
         app.MapGet("/api/units/{unitId:int}/categories", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.CategoriesAsync(unitId, CategoryScopes.Parse(scope), ct))

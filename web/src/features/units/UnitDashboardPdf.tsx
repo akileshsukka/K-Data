@@ -8,7 +8,8 @@ import { useToast } from "../../components/Toast";
  * then Electrical & Instrumentation, then pipelines, each section starting on its own page.
  * The PDF code (and its libraries) only loads when the button is pressed.
  */
-export function ExportPdfButton({ unitId, unitName, plantName }: { unitId: number; unitName: string; plantName: string }) {
+/** grouped: the view on screen (split items as the client or by equipment); not given = the unit default. */
+export function ExportPdfButton({ unitId, unitName, plantName, grouped }: { unitId: number; unitName: string; plantName: string; grouped?: boolean }) {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -16,7 +17,7 @@ export function ExportPdfButton({ unitId, unitName, plantName }: { unitId: numbe
     setBusy(true);
     try {
       const { exportUnitPdf } = await import("./unitPdfReport");
-      const name = await exportUnitPdf({ unitId, unitName, plantName });
+      const name = await exportUnitPdf({ unitId, unitName, plantName, grouped });
       toast(`${name} downloaded`);
     } catch (e) {
       toast((e as Error).message || "Could not create the PDF.", "error");
