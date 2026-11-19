@@ -115,7 +115,7 @@ function SplitForm({ preview, reload }: { preview: SplitPreview; reload: () => v
               <li><strong>{tags[0] || "The first part"}</strong> is this asset: it keeps {preview.code}, {preview.inSimpro ? "its Simpro flange, " : ""}its history and the readings you leave on it.</li>
               <li>The other parts are <strong>new assets</strong> with their own Equipment ID. They get a copy of the preservation data, {preview.customFields} custom field value(s), {preview.groups} workpack/group membership(s), {preview.documentedGates} gate documentation row(s) and {preview.documents} linked document(s) (the files are not duplicated).</li>
               {preview.electricalTestRequired && <li>The {g}7 electrical test values stay on {tags[0] || "the first part"}; the new parts only inherit that they need one.</li>}
-              <li>All parts keep the client tag <strong>{source}</strong>, which joins them back into one row for the client. Until the grouped client Excel is available, the Excel lists each part on its own row.</li>
+              <li>All parts keep the client tag <strong>{source}</strong>, so the unit Excel shows them as one row again, as the client lists it. A change made to that row in the Excel waits in Import issues for you to say which parts it is for.</li>
               <li>Simpro: {preview.inSimpro ? `the flange of ${preview.code} gets the new tag, and ` : ""}the new parts are created by the next sync. Check the Simpro preview before syncing.</li>
               <li>An Excel of {preview.unit} downloaded before the split only changes {tags[0] || "the first part"}: download a new one.</li>
             </ul>

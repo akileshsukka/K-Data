@@ -437,11 +437,13 @@ export interface ImportCounts {
   rejected: number;
   warning: number;
   created: number;
+  /** Changes of a grouped row (parts of a split item) waiting for a decision in Import issues. */
+  grouped?: number;
   issues: number;
 }
 
 export type ImportStatus = "Previewed" | "Applied" | "AppliedWithIssues" | "Rejected" | "Failed" | "Cancelled";
-export type ImportOutcome = "Applied" | "Derived" | "No change" | "Invalid" | "Conflict" | "Rejected" | "Warning" | "Created";
+export type ImportOutcome = "Applied" | "Derived" | "No change" | "Invalid" | "Conflict" | "Rejected" | "Warning" | "Created" | "Grouped";
 
 export interface ImportRun {
   id: number;

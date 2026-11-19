@@ -177,6 +177,10 @@ public static class ExcelEndpoints
         issues.MapPost("/{id:long}", (long id, ResolveIssueRequest request, ClaimsPrincipal user, PresAppDbContext db, TimeProvider clock, CancellationToken ct) =>
             ImportQueries.ResolveAsync(db, id, request, user.Identity?.Name ?? "unknown", clock.GetUtcNow().UtcDateTime, ct));
 
+        // A changed cell of a grouped row (split item): apply the file's value to this part (field permissions checked inside).
+        issues.MapPost("/{id:long}/apply", (long id, ClaimsPrincipal user, GroupedIssueService s, CancellationToken ct) =>
+            s.ApplyAsync(id, user, ct)).RequirePermission(Permissions.AssetsEdit);
+
         // ---------------------------------------------------------------- templates and settings
         var templates = app.MapGroup("/api/excel-templates").RequirePermission(Permissions.CatalogManage);
 

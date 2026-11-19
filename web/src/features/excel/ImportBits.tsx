@@ -9,10 +9,11 @@ const outcomeStyle: Record<ImportOutcome, string> = {
   Conflict: "bg-hold/10 text-hold border-hold/30",
   Rejected: "bg-hold/10 text-hold border-hold/30",
   Warning: "bg-ongoing/10 text-ongoing border-ongoing/30",
+  Grouped: "bg-violet-soft text-violet border-violet/30",
 };
 
 export function OutcomeChip({ outcome }: { outcome: ImportOutcome }) {
-  return <span className={`inline-block rounded border px-1.5 py-0.5 text-sm font-semibold whitespace-nowrap ${outcomeStyle[outcome]}`}>{outcome}</span>;
+  return <span className={`inline-block rounded border px-1.5 py-0.5 text-sm font-semibold whitespace-nowrap ${outcomeStyle[outcome]}`}>{outcome === "Grouped" ? "Grouped: decide" : outcome}</span>;
 }
 
 const statusText: Record<ImportStatus, string> = {
@@ -37,4 +38,4 @@ export function StatusChip({ status }: { status: ImportStatus }) {
   return <span className={`inline-block rounded border px-2 py-0.5 text-sm font-semibold whitespace-nowrap ${statusStyle[status]}`}>{statusText[status]}</span>;
 }
 
-export const isIssue = (o: ImportOutcome) => o === "Invalid" || o === "Conflict" || o === "Rejected" || o === "Warning";
+export const isIssue = (o: ImportOutcome) => o === "Invalid" || o === "Conflict" || o === "Rejected" || o === "Warning" || o === "Grouped";

@@ -150,7 +150,8 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
         var baseRows = BaseSnapshot.FromJson(session.BaseJson).Rows.ToDictionary(r => r.Key);
 
         // ---- every list of the file (MasterList, and the E&I list of a v5 file): same structure, Key column exactly as exported
-        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row, ListColumns Columns)>();
+        // A grouped row (the parts of a split item: several ids in the Key) has one entry per part; Parts lists them all.
+        var rows = new List<(int Number, BaseRow Base, IXLTableRow Row, ListColumns Columns, IReadOnlyList<BaseRow> Parts)>();
         var changes = new List<ImportChange>();
         var seen = new HashSet<Guid>();
         foreach (var expected in signature.All())
@@ -176,11 +177,16 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
                     });
                     continue;
                 }
-                if (!Guid.TryParse(keyText, out var key) || !baseRows.TryGetValue(key, out var baseRow))
-                    throw new ImportRejected($"The hidden Key column was changed in {where} {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
-                if (!seen.Add(key))
-                    throw new ImportRejected($"The hidden Key of {where} {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
-                rows.Add((i, baseRow, row, list));
+                var parts = new List<BaseRow>();
+                foreach (var keyPart in keyText.Split(PipingWorkbookExporter.KeySeparator, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!Guid.TryParse(keyPart, out var key) || !baseRows.TryGetValue(key, out var baseRow))
+                        throw new ImportRejected($"The hidden Key column was changed in {where} {i}{(tag is null ? "" : $" ({tag})")}. Nothing was imported: download a new file and copy your changes into it.");
+                    if (!seen.Add(key))
+                        throw new ImportRejected($"The hidden Key of {where} {i}{(tag is null ? "" : $" ({tag})")} appears twice (a row was copied with its Key). Nothing was imported: download a new file.");
+                    parts.Add(baseRow);
+                }
+                foreach (var part in parts) rows.Add((i, part, row, list, parts));
             }
         }
         var missing = baseRows.Count - rows.Count;
@@ -202,8 +208,14 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
         var unitCategories = !holdOrNa ? []
             : await db.DashboardCategories.Where(c => c.UnitId == unitId && c.IsActive && c.Code != null).ToListAsync(ct);
 
-        foreach (var (number, baseRow, row, list) in rows)
+        foreach (var (number, baseRow, row, list, parts) in rows)
         {
+            if (parts.Count > 1)
+            {
+                // Only once per row (its first part): the changes of a grouped row wait for a decision in Import issues.
+                if (baseRow == parts[0]) changes.AddRange(GroupedRowChanges(number, parts, row, list, assets, options, unitCategories));
+                continue;
+            }
             assets.TryGetValue(baseRow.Key, out var asset);
             ImportChange Change(string field, ImportOutcome outcome, string? reason, string? baseValue = null, string? excel = null, string? current = null, string? newValue = null) => new()
             {
@@ -436,7 +448,7 @@ public sealed partial class ExcelImportService(PresAppDbContext db, AuditContext
     {
         foreach (var c in plan.Changes)
         {
-            c.Resolution = c.Outcome is ImportOutcome.Invalid or ImportOutcome.Conflict or ImportOutcome.Rejected or ImportOutcome.Warning
+            c.Resolution = c.Outcome is ImportOutcome.Invalid or ImportOutcome.Conflict or ImportOutcome.Rejected or ImportOutcome.Warning or ImportOutcome.Grouped
                 ? IssueResolution.Open : IssueResolution.None;
             run.Changes.Add(c);
         }

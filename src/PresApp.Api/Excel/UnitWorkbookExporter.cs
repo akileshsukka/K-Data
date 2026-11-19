@@ -81,8 +81,12 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var eiTable = WorkbookFormat.FindTable(wb, ExcelColumns.EiTable);
 
         // ---- rows: with an E&I list, the E&I items go there and the MasterList keeps the static and rotating equipment
-        var masterAssets = eiTable is null ? assets : assets.Where(a => a.Type != AssetType.ElectricalInstrument).ToList();
-        var eiAssets = eiTable is null ? [] : assets.Where(a => a.Type == AssetType.ElectricalInstrument).ToList();
+        // The parts of a split item (P-101A, P-101B of the client's P-101A/B) are one row, as the client lists them
+        // (GroupedRows). An inactive list is a plain report: one row per asset.
+        List<IReadOnlyList<Asset>> Rows(IEnumerable<Asset> list) =>
+            inactive is null ? GroupedRows.Group(list) : list.Select(a => (IReadOnlyList<Asset>)[a]).ToList();
+        var masterAssets = Rows(eiTable is null ? assets : assets.Where(a => a.Type != AssetType.ElectricalInstrument));
+        var eiAssets = eiTable is null ? [] : Rows(assets.Where(a => a.Type == AssetType.ElectricalInstrument));
         var lists = new ListSheet(wb.Worksheets.Add(WorkbookFormat.ListsSheet));
         // Category dropdowns: each list offers its own catalogue (an old file without EIList keeps every item in the MasterList).
         var context = new FillContext(unit, optionsBySet, eiTable is null ? categories : Coded(CategoryScope.Mechanical), lists);
@@ -95,7 +99,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         if (inactive is null && disciplineCol is not null && masterAssets.Count > 0)
         {
             var body = table.DataRange;
-            var all = masterAssets.Select(a => a.Discipline.Name).Distinct().ToList();
+            var all = masterAssets.Select(r => r[0].Discipline.Name).Distinct().ToList();
             var keep = all.Where(d => !HiddenDisciplines.Contains(d.Trim())).ToList();
             if (keep.Count > 0 && keep.Count < all.Count)
             {
@@ -103,7 +107,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                 foreach (var d in keep) filter.AddFilter(d);
                 for (var i = 0; i < masterAssets.Count; i++)
                 {
-                    if (HiddenDisciplines.Contains(masterAssets[i].Discipline.Name.Trim())) body.Row(i + 1).WorksheetRow().Hide();
+                    if (HiddenDisciplines.Contains(masterAssets[i][0].Discipline.Name.Trim())) body.Row(i + 1).WorksheetRow().Hide();
                 }
             }
         }
@@ -189,7 +193,8 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
             {
                 var values = editable.ToDictionary(f => f.Key, f => FieldValues.Read(f, a));
                 if (v4) values[TemplateV4.CategoryField] = a.Preservation?.DashboardCategory is { IsActive: true } c ? TemplateV4.Token(c) : null;
-                return new BaseRow(a.Id, a.Tag, a.Code, values);
+                // The tag written in the row: the client tag for the parts of a split item.
+                return new BaseRow(a.Id, a.ClientTag ?? a.Tag, a.Code, values);
             }).ToList()).ToJson()
         });
         await db.SaveChangesAsync(ct);
@@ -197,8 +202,11 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         return new ExportResult(fileName, output.ToArray(), sessionId, n);
     }
 
-    /// <summary>Writes one row per asset into a list table, adds its hidden Key column and its dropdowns.</summary>
-    private static List<ExcelColumn> Fill(IXLTable table, List<Asset> assets, FillContext context)
+    /// <summary>
+    /// Writes one row per asset (or per split item: its parts together, see <see cref="GroupedRows"/>) into a list
+    /// table, adds its hidden Key column (the ids of the row, comma separated) and its dropdowns.
+    /// </summary>
+    private static List<ExcelColumn> Fill(IXLTable table, List<IReadOnlyList<Asset>> rows, FillContext context)
     {
         var sheet = table.Worksheet;
         var headers = table.HeadersRow().Cells().Select(c => WorkbookFormat.CellText(c)).ToList();
@@ -207,12 +215,14 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         var columns = ExcelColumns.Map(headers, formulas.Select(f => f is not null).ToList());
 
         // ---- rows
-        var n = assets.Count;
+        var n = rows.Count;
         if (n > 1) table.DataRange.LastRow().InsertRowsBelow(n - 1);
         var body = table.DataRange;
+        var description = PreservationFields.Find("Description")!;
         for (var i = 0; i < n; i++)
         {
-            var a = assets[i];
+            var parts = rows[i];
+            var a = parts[0];
             var row = body.Row(i + 1);
             foreach (var col in columns)
             {
@@ -222,17 +232,19 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
                     case ColumnRole.Serial: cell.Value = i + 1; break;
                     case ColumnRole.OperatingUnit: cell.Value = context.Unit.Number; break;
                     case ColumnRole.Discipline: cell.Value = a.Discipline.Name; break;
-                    case ColumnRole.Tag: cell.Value = a.Tag ?? ""; break;
-                    case ColumnRole.Description: cell.Value = a.Description ?? ""; break;
+                    case ColumnRole.Tag: cell.Value = GroupedRows.RowTag(parts) ?? ""; break;
+                    case ColumnRole.Description: cell.Value = GroupedRows.Value(description, parts) ?? ""; break;
                     case ColumnRole.Formula: cell.FormulaR1C1 = formulas[col.Index]; break;
                     case ColumnRole.HoldCategory or ColumnRole.NaCategory:
-                        var category = a.Preservation?.DashboardCategory;
+                        var category = GroupedRows.Category(
+                            parts.Select(p => p.Preservation?.DashboardCategory is { IsActive: true, Code: not null } c ? c : null).ToList(),
+                            c => c.Section == CategorySection.Hold);
                         var section = col.Role == ColumnRole.HoldCategory ? CategorySection.Hold : CategorySection.NotApplicable;
                         cell.Style.NumberFormat.Format = "@";
                         cell.SetValue(category is { IsActive: true, Code: not null } && category.Section == section ? category.Code : "");
                         break;
                     case ColumnRole.Field:
-                        var text = FieldValues.Read(col.Field!, a) ?? "";
+                        var text = GroupedRows.Value(col.Field!, parts) ?? "";
                         if (col.Editable) { cell.Style.NumberFormat.Format = "@"; cell.SetValue(text); }
                         else cell.Value = text;
                         break;
@@ -250,7 +262,7 @@ public sealed class UnitWorkbookExporter(PresAppDbContext db, TimeProvider clock
         {
             var cell = body.Row(i + 1).Cell(table.DataRange.ColumnCount());
             cell.Style.NumberFormat.Format = "@";
-            cell.SetValue(assets[i].Id.ToString());
+            cell.SetValue(string.Join(PipingWorkbookExporter.KeySeparator, rows[i].Select(a => a.Id.ToString())));
         }
         sheet.Column(keyColumn).Hide();
         // A template that hides every column after the table (e.g. Z:XFD) would swallow the Key column into that

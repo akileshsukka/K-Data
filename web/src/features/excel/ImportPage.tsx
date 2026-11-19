@@ -102,7 +102,9 @@ export function ImportPage() {
         <>
           <section className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Summary">
             <Count label={preview ? "Changes to save" : "Changes saved"} value={changeCount} detail={`${c.applied} cells · ${c.derived} derived${c.created ? ` · ${c.created} new` : ""}`} />
-            <Count label="Issues" value={c.invalid + c.conflict + c.rejected} detail={`${c.conflict} conflicts · ${c.invalid} invalid · ${c.rejected} rejected`} tone={c.invalid + c.conflict + c.rejected > 0 ? "hold" : undefined} />
+            <Count label="Issues" value={c.invalid + c.conflict + c.rejected + (c.grouped ?? 0)}
+              detail={`${c.conflict} conflicts · ${c.invalid} invalid · ${c.rejected} rejected${c.grouped ? ` · ${c.grouped} to decide (grouped rows)` : ""}`}
+              tone={c.invalid + c.conflict + c.rejected + (c.grouped ?? 0) > 0 ? "hold" : undefined} />
             <Count label="Warnings" value={c.warning} detail="Applied, but check them" tone={c.warning > 0 ? "ongoing" : undefined} />
             <Count label="Rows in file" value={run.rowsInFile} detail={`${c.noChange} cells already up to date`} />
           </section>

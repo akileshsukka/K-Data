@@ -88,7 +88,14 @@ export function ImportIssuesPage() {
                   <p className="mt-1 text-sm text-done">Resolved {formatDateTime(i.change.resolvedAtUtc)} by {i.change.resolvedBy}{i.change.resolutionNote ? `: ${i.change.resolutionNote}` : ""}</p>
                 )}
               </div>
-              <Button variant={resolved ? "secondary" : "primary"} onClick={() => setResolving(i.change)}>{resolved ? "Reopen" : "Mark resolved"}</Button>
+              {!resolved && i.change.outcome === "Grouped" ? (
+                <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
+                  <ApplyButton change={i.change} />
+                  <Button variant="secondary" onClick={() => setResolving(i.change)}>Do not apply</Button>
+                </div>
+              ) : (
+                <Button variant={resolved ? "secondary" : "primary"} onClick={() => setResolving(i.change)}>{resolved ? "Reopen" : "Mark resolved"}</Button>
+              )}
             </li>
           ))}
         </ul>
@@ -96,6 +103,30 @@ export function ImportIssuesPage() {
 
       <ResolveDialog change={resolving} onClose={() => setResolving(null)} />
     </div>
+  );
+}
+
+/**
+ * A changed cell of a grouped row (the parts of a split item, e.g. P-101A/B): each part has its own issue.
+ * Apply it on the parts the value is for; "Do not apply" closes it with a note.
+ */
+function ApplyButton({ change }: { change: ImportChange }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const apply = useMutation({
+    mutationFn: () => api(`/api/import-issues/${change.id}/apply`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+      queryClient.invalidateQueries({ queryKey: ["asset"] });
+      queryClient.invalidateQueries({ queryKey: ["register"] });
+      toast(`Applied to ${change.assetTag ?? change.assetCode}`);
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
+  return (
+    <Button busy={apply.isPending} onClick={() => apply.mutate()}>
+      Apply “{change.newValue ?? "empty"}” to {change.assetTag ?? change.assetCode}
+    </Button>
   );
 }
 

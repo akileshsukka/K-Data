@@ -87,7 +87,7 @@ public static class ImportQueries
     private static ImportCounts CountsOf(Dictionary<ImportOutcome, int> c) => new(
         c.GetValueOrDefault(ImportOutcome.Applied), c.GetValueOrDefault(ImportOutcome.Derived), c.GetValueOrDefault(ImportOutcome.NoChange),
         c.GetValueOrDefault(ImportOutcome.Invalid), c.GetValueOrDefault(ImportOutcome.Conflict), c.GetValueOrDefault(ImportOutcome.Rejected),
-        c.GetValueOrDefault(ImportOutcome.Warning), c.GetValueOrDefault(ImportOutcome.Created));
+        c.GetValueOrDefault(ImportOutcome.Warning), c.GetValueOrDefault(ImportOutcome.Created), c.GetValueOrDefault(ImportOutcome.Grouped));
 
     private static ImportRunDto ToDto(ImportRun r, ImportCounts counts, ExcelSession? session) => new(
         r.Id, r.Kind.ToString(), r.FileName, r.UnitId, r.Unit?.Name, r.SessionId, r.UploadedBy, r.UploadedAtUtc, r.AppliedAtUtc,

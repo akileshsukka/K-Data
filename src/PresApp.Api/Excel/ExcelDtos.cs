@@ -1,8 +1,8 @@
 namespace PresApp.Api.Excel;
 
-public sealed record ImportCounts(int Applied, int Derived, int NoChange, int Invalid, int Conflict, int Rejected, int Warning, int Created)
+public sealed record ImportCounts(int Applied, int Derived, int NoChange, int Invalid, int Conflict, int Rejected, int Warning, int Created, int Grouped = 0)
 {
-    public int Issues => Invalid + Conflict + Rejected + Warning;
+    public int Issues => Invalid + Conflict + Rejected + Warning + Grouped;
 }
 
 public sealed record ImportRunDto(

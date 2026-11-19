@@ -36,7 +36,13 @@ public enum ImportOutcome
     Conflict,
     Rejected,
     Warning,
-    Created
+    Created,
+
+    /// <summary>
+    /// A changed cell of a grouped row (the parts of a split item, e.g. P-101A/B): one per part, never applied by the
+    /// import. In Import issues it is applied to the parts it is meant for, or closed.
+    /// </summary>
+    Grouped
 }
 
 public enum IssueResolution
