@@ -253,6 +253,8 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
         var customDefs = await db.FieldDefinitions.Include(f => f.OptionSet).ThenInclude(o => o!.Values).Where(f => f.IsActive).ToListAsync(ct);
         var assets = await (apply ? query : query.AsNoTracking()).ToListAsync(ct);
         var byTag = assets.Where(a => a.Tag != null).GroupBy(a => ValueNormalizer.ListKey(a.Tag!)).ToDictionary(g => g.Key, g => g.ToList());
+        // A client tag that was split (P-101A/B → P-101A, P-101B) is never created again as a new equipment.
+        var byClientTag = assets.Where(a => a.ClientTag != null).GroupBy(a => ValueNormalizer.ListKey(a.ClientTag!)).ToDictionary(g => g.Key, g => g.ToList());
         // Lines whose number is written differently (insulation code, size format) are found by their identity;
         // a non-standard number by its unit and sequence when nothing else contradicts.
         var rules = lines ? await LineNumberRules.LoadAsync(db, ct) : null;
@@ -301,6 +303,13 @@ public sealed class OnboardingService(PresAppDbContext db, AuditContext audit, T
                     changes.Add(Change(asset, "Description", ImportOutcome.Applied, null, row.Description, null, Truncate(row.Description, 255)));
                     asset.Description = Truncate(row.Description, 255);
                 }
+            }
+            else if (!lines && byClientTag.TryGetValue(key, out var splitParts))
+            {
+                changes.Add(Change(null, RowField, ImportOutcome.Rejected,
+                    $"{row.Tag} was split into {string.Join(", ", splitParts.OrderBy(p => p.Tag, NaturalComparer.Instance).Select(p => $"{p.Tag} ({p.Code})"))}. "
+                    + "Nothing is created or loaded for it: enter its values on each part in the app."));
+                continue;
             }
             else if (lines)
             {

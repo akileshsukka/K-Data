@@ -117,7 +117,8 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 ? new AssetCategoryDto(c.Id, c.Code, c.Label, Reporting.UnitDashboard.SectionKey(c.Section))
                 : null,
             showLineCheck && a.Pipeline is { } line ? new LineNumberCheck(line.NonStandardNumber, line.NumberNote) : null,
-            a.ElectricalTest is { } test ? ToDto(test) : null);
+            a.ElectricalTest is { } test ? ToDto(test) : null,
+            a.ClientTag);
     }
 
     internal static ElectricalTestDto ToDto(ElectricalTest t) => new(

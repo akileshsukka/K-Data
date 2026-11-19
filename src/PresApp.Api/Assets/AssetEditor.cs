@@ -696,7 +696,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
             x.r.MeasuredAtUtc, x.r.RecordedAtUtc, x.r.RecordedBy, x.r.Source.ToString(), x.r.Phase.ToString(), x.r.Note))
         .ToList();
 
-    private static void SetLatest(AssetPreservation p, string key, decimal value)
+    /// <summary>Writes the latest value of one measurement on the asset (null clears it).</summary>
+    internal static void SetLatest(AssetPreservation p, string key, decimal? value)
     {
         switch (key)
         {

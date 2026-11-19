@@ -16,6 +16,7 @@ import { PipeSpecsPage } from "../features/admin/PipeSpecsPage";
 import { LineCodesPage } from "../features/admin/LineCodesPage";
 import { PasteLinesPage } from "../features/lines/PasteLinesPage";
 import { NewAssetPage } from "../features/asset/NewAssetPage";
+import { SplitAssetPage } from "../features/asset/SplitAssetPage";
 import { BulkEditPage } from "../features/bulk/BulkEditPage";
 import { UnitHistoryPage } from "../features/history/UnitHistoryPage";
 import { UsersPage } from "../features/admin/UsersPage";
@@ -66,6 +67,7 @@ export const router = createBrowserRouter([
         children: [
           { path: "u/:unitId/new", element: <NewAssetPage /> },
           { path: "u/:unitId/lines/paste", element: <PasteLinesPage /> },
+          { path: "assets/:id/split", element: <SplitAssetPage /> },
         ],
       },
       {

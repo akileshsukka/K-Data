@@ -13,7 +13,8 @@ internal sealed class AssetConfiguration : IEntityTypeConfiguration<Asset>
         b.Property(x => x.Id).ValueGeneratedNever();
         b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
         b.Property(x => x.Code).HasMaxLength(Asset.CodeMaxLength).IsRequired();
-        b.Property(x => x.Tag).HasMaxLength(55);
+        b.Property(x => x.Tag).HasMaxLength(Asset.TagMaxLength);
+        b.Property(x => x.ClientTag).HasMaxLength(Asset.TagMaxLength);
         b.Property(x => x.Description).HasMaxLength(255);
         b.Property(x => x.NameplateData).HasMaxLength(Asset.NameplateMaxLength);
         b.Property(x => x.Priority).HasMaxLength(40);
@@ -22,6 +23,7 @@ internal sealed class AssetConfiguration : IEntityTypeConfiguration<Asset>
         b.HasIndex(x => x.Code).IsUnique();
         b.HasIndex(x => new { x.UnitId, x.Type, x.IsActive });
         b.HasIndex(x => x.Tag);
+        b.HasIndex(x => x.ClientTag);
         b.HasIndex(x => x.DisciplineId);
 
         b.HasOne(x => x.Discipline).WithMany().HasForeignKey(x => x.DisciplineId).OnDelete(DeleteBehavior.Restrict);

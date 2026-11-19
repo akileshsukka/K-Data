@@ -22,6 +22,14 @@ public class Asset : AuditableEntity, IFieldAudited
 
     /// <summary>Physical tag (client "Equip No"), Simpro custID.</summary>
     public string? Tag { get; set; }
+    public const int TagMaxLength = 55;
+
+    /// <summary>
+    /// The tag the client knows the item by, when one client tag was split into several assets (e.g. "P-101A/B" on both
+    /// P-101A and P-101B). Null for an asset that was never split. Every part of a split item carries the same text; the
+    /// client Excel shows them as one row. Set by <c>AssetSplit</c>.
+    /// </summary>
+    public string? ClientTag { get; set; }
 
     public string? Description { get; set; }
 

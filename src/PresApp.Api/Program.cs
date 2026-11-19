@@ -35,6 +35,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetQueries>();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetEditor>();
 builder.Services.AddScoped<PresApp.Api.Assets.AssetDeletion>();
+builder.Services.AddScoped<PresApp.Api.Assets.AssetSplit>();
 builder.Services.AddScoped<PresApp.Api.Assets.ElectricalTestService>();
 builder.Services.AddScoped<PresApp.Api.Excel.ElectricalTestWorkbook>();
 builder.Services.AddScoped<PresApp.Api.Excel.ReadingsWorkbook>();

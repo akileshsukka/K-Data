@@ -337,6 +337,8 @@ export interface AssetProfile {
   dashboardCategory: { id: number; code: string | null; label: string; section: CategorySection } | null;
   lineNumberCheck?: LineNumberCheck | null;
   electricalTest?: ElectricalTest | null;
+  /** The client's tag when this asset is one part of a split item (e.g. P-101A/B). */
+  clientTag?: string | null;
 }
 
 /** E7 electrical test of an asset (motors). Values by measure key; ratios (DAR, PI) calculated by the server per block key. */
@@ -918,4 +920,42 @@ export interface SetActiveResult {
 /** How a unit shows its lines by default: one row per line, or sizes of a line grouped. */
 export interface PipingView {
   grouped: boolean;
+}
+
+/** One gate of an asset, as it is now (split preview) or as one part of a split gets it. */
+export interface SplitGate {
+  gate: number;
+  status: string | null;
+  comments: string | null;
+}
+
+/** What a split starts from (GET /api/assets/{id}/split). `blocked` says why it cannot be split. */
+export interface SplitPreview {
+  id: string;
+  code: string;
+  tag: string | null;
+  clientTag: string | null;
+  description: string | null;
+  unit: string;
+  type: AssetType;
+  inSimpro: boolean;
+  currentGate: string;
+  suggestedTags: string[];
+  gates: SplitGate[];
+  statusOptions: string[];
+  readings: { id: number; measurement: string; value: number; unitOfMeasure: string | null; measuredAtUtc: string; recordedBy: string; note: string | null }[];
+  documents: number;
+  documentedGates: number;
+  customFields: number;
+  groups: number;
+  electricalTestRequired: boolean;
+  stamp: string;
+  blocked: string | null;
+}
+
+export interface SplitResult {
+  clientTag: string;
+  parts: { id: string; code: string; tag: string; currentGate: string; new: boolean }[];
+  readingsMoved: number;
+  readingsCopied: number;
 }

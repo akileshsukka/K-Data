@@ -71,6 +71,12 @@ export function AssetPage() {
             {!a.isActive && <span className="ml-2 rounded bg-hold/10 px-1.5 py-0.5 text-sm font-semibold text-hold">Inactive</span>}
             {a.lineNumberCheck?.nonStandard && <NonStandardBadge note={a.lineNumberCheck.note} className="ml-2 align-middle" />}
           </p>
+          {a.clientTag && (
+            <p className="mt-1 text-sm">
+              <span className="rounded bg-violet-soft px-1.5 py-0.5 font-semibold text-violet">Client tag {a.clientTag}</span>
+              <span className="ml-2 text-muted">This asset is one part of it.</span>
+            </p>
+          )}
           {a.values.Description && <p className="mt-1 max-w-2xl">{a.values.Description}</p>}
           {a.lineNumberCheck?.nonStandard && <p className="mt-1 text-sm text-ongoing">Non-standard line number (internal): {a.lineNumberCheck.note}. Complete size, spec or service by hand if you know them.</p>}
         </div>
@@ -245,9 +251,19 @@ function AdminCard({ asset }: { asset: AssetProfile }) {
       <p className="mt-1 text-sm text-muted">
         {asset.simproFlangeId ? "In Simpro." : "Not in Simpro yet: it is created by the next sync."} Last change by {asset.updatedBy} on {formatDateTime(asset.updatedAtUtc)}.
       </p>
-      <Button variant={asset.isActive ? "danger" : "secondary"} className="mt-3" busy={setActive.isPending} onClick={toggle}>
-        {asset.isActive ? "Deactivate asset" : "Reactivate asset"}
-      </Button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {asset.isActive && asset.type !== "Pipeline" && (
+          <Link to={`/assets/${asset.id}/split`} className="inline-flex min-h-10 items-center rounded-md border border-line bg-panel px-4 text-[15px] font-semibold hover:border-violet hover:text-violet">
+            Split equipment
+          </Link>
+        )}
+        <Button variant={asset.isActive ? "danger" : "secondary"} busy={setActive.isPending} onClick={toggle}>
+          {asset.isActive ? "Deactivate asset" : "Reactivate asset"}
+        </Button>
+      </div>
+      {asset.isActive && asset.type !== "Pipeline" && (
+        <p className="mt-2 text-sm text-muted">Split: when the client lists it under one tag (e.g. P-101A/B) but each part is worked on separately.</p>
+      )}
     </section>
   );
 }

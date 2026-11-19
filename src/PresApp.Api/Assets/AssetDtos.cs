@@ -30,7 +30,8 @@ public sealed record AssetProfile(
     string CurrentGate, string SuggestedCurrentGate, IReadOnlyDictionary<string, string?> Values,
     IReadOnlyList<GateDocDto> GateDocuments, IReadOnlyList<GroupRefDto> Groups,
     DateTime? PreservedAtUtc, string? PreservedBy, string UpdatedBy, DateTime UpdatedAtUtc,
-    AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null, ElectricalTestDto? ElectricalTest = null);
+    AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null, ElectricalTestDto? ElectricalTest = null,
+    string? ClientTag = null);
 
 /// <summary>E7 electrical test of an asset: values by measure key, calculated DAR / PI ratios by block key, required values still missing.</summary>
 public sealed record ElectricalTestDto(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values,

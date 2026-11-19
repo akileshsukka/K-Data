@@ -72,6 +72,12 @@ public static class AssetEndpoints
         app.MapPost("/api/assets/delete", (DeleteAssetsRequest request, AssetDeletion d, CancellationToken ct) =>
             d.DeleteAsync(request, ct)).RequirePermission(Permissions.AssetsDelete);
 
+        // Split an asset the client lists under one grouped tag (P-101A/B) into separate assets: preview, then split.
+        app.MapGet("/api/assets/{id:guid}/split", (Guid id, AssetSplit s, CancellationToken ct) =>
+            s.PreviewAsync(id, ct)).RequirePermission(Permissions.AssetsManage);
+        app.MapPost("/api/assets/{id:guid}/split", (Guid id, SplitAssetRequest request, ClaimsPrincipal user, AssetSplit s, CancellationToken ct) =>
+            s.SplitAsync(id, request, user.Identity?.Name ?? "", ct)).RequirePermission(Permissions.AssetsManage);
+
         app.MapPost("/api/bulk/preview", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.BulkAsync(request, apply: false, user, ct)).RequirePermission(Permissions.BulkEdit);
 

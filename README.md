@@ -123,6 +123,18 @@ Printable section acceptance gate forms, one page per selected asset: select row
 - **Admin → Gate forms**: source document of each unit (mechanical and electrical), default Unit ID, and the Word template of each plant and form. A unit without a source prints its forms with the source empty after a warning.
 - Templates are the client forms with markers: `{{UNIT}}`, `{{SOURCE}}` (the only ones allowed in headers/footers), `{{RECORD_NO}}`, `{{DATE}}`, `{{SECTION}}` (required), `{{WORKPACK}}`, `{{UNIT_ID}}`. An upload is checked and kept as a version; download its sample, then activate it. Without an active version the built-in template is used (`src/PresApp.Api/GateForms/Resources`: work pack layout for the mechanical form of every plant, electrical form for all).
 
+## Split equipment (grouped client tags)
+
+Some equipment comes in the client list under one grouped tag (`P-101A/B`) but is worked on as separate equipment. **Split equipment** (asset page → Administration, roles with `assets.manage`) turns it into separate assets; equipment that is worked on as one stays as it is.
+
+- The existing asset becomes the first part: it keeps its Equipment ID, Simpro flange, history and the readings left on it; only its tag changes (P-101A). Each other part is a new asset with the next Equipment ID and a copy of the preservation data, custom fields, groups, gate documentation and document links (files are not duplicated). E7 test values are not copied; the new parts only inherit that they need one.
+- The preview proposes the tags from the grouped tag (`P-101A/B`, `P-101 A&B`, `P-101A/P-101B` → P-101A, P-101B; 2 to 6 parts) and shows every gate of every part, starting from the current values, to correct the ones that do not apply. Current Gate of a part follows its gates when they are changed. The **Client Excel** column shows what the client will see: the most advanced status among the parts (Completed > Ongoing > Hold); Not Applicable only when all parts are N/A.
+- Each reading goes to one part or is copied to all of them (the copy says "Copied from P-101A/B when it was split."). A note with a part's letter or tag ("B", "P-101B") picks that part already. Latest readings are recalculated for every part.
+- Nothing is saved until confirmed, in one transaction. If the asset changed after the preview was opened (a reading, a gate), the split is refused and the preview has to be reloaded. Every part gets a "(split)" row in its history.
+- Every part keeps the client's tag (`Asset.ClientTag`). A client list loaded again with `P-101A/B` never creates it again: the row goes to Import issues. Simpro: the first part's flange gets its new tag and the new parts are created by the next sync.
+- An Excel of the unit downloaded before the split only changes the first part: download a new one.
+- Take a backup before splitting on the server (`deploy/sql/02-backup-jobs.sql`), and check the Simpro preview before the next sync.
+
 ## Server installation (once)
 
 1. **Database.** In SSMS on EM-L-5236, run `deploy/sql/01-create-database.sql`. It creates the empty `PresApp` database. PresApp creates the tables on its first start; the service login is created by the install script (step 4), because the Windows account `NT SERVICE\PresApp` only exists once the service is installed.
