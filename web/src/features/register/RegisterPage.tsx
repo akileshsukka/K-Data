@@ -428,6 +428,12 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 body={{ type, assetIds: filtered.map((r) => r.id), grouped: lines ? grouped : undefined }}
                 label={`Download inactive list (${filtered.length})`} />
             )}
+            {/* Documentation ready: every asset on screen with the date and work pack of its last gate form and whether the G8/E8 signed file is uploaded. */}
+            {session.can(Perm.excelExport) && !f.inactive && f.docs === "ready" && filtered.length > 0 && (
+              <DownloadExcelButton unitId={unitId} variant="secondary" path={`/api/units/${unitId}/gate-forms/documentation`}
+                body={{ type, assetIds: filtered.map((r) => r.id) }}
+                label={`Documentation list (${filtered.length})`} />
+            )}
             {session.can(Perm.excelExport) && !f.inactive && type === "Equipment" && <DownloadExcelButton unitId={unitId} variant="secondary" />}
             {session.can(Perm.excelExport) && !f.inactive && lines && <DownloadExcelButton unitId={unitId} variant="secondary" piping grouped={grouped} label={grouped ? "Download line list (grouped)" : "Download line list"} />}
             {seesNumberCheck && session.can(Perm.assetsEdit) && all.some((r) => r.line?.numberCheck?.nonStandard) && (

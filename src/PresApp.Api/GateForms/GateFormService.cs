@@ -330,10 +330,12 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
     private static string SectionDefault(FormAsset a) => string.IsNullOrWhiteSpace(a.Tag) ? a.Code : a.Tag.Trim();
 
     /// <summary>The P&amp;ID number of a line (several, one per line, become "a, b"); equipment has none yet.</summary>
-    private static string? WorkPackDefault(FormAsset a)
+    private static string? WorkPackDefault(FormAsset a) => WorkPackFromPid(a.PidNumber);
+
+    internal static string? WorkPackFromPid(string? pidNumber)
     {
-        if (string.IsNullOrWhiteSpace(a.PidNumber)) return null;
-        return string.Join(", ", a.PidNumber.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (string.IsNullOrWhiteSpace(pidNumber)) return null;
+        return string.Join(", ", pidNumber.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     public static string FormatDate(DateOnly d) => d.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);

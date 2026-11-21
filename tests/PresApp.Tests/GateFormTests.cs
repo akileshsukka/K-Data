@@ -215,6 +215,54 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Contains("not a Word document", await ErrorAsync(await UploadAsync(plantId, [1, 2, 3], "e.docx")));
     }
 
+    [Fact]
+    public async Task Documentation_list_has_the_last_form_date_and_work_pack_and_says_whether_the_G8_file_is_uploaded()
+    {
+        var unitId = await UnitAsync("Unit 39");
+        var signed = await CreateAsync(unitId, "Equipment", "Static", "39-V-951");
+        var line = await CreateAsync(unitId, "Pipeline", "Piping", "39-0951-HC-4\"-77010-P", pid: "39-00-30-951");
+        var noForm = await CreateAsync(unitId, "Equipment", "Static", "39-V-952");
+
+        // Two prints: only the last date counts.
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-10", section = (string?)null, workPack = "WP-1", unitId = (string?)null });
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-20", section = (string?)null, workPack = "WP-2", unitId = (string?)null });
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = "2026-11-21", section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+
+        // The signed file of G8 for the vessel; a G1 file for the line does not count.
+        foreach (var (id, gate) in new[] { (signed, 8), (line, 1) })
+        {
+            var file = new ByteArrayContent(System.Text.Encoding.ASCII.GetBytes($"%PDF-1.7\n% {id}\n%%EOF\n"));
+            file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            var form = new MultipartFormDataContent { { file, "file", "signed.pdf" }, { new StringContent(JsonSerializer.Serialize(new[] { new { assetId = id, gate } })), "links" } };
+            Assert.Equal(HttpStatusCode.Created, (await admin.PostAsync("/api/documents", form)).StatusCode);
+        }
+
+        var response = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/documentation", new { type = "Equipment", assetIds = new[] { noForm, signed, line } });
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
+        var ws = wb.Worksheet("Documentation");
+        Assert.Equal(["Tag", "Description", "Gate form date", "Work pack / P&ID rev.", "G8 signed file uploaded"], Enumerable.Range(1, 5).Select(c => ws.Cell(1, c).GetString()));
+        // The line is not in the Equipment register; the rest keep the order of the screen.
+        Assert.Equal("39-V-952", ws.Cell(2, 1).GetString());
+        Assert.True(ws.Cell(2, 3).IsEmpty());
+        Assert.Equal("", ws.Cell(2, 4).GetString());
+        Assert.Equal("No", ws.Cell(2, 5).GetString());
+        Assert.Equal("39-V-951", ws.Cell(3, 1).GetString());
+        Assert.Equal("Item 39-V-951", ws.Cell(3, 2).GetString());
+        Assert.Equal(new DateTime(2026, 11, 20), ws.Cell(3, 3).GetDateTime());
+        Assert.Equal("WP-2", ws.Cell(3, 4).GetString());
+        Assert.Equal("Yes", ws.Cell(3, 5).GetString());
+        Assert.True(ws.Cell(4, 1).IsEmpty());
+
+        // Lines: the work pack printed is the P&ID number when nothing else was typed.
+        response = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/documentation", new { type = "Pipeline", assetIds = new[] { line } });
+        using var lines = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
+        var lws = lines.Worksheet("Documentation");
+        Assert.Equal(new DateTime(2026, 11, 21), lws.Cell(2, 3).GetDateTime());
+        Assert.Equal("39-00-30-951", lws.Cell(2, 4).GetString());
+        Assert.Equal("No", lws.Cell(2, 5).GetString());
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private sealed record Doc(string Header, List<string> Pages);

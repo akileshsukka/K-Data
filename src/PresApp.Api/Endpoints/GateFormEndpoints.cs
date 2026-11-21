@@ -22,6 +22,14 @@ public static class GateFormEndpoints
             return Results.File(content, GateFormService.DocxType, name);
         }).RequirePermission(Permissions.ExcelExport);
 
+        // Excel of the assets on screen (e.g. "Documentation ready"): tag, description, date and work pack of the last gate form
+        // printed, and whether the G8 / E8 signed file is uploaded.
+        app.MapPost("/api/units/{unitId:int}/gate-forms/documentation", async (int unitId, GateFormDocumentationRequest request, GateFormDocumentationList list, CancellationToken ct) =>
+        {
+            var (name, content) = await list.ExportAsync(unitId, request, ct);
+            return Results.File(content, GateFormDocumentationList.XlsxType, name);
+        }).RequirePermission(Permissions.ExcelExport);
+
         // ---------------------------------------------------------------- administration
         var admin = app.MapGroup("/api/gate-forms").RequirePermission(Permissions.CatalogManage);
 
