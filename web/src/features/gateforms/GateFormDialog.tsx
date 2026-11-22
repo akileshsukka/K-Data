@@ -18,7 +18,7 @@ const titles: Record<GateFormKind, string> = {
  * Word file of the printable section acceptance gate, one page per selected asset. Each row starts from what was saved
  * for the asset (or the tag / P&ID number / unit Unit ID); date and the other fields can be set for all at once or row by
  * row. Generating saves the values with the assets (roles that may edit), and an empty Record No. takes the next one of
- * its discipline and unit (ITR-STAT-541-001). "Save without printing" keeps Record Nos. typed for forms made outside the app.
+ * its discipline and unit (ITR-541-STAT-001). "Save without printing" keeps Record Nos. typed for forms made outside the app.
  */
 export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open: boolean; onClose: () => void; unitId: number; kind: GateFormKind; assetIds: string[] }) {
   const toast = useToast();

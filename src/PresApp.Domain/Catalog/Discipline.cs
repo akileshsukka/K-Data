@@ -12,7 +12,7 @@ public class Discipline
     public string? Prefix { get; set; }
 
     /// <summary>
-    /// Code of the gate form Record No. (STAT → ITR-STAT-541-001). Empty = the Record No. of its assets is typed by hand.
+    /// Code of the gate form Record No. (STAT → ITR-541-STAT-001). Empty = the Record No. of its assets is typed by hand.
     /// Configurable by admin (Admin → Gate forms).
     /// </summary>
     public string? RecordNoCode { get; set; }

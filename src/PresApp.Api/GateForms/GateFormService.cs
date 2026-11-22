@@ -275,7 +275,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
     }
 
     /// <summary>
-    /// The Record No. kept for the asset: the one typed (written as ITR-CODE-UNIT-NNN when it follows that pattern; refused
+    /// The Record No. kept for the asset: the one typed (written as ITR-UNIT-CODE-NNN when it follows that pattern; refused
     /// when another asset has it). Left empty: the one it already has (a reprint never takes a new number), else, when
     /// <paramref name="assign"/>, the next one of its discipline and unit.
     /// </summary>

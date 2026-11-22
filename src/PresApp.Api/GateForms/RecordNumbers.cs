@@ -11,7 +11,7 @@ public sealed record RecordNoSettingsDto(List<RecordNoCodeDto> Codes, List<Recor
 public sealed record SaveRecordNoCode(string? Code);
 
 /// <summary>
-/// Record No. of the gate forms (ITR): <c>ITR-{discipline code}-{unit}-{number}</c>, e.g. ITR-STAT-541-001.
+/// Record No. of the gate forms (ITR): <c>ITR-{unit}-{discipline code}-{number}</c>, e.g. ITR-541-STAT-001.
 /// <list type="bullet">
 /// <item>Each discipline has its code (Admin → Gate forms); without one, the Record No. of its assets is typed by hand.</item>
 /// <item>One counter per code and unit. Printing an asset with no Record No. gives it the next number; reprints keep it.</item>

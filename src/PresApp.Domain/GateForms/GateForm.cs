@@ -79,7 +79,7 @@ public class GateFormEntry : AuditableEntity, IFieldAudited
 }
 
 /// <summary>
-/// Last Record No. number used per discipline code and unit, for Record Nos. like ITR-STAT-541-001. Each (code, unit) pair
+/// Last Record No. number used per discipline code and unit, for Record Nos. like ITR-541-STAT-001. Each (code, unit) pair
 /// counts independently. A number typed by hand above it moves it up, so the next automatic one follows it.
 /// </summary>
 public class RecordNoSequence
@@ -94,21 +94,31 @@ public static class RecordNoFormat
     public const string Start = "ITR";
     public const int CodeMaxLength = 10;
 
-    /// <summary>Builds e.g. ITR-STAT-541-001 (unit and number padded to 3 digits, as in the Equipment IDs).</summary>
+    /// <summary>Builds e.g. ITR-541-STAT-001: unit first, then the discipline code (unit and number padded to 3 digits, as in the Equipment IDs).</summary>
     public static string Build(string code, int unitNumber, int number) =>
-        $"{Start}-{code.Trim().ToUpperInvariant()}-{unitNumber:000}-{number:000}";
+        $"{Start}-{unitNumber:000}-{code.Trim().ToUpperInvariant()}-{number:000}";
 
-    /// <summary>Reads ITR-CODE-UNIT-NUMBER in any case and padding; false for anything else.</summary>
+    /// <summary>
+    /// Reads ITR-UNIT-CODE-NUMBER in any case and padding; false for anything else. The first order used (ITR-CODE-UNIT-NUMBER,
+    /// e.g. ITR-STAT-541-001) is still read, so a number typed that way is written again with the unit first.
+    /// </summary>
     public static bool TryParse(string? value, out string code, out int unitNumber, out int number)
     {
         code = "";
         unitNumber = number = 0;
         var parts = value?.Trim().Split('-');
         if (parts is not { Length: 4 } || !string.Equals(parts[0], Start, StringComparison.OrdinalIgnoreCase)) return false;
-        if (!IsCode(parts[1])) return false;
-        if (!int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out unitNumber)) return false;
         if (!int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out number) || number <= 0) return false;
-        code = parts[1].ToUpperInvariant();
+        // Unit first (ITR-541-STAT-001); when both parts are digits, this is the order taken.
+        if (IsCode(parts[2]) && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out unitNumber))
+            code = parts[2].ToUpperInvariant();
+        else if (IsCode(parts[1]) && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out unitNumber))
+            code = parts[1].ToUpperInvariant();
+        else
+        {
+            unitNumber = number = 0;
+            return false;
+        }
         return true;
     }
 

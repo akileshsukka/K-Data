@@ -85,7 +85,7 @@ internal static class SeedData
     ];
 
     /// <summary>
-    /// Code of the gate form Record No. (ITR-STAT-541-001) given to a discipline when it is created. Existing databases get
+    /// Code of the gate form Record No. (ITR-541-STAT-001) given to a discipline when it is created. Existing databases get
     /// them from migration Phase19RecordNo; an admin changes them in Admin → Gate forms.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> RecordNoCodes = new Dictionary<string, string>

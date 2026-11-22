@@ -870,7 +870,7 @@ export interface GateFormPrepared {
   skipped: { code: string; tag: string | null; reason: string }[];
 }
 
-/** Record No. (ITR) code of a discipline: ITR-{code}-{unit}-{number}. */
+/** Record No. (ITR) code of a discipline: ITR-{unit}-{code}-{number}. */
 export interface RecordNoCode {
   disciplineId: number;
   discipline: string;

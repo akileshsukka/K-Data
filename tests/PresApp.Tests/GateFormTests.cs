@@ -63,7 +63,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Contains("System / circuit / section 39-V-901 / circuit 2", doc.Pages[0]);
         Assert.Contains("Work pack / P&ID rev. WP-12 rev B", doc.Pages[0]);
         // Empty fields print the blank line of the client form; an empty Record No. takes the next one of the discipline (Piping).
-        Assert.Contains("Record No. ITR-PIP-039-", doc.Pages[1]);
+        Assert.Contains("Record No. ITR-039-PIP-", doc.Pages[1]);
         Assert.Contains("Date ______________________________", doc.Pages[1]);
         Assert.Contains("System / circuit / section 39-0901-HC-4\"-77010-P", doc.Pages[1]);
         Assert.Contains("Work pack / P&ID rev. 39-00-30-201, 39-00-30-202", doc.Pages[1]);
@@ -74,7 +74,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal("REC-7", entries[vessel].RecordNo);
         Assert.Equal(new DateOnly(2026, 11, 25), entries[vessel].Date);
         Assert.Equal("39-V-901 / circuit 2", entries[vessel].Section);
-        Assert.StartsWith("ITR-PIP-039-", entries[line].RecordNo);
+        Assert.StartsWith("ITR-039-PIP-", entries[line].RecordNo);
         Assert.Null(entries[line].Section);
         Assert.Null(entries[line].WorkPack);
 
@@ -252,7 +252,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal("No", ws.Cell(2, 6).GetString());
         Assert.Equal("39-V-951", ws.Cell(3, 1).GetString());
         Assert.Equal("Item 39-V-951", ws.Cell(3, 2).GetString());
-        Assert.StartsWith("ITR-STAT-039-", ws.Cell(3, 3).GetString());
+        Assert.StartsWith("ITR-039-STAT-", ws.Cell(3, 3).GetString());
         Assert.Equal(new DateTime(2026, 11, 20), ws.Cell(3, 4).GetDateTime());
         Assert.Equal("WP-2", ws.Cell(3, 5).GetString());
         Assert.Equal("Yes", ws.Cell(3, 6).GetString());
@@ -279,28 +279,28 @@ public sealed class GateFormTests : IClassFixture<TestApp>
 
         // The dialog shows what each asset will get, in the order of the rows.
         var rows = (await PrepareAsync(admin, unitId, "Mechanical", a, b)).GetProperty("rows");
-        Assert.Equal("ITR-STAT-041-001", rows[0].GetProperty("recordNoNext").GetString());
-        Assert.Equal("ITR-STAT-041-002", rows[1].GetProperty("recordNoNext").GetString());
+        Assert.Equal("ITR-041-STAT-001", rows[0].GetProperty("recordNoNext").GetString());
+        Assert.Equal("ITR-041-STAT-002", rows[1].GetProperty("recordNoNext").GetString());
 
         var doc = await GenerateAsync(admin, unitId, "Mechanical", Row(a), Row(b));
-        Assert.Contains("Record No. ITR-STAT-041-001", doc.Pages[0]);
-        Assert.Contains("Record No. ITR-STAT-041-002", doc.Pages[1]);
+        Assert.Contains("Record No. ITR-041-STAT-001", doc.Pages[0]);
+        Assert.Contains("Record No. ITR-041-STAT-002", doc.Pages[1]);
 
         // A reprint keeps the number, even sent empty.
         doc = await GenerateAsync(admin, unitId, "Mechanical", Row(a));
-        Assert.Contains("Record No. ITR-STAT-041-001", doc.Pages[0]);
+        Assert.Contains("Record No. ITR-041-STAT-001", doc.Pages[0]);
         Assert.Equal(JsonValueKind.Null, (await PrepareAsync(admin, unitId, "Mechanical", a)).GetProperty("rows")[0].GetProperty("recordNoNext").ValueKind);
 
         // A form made outside the app: its number typed by hand and saved without printing. The counter follows it.
         var saved = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { Row(c, " itr-stat-41-10 ") } });
         Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
-        Assert.Equal("ITR-STAT-041-010", await app.WithDbAsync(db => db.GateFormEntries.Where(e => e.AssetId == c).Select(e => e.RecordNo).FirstAsync()));
+        Assert.Equal("ITR-041-STAT-010", await app.WithDbAsync(db => db.GateFormEntries.Where(e => e.AssetId == c).Select(e => e.RecordNo).FirstAsync()));
         doc = await GenerateAsync(admin, unitId, "Mechanical", Row(d));
-        Assert.Contains("Record No. ITR-STAT-041-011", doc.Pages[0]);
+        Assert.Contains("Record No. ITR-041-STAT-011", doc.Pages[0]);
 
         // Another asset's number is refused; saving without printing never takes a number.
         var fifth = await CreateAsync(unitId, "Equipment", "Static", "41-V-905");
-        var taken = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/generate", new { kind = "Mechanical", rows = new[] { Row(fifth, "ITR-STAT-041-002") } });
+        var taken = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/generate", new { kind = "Mechanical", rows = new[] { Row(fifth, "ITR-041-STAT-002") } });
         Assert.Contains("already used by 41-V-902", await ErrorAsync(taken));
         (await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { new { assetId = fifth, recordNo = (string?)null, date = "2026-11-22", section = (string?)null, workPack = (string?)null, unitId = (string?)null } } })).EnsureSuccessStatusCode();
         Assert.Null(await app.WithDbAsync(db => db.GateFormEntries.Where(x => x.AssetId == fifth).Select(x => x.RecordNo).FirstAsync()));
@@ -309,7 +309,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var settings = await admin.GetFromJsonAsync<JsonElement>("/api/gate-forms/record-numbers");
         var counter = settings.GetProperty("counters").EnumerateArray().Single(x => x.GetProperty("unitNumber").GetInt32() == 41 && x.GetProperty("code").GetString() == "STAT");
         Assert.Equal(11, counter.GetProperty("lastNumber").GetInt32());
-        Assert.Equal("ITR-STAT-041-012", counter.GetProperty("next").GetString());
+        Assert.Equal("ITR-041-STAT-012", counter.GetProperty("next").GetString());
         var codes = settings.GetProperty("codes").EnumerateArray().ToDictionary(x => x.GetProperty("discipline").GetString()!, x => x);
         Assert.Equal("STAT", codes["Static"].GetProperty("code").GetString());
         Assert.Equal("ELEC", codes["Electrical"].GetProperty("code").GetString());
@@ -322,7 +322,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal(JsonValueKind.Null, (await PrepareAsync(admin, unitId, "Mechanical", fifth)).GetProperty("rows")[0].GetProperty("recordNoNext").ValueKind);
         var put = await admin.PutAsJsonAsync($"/api/gate-forms/record-numbers/disciplines/{staticId}", new { code = "stat" });
         Assert.Equal("STAT", (await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-        Assert.Equal("ITR-STAT-041-012", (await PrepareAsync(admin, unitId, "Mechanical", fifth)).GetProperty("rows")[0].GetProperty("recordNoNext").GetString());
+        Assert.Equal("ITR-041-STAT-012", (await PrepareAsync(admin, unitId, "Mechanical", fifth)).GetProperty("rows")[0].GetProperty("recordNoNext").GetString());
     }
 
     // ------------------------------------------------------------------ helpers

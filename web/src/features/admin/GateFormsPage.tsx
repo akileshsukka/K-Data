@@ -71,7 +71,7 @@ function RecordNumbersSection() {
     <section className="mt-6 rounded-lg border border-line bg-panel p-5">
       <h2 className="text-xl font-semibold">Record No. (ITR)</h2>
       <p className="mt-1 max-w-4xl text-muted">
-        An asset printed with the Record No. empty gets the next one of its discipline and unit: <code>ITR-STAT-541-001</code>, <code>ITR-STAT-541-002</code>…
+        An asset printed with the Record No. empty gets the next one of its discipline and unit: <code>ITR-541-STAT-001</code>, <code>ITR-541-STAT-002</code>…
         Reprints keep it. It can always be typed by hand in the form dialog (with “Save without printing” for forms made outside the app);
         a typed number above the counter moves the counter up. A discipline without a code has its Record No. typed by hand.
       </p>
