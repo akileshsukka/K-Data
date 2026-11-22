@@ -29,6 +29,7 @@ public static class Permissions
     public const string CatalogManage = "catalog.manage";
     public const string UsersManage = "users.manage";
     public const string LinesNonStandard = "lines.nonStandard";
+    public const string ReportHighlights = "report.highlights";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -55,6 +56,7 @@ public static class Permissions
         new(CatalogManage, "Manage lists and custom fields"),
         new(UsersManage, "Manage users and roles"),
         new(LinesNonStandard, "Load lines whose number is not in the standard format (format check off) and see the internal \"non-standard number\" mark and filter"),
+        new(ReportHighlights, "Write the unit highlights of the daily report"),
     ];
 
     public static bool IsKnown(string permission) => All.Any(p => p.Key == permission);

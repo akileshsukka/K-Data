@@ -51,6 +51,7 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<CategoryKeyword> CategoryKeywords => Set<CategoryKeyword>();
     public DbSet<UnitReportConfig> UnitReportConfigs => Set<UnitReportConfig>();
     public DbSet<PipingNote> PipingNotes => Set<PipingNote>();
+    public DbSet<UnitHighlight> UnitHighlights => Set<UnitHighlight>();
 
     // Audit, imports, Simpro
     public DbSet<ChangeLog> ChangeLogs => Set<ChangeLog>();

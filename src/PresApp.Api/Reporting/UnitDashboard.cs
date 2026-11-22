@@ -115,14 +115,54 @@ public sealed class UnitDashboard(PresAppDbContext db)
     }
 
     /// <summary>
+    /// Figures of one scope of a unit for the daily report, counted exactly like the dashboard: totals, one row per
+    /// discipline (E&amp;I as one row) and the tags preserved, keyed by their first asset. <paramref name="valueAt"/> gives the
+    /// statuses at an earlier moment; categories (hold, not applicable) are always the current ones.
+    /// </summary>
+    internal async Task<ReportFigures> ReportFiguresAsync(int unitId, CategoryScope scope, bool grouped, Func<Guid, string, string?, string?>? valueAt, CancellationToken ct)
+    {
+        var (d, cards) = await ComputeAsync(unitId, scope, grouped, ct, valueAt);
+        var ei = scope == CategoryScope.ElectricalInstrument;
+        var prefix = ei ? EiCardPrefix : "";
+        var items = cards[prefix + "tags"];
+        var preserved = cards[prefix + "preserved"];
+        var preservedIds = preserved.Select(i => i.Id).ToHashSet();
+        var holdIds = cards[prefix + "hold"].Select(i => i.Id).ToHashSet();
+        var naIds = cards[prefix + "na"].Select(i => i.Id).ToHashSet();
+
+        var groups = new List<(string Name, List<Item> Rows, decimal Pct)>();
+        if (ei)
+            groups.Add(("E&I", items, Pct(items.Sum(a => a.Steps.Count(IsCompleted)), items.Sum(a => a.Steps.Count(s => !IsNotApplicable(s))))));
+        else
+        {
+            foreach (var name in MechanicalDisciplines)
+                groups.Add((name, items.Where(a => a.Discipline.Contains(name, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    d.Disciplines.First(r => r.Discipline == name).ProgressPct));
+            var other = items.Where(a => !MechanicalDisciplines.Any(n => a.Discipline.Contains(n, StringComparison.OrdinalIgnoreCase))).ToList();
+            groups.Add(("Other", other, Pct(other.Sum(a => a.Steps.Count(IsCompleted)), other.Count * 5)));
+        }
+        var rows = groups.Where(g => g.Rows.Count > 0).Select(g =>
+        {
+            var na = g.Rows.Count(a => naIds.Contains(a.Id));
+            return new DailyDisciplineRow(g.Name, g.Rows.Count, na, g.Rows.Count(a => preservedIds.Contains(a.Id)), g.Rows.Count(a => holdIds.Contains(a.Id)),
+                na == g.Rows.Count ? null : g.Pct);
+        }).ToList();
+        return new ReportFigures(d.TotalTags, d.TotalNotApplicable, d.Preserved, d.TotalHold, rows,
+            preserved.ToDictionary(i => i.Ids.Min(), i => i.Tag ?? i.Code));
+    }
+
+    /// <summary>
     /// Statuses of one tag, in the order of the activities of its dashboard: one asset, or (grouped) a split item whose
     /// <see cref="Ids"/> are all its parts and whose values are those of its client Excel row.
     /// </summary>
     private sealed record Item(Guid Id, string Code, string? Tag, string Discipline, string? Eu, string? Ready, string? Remarks, int? CategoryId, string?[] Steps,
         IReadOnlyList<Guid> Ids);
 
-    private async Task<(DashboardDto Dashboard, Dictionary<string, List<Item>> Cards)> ComputeAsync(int unitId, CategoryScope scope, bool grouped, CancellationToken ct)
+    /// <param name="valueAt">Statuses at an earlier moment (asset, field, current value → value then); null = the current ones.</param>
+    private async Task<(DashboardDto Dashboard, Dictionary<string, List<Item>> Cards)> ComputeAsync(int unitId, CategoryScope scope, bool grouped, CancellationToken ct,
+        Func<Guid, string, string?, string?>? valueAt = null)
     {
+        string? V(Guid id, string field, string? current) => valueAt is null ? current : valueAt(id, field, current);
         var unit = await db.Units.AsNoTracking().Include(u => u.Plant).FirstOrDefaultAsync(u => u.Id == unitId, ct)
                    ?? throw ApiProblem.NotFound("Unit not found.");
         var ei = scope == CategoryScope.ElectricalInstrument;
@@ -143,9 +183,13 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var scope0 = all.Where(a => a.IsActive && !string.IsNullOrWhiteSpace(a.Tag)
                                    && (ei ? a.Type == AssetType.ElectricalInstrument : a.Type != AssetType.ElectricalInstrument && !Excluded.Contains(a.Discipline.Trim())))
             .ToList();
-        var single = scope0.Select(a => new Item(a.Id, a.Code, a.Tag, a.Discipline, a.Eu, a.Ready, a.Remarks, a.CategoryId, ei
-                ? [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status, a.G5Status, a.G6Status, a.G7Status, a.G8Status]
-                : [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status], [a.Id]))
+        var fields = StatusHistory.Fields;   // walkdown, G1–G8: the order of the step arrays
+        var single = scope0.Select(a =>
+            {
+                string?[] current = [a.Walkdown, a.G1Status, a.G2Status, a.G3Status, a.G4Status, a.G5Status, a.G6Status, a.G7Status, a.G8Status];
+                var steps = current.Take(ei ? 9 : 5).Select((v, i) => V(a.Id, fields[i], v)).ToArray();
+                return new Item(a.Id, a.Code, a.Tag, a.Discipline, a.Eu, a.Ready, a.Remarks, a.CategoryId, steps, [a.Id]);
+            })
             .ToList();
         // "As the client": the parts of a split item are one tag, with the values of its row in the client Excel.
         var clientTags = scope0.Where(a => a.ClientTag is not null).ToDictionary(a => a.Id, a => (a.ClientTag!, a.Type));

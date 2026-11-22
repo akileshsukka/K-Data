@@ -8,6 +8,7 @@ import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
 import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 import { PipingSummaryCards } from "../lines/PipingSummaryCards";
+import { DailyReportPanel } from "./DailyReportPanel";
 import { ExportPdfButton } from "./UnitDashboardPdf";
 
 /** The two dashboards of a unit, as the switch at the top of the overview names them. */
@@ -118,6 +119,8 @@ export function UnitHomePage() {
           </span>
         </label>
       )}
+
+      <DailyReportPanel unitId={unit.id} />
 
       {dashboard.isPending && <p className="mt-6 text-muted">Loading dashboard…</p>}
       {dashboard.isError && <p className="mt-6 text-hold">{dashboard.error.message}</p>}

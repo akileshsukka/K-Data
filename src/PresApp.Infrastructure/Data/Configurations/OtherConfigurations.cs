@@ -116,6 +116,17 @@ internal sealed class PipingNoteConfiguration : IEntityTypeConfiguration<PipingN
     }
 }
 
+internal sealed class UnitHighlightConfiguration : IEntityTypeConfiguration<UnitHighlight>
+{
+    public void Configure(EntityTypeBuilder<UnitHighlight> b)
+    {
+        b.ToTable("UnitHighlight");
+        b.Property(x => x.Text).HasMaxLength(UnitHighlight.TextLength).IsRequired();
+        b.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId);
+        b.HasIndex(x => new { x.Date, x.UnitId });
+    }
+}
+
 internal sealed class UnitReportConfigConfiguration : IEntityTypeConfiguration<UnitReportConfig>
 {
     public void Configure(EntityTypeBuilder<UnitReportConfig> b)
