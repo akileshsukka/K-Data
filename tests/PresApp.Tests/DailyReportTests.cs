@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using PresApp.Api.Endpoints;
 using PresApp.Domain.Common;
 using PresApp.Domain.Rules;
@@ -109,11 +110,34 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task An_ei_item_with_e1_to_e7_closed_is_preserved_and_the_unit_card_goes_out_without_epcs()
+    {
+        var unitId = await UnitIdAsync("Unit 42");
+        var motor = await CreateAsync(unitId, "42-EM-901", "ElectricalInstrument", "Electrical");
+        var other = await CreateAsync(unitId, "42-EM-902", "ElectricalInstrument", "Electrical");
+        // E1–E7 done (E5 not applicable), E8 (the signed closing) still empty: preserved. The other one misses E7.
+        await PatchAsync(motor, [.. Enumerable.Range(1, 7).Select(g => ($"G{g}Status", g == 5 ? "N/A" : "Completed"))]);
+        await PatchAsync(other, [.. Enumerable.Range(1, 6).Select(g => ($"G{g}Status", "Completed"))]);
+        var ei = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard?scope=ei");
+        Assert.Equal(1, ei.GetProperty("preserved").GetInt32());
+
+        using var noKey = WithKey("");
+        var card = await noKey.CreateClient().GetAsync($"/api/units/{unitId}/daily-card?date={Today:yyyy-MM-dd}");
+        Assert.Equal(HttpStatusCode.Unauthorized, card.StatusCode); // signed-in users only
+        var response = await WithKeyClient(noKey).GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/daily-card?date={Today:yyyy-MM-dd}");
+        Assert.Equal(1, response.GetProperty("unit").GetProperty("preserved").GetInt32());
+        Assert.Contains("not connected", response.GetProperty("activitiesError").GetString());
+        Assert.Empty(response.GetProperty("activities").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Epcs_reads_the_summary_with_the_shared_key_only()
     {
-        Assert.Equal(HttpStatusCode.NotFound, (await app.CreateClient().GetAsync("/api/integration/daily-summary")).StatusCode);
+        // The key is set here, last, so a developer's appsettings.Local.json never decides the result.
+        using var noKey = WithKey("");
+        Assert.Equal(HttpStatusCode.NotFound, (await noKey.CreateClient().GetAsync("/api/integration/daily-summary")).StatusCode);
 
-        using var withKey = app.WithWebHostBuilder(b => b.UseSetting("Integration:ApiKey", "test-shared-key"));
+        using var withKey = WithKey("test-shared-key");
         var client = withKey.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/integration/daily-summary")).StatusCode);
 
@@ -130,6 +154,17 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> WithKey(string key) =>
+        app.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, c) =>
+            c.AddInMemoryCollection(new Dictionary<string, string?> { ["Integration:ApiKey"] = key })));
+
+    private HttpClient WithKeyClient(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add(PresApp.Api.Auth.CloudflareAccessHandler.HeaderName, app.CreateToken(TestApp.AdminEmail));
+        return client;
+    }
 
     private static DateTime At(DateOnly day) => SiteClock.StartOfDayUtc(day).AddHours(12);
 

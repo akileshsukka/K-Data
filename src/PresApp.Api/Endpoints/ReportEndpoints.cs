@@ -21,6 +21,15 @@ public static class ReportEndpoints
         app.MapGet("/api/reports/daily", (DateOnly? date, int? unitId, DailySummary s, CancellationToken ct) => s.GetAsync(date, ct, unitId))
             .RequirePermission(Permissions.AssetsView);
 
+        // One unit's daily card (the same card as the general daily report of EPCS), with the unit's activities from EPCS.
+        app.MapGet("/api/units/{unitId:int}/daily-card", async (int unitId, DateOnly? date, DailySummary s, EpcsClient epcs, PresApp.Infrastructure.Data.PresAppDbContext db, CancellationToken ct) =>
+        {
+            var summary = await s.GetAsync(date, ct, unitId);
+            var unit = summary.Units.FirstOrDefault() ?? throw Hosting.ApiProblem.NotFound("Unit");
+            var (activities, error) = await epcs.UnitActivitiesAsync(unit.UnitNumber, summary.Date, ct);
+            return new DailyCardDto(summary.Date, unit, activities ?? [], error);
+        }).RequirePermission(Permissions.AssetsView);
+
         app.MapGet("/api/units/{unitId:int}/highlights", (int unitId, DateOnly date, UnitHighlightService s, CancellationToken ct) => s.ListAsync(unitId, date, ct))
             .RequirePermission(Permissions.AssetsView);
         app.MapPost("/api/units/{unitId:int}/highlights", (int unitId, AddHighlightRequest r, UnitHighlightService s, CancellationToken ct) => s.AddAsync(unitId, r, ct))

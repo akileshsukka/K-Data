@@ -60,7 +60,8 @@ public sealed record CategoryOption(int Id, string Code, string Label, string Se
 /// Categories: once any equipment of the unit has a category assigned (template v4), the assigned category counts;
 /// until then, the keyword in Preservation Remarks with the lowest priority (template v3).</item>
 /// <item><b>E&amp;I</b> (sheet "E&amp;I Dashboard"): the E&amp;I items, Walkdown and E1–E8. A "Not Applicable" step is left
-/// out of the completion and progress %. Preserved = every step Completed or Not Applicable, at least one Completed.
+/// out of the completion and progress %. Preserved = E1–E7 Completed or Not Applicable, at least one Completed (physically
+/// preserved; E8 is the signed closing, and Mark as preserved stays the official closure).
 /// Categories: the assigned E&amp;I category (CatE1, CatE2…).</item>
 /// </list>
 /// </summary>
@@ -252,7 +253,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var naItems = na.SelectMany(c => byCategory.GetValueOrDefault(c.Id) ?? []).ToList();
         var categorized = holdItems.Concat(naItems).Select(a => a.Id).ToHashSet();
         var ready = items.Where(a => Is(a.Ready, "Yes")).ToList();
-        var preserved = items.Where(a => ei ? AllStepsClosed(a.Steps[1..]) : IsCompleted(a.Steps[4])).ToList();
+        var preserved = items.Where(a => ei ? AllStepsClosed(a.Steps[1..8]) : IsCompleted(a.Steps[4])).ToList();
         var prefix = ei ? EiCardPrefix : "";
         var cards = new Dictionary<string, List<Item>>
         {
@@ -306,7 +307,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
             .ToList();
     }
 
-    /// <summary>E&amp;I preserved: every step Completed or Not Applicable, at least one Completed (same rule as the Preservation Date).</summary>
+    /// <summary>E&amp;I preserved: steps E1–E7 Completed or Not Applicable, at least one Completed (22-nov: E8, the signed closing, is not needed).</summary>
     private static bool AllStepsClosed(IReadOnlyList<string?> steps) =>
         steps.All(s => IsCompleted(s) || IsNotApplicable(s)) && steps.Any(IsCompleted);
 
