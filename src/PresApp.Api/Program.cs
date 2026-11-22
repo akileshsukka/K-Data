@@ -55,6 +55,8 @@ builder.Services.AddScoped<PresApp.Api.GateForms.GateFormService>();
 builder.Services.AddScoped<PresApp.Api.GateForms.GateFormDocumentationList>();
 builder.Services.AddScoped<PresApp.Api.GateForms.RecordNumbers>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitDashboard>();
+builder.Services.AddScoped<PresApp.Api.Reporting.UnitHighlightService>();
+builder.Services.AddScoped<PresApp.Api.Reporting.DailySummary>();
 builder.Services.AddScoped<PresApp.Api.Monitoring.MonitoringService>();
 builder.Services.AddScoped<PresApp.Api.Groups.GroupService>();
 builder.Services.AddScoped<PresApp.Api.Piping.PipeSpecService>();
@@ -121,6 +123,7 @@ app.MapCustomFieldEndpoints();
 app.MapOptionSetEndpoints();
 app.MapDocumentEndpoints();
 app.MapGateFormEndpoints();
+app.MapReportEndpoints();
 
 // Unknown /api routes are 404; everything else is the React app.
 app.MapFallback("/api/{**path}", () => Results.NotFound());

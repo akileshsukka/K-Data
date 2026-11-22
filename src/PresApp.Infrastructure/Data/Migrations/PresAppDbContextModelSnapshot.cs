@@ -1969,6 +1969,62 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.ToTable("PipingNote", (string)null);
                 });
 
+            modelBuilder.Entity("PresApp.Domain.Reporting.UnitHighlight", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UnitId");
+
+                    b.HasIndex("Date", "UnitId");
+
+                    b.ToTable("UnitHighlight", (string)null);
+                });
+
             modelBuilder.Entity("PresApp.Domain.Reporting.UnitReportConfig", b =>
                 {
                     b.Property<int>("UnitId")
@@ -2610,6 +2666,17 @@ namespace PresApp.Infrastructure.Data.Migrations
                 });
 
             modelBuilder.Entity("PresApp.Domain.Reporting.PipingNote", b =>
+                {
+                    b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Unit");
+                });
+
+            modelBuilder.Entity("PresApp.Domain.Reporting.UnitHighlight", b =>
                 {
                     b.HasOne("PresApp.Domain.Catalog.Unit", "Unit")
                         .WithMany()

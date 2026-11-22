@@ -84,6 +84,7 @@ export const Perm = {
   catalogManage: "catalog.manage",
   usersManage: "users.manage",
   linesNonStandard: "lines.nonStandard",
+  reportHighlights: "report.highlights",
 } as const;
 
 export type AssetType = "Equipment" | "Pipeline" | "ElectricalInstrument";
