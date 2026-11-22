@@ -208,7 +208,7 @@ export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
     return (
       <>
         <Stat label="E&I tags" value={d.totalTags} detail="Electrical and instrumentation" to={to("ei-tags")} register={register} />
-        <Stat label="Preserved" value={d.preserved} detail="All applicable steps E1–E8 completed" emphasis to={to("ei-preserved")} register={register} />
+        <Stat label="Preserved" value={d.preserved} detail="Steps E1–E7 completed (E8 not needed)" emphasis to={to("ei-preserved")} register={register} />
         <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("ei-hold")} register={register} />
         <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("ei-na")} register={register} />
         <Stat label="Available" value={d.availableForPreservation} detail="Tags minus categories" to={to("ei-available")} register={register} />

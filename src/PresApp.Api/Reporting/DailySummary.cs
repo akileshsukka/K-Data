@@ -29,12 +29,15 @@ public sealed record DailyUnitDto(
 public sealed record DailyTotalsDto(int Tags, int NotApplicable, int Applicable, int Preserved, int Hold, decimal PreservedPct, int CompletedOnDay,
     int Lines, int LinesPreserved);
 
+/// <summary>One unit's daily card: its figures and its activities from EPCS (<see cref="ActivitiesError"/> when they could not be read).</summary>
+public sealed record DailyCardDto(DateOnly Date, DailyUnitDto Unit, List<EpcsActivity> Activities, string? ActivitiesError);
+
 /// <summary>The daily report of one site day: the day ends at midnight UAE time (<see cref="CutoffUtc"/>).</summary>
 public sealed record DailySummaryDto(DateOnly Date, DateTime CutoffUtc, DateTime GeneratedAtUtc, List<DailyUnitDto> Units, DailyTotalsDto Totals);
 
 /// <summary>
 /// Preservation figures of every unit for the daily report, the same counting as the Unit overview (Preserved = G4 N2
-/// blanketing completed, E&amp;I = every step closed; categories for hold and not applicable; each unit in its default
+/// blanketing completed, E&amp;I = E1–E7 closed; categories for hold and not applicable; each unit in its default
 /// view, by equipment or as the client). Statuses are those at the end of the day, rebuilt from the change log, so the
 /// report of a past day does not move when work continues; "completed on the day" = tags preserved at the end of the
 /// day that were not at its start.

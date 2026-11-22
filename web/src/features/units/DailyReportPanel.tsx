@@ -6,6 +6,9 @@ import { useSession } from "../../app/session";
 import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
 import { formatDate, todayDubai } from "../../components/dates";
+import { exportDailyCardPdf } from "./dailyCardPdf";
+
+const PIPING_KEY = "kdata.dailyCard.showPiping";
 
 interface Highlight {
   id: number;
@@ -55,6 +58,16 @@ export function DailyReportPanel({ unitId }: { unitId: number }) {
   const [day, setDay] = useState(today);
   const [draft, setDraft] = useState<{ id: number | null; text: string; expected: string | null } | null>(null);
   const canEdit = session.can(Perm.reportHighlights);
+  const [cardBusy, setCardBusy] = useState(false);
+  // Piping lines in or out of the card PDF (temporary; remembered in this browser).
+  const [showPiping, setShowPiping] = useState(() => { try { return localStorage.getItem(PIPING_KEY) !== "0"; } catch { return true; } });
+  const togglePiping = (on: boolean) => { setShowPiping(on); try { localStorage.setItem(PIPING_KEY, on ? "1" : "0"); } catch { /* private mode */ } };
+  const downloadCard = async () => {
+    setCardBusy(true);
+    try { toast(`Saved ${await exportDailyCardPdf(unitId, day, showPiping)}`); }
+    catch (e) { toast(e instanceof Error ? e.message : "Could not make the PDF.", "error"); }
+    finally { setCardBusy(false); }
+  };
 
   const key = ["daily-report", unitId, day];
   const summary = useQuery({
@@ -96,6 +109,10 @@ export function DailyReportPanel({ unitId }: { unitId: number }) {
           <Button variant="quiet" aria-label="Day before" onClick={() => { setDay(shift(day, -1)); setDraft(null); }}>‹</Button>
           <Button variant="quiet" disabled={day === today} onClick={() => { setDay(today); setDraft(null); }}>Today</Button>
           <Button variant="quiet" aria-label="Next day" disabled={day >= today} onClick={() => { setDay(shift(day, 1)); setDraft(null); }}>›</Button>
+          <label className="ml-2 inline-flex items-center gap-1.5 text-sm text-muted" title="Piping lines in the card PDF">
+            <input type="checkbox" checked={showPiping} onChange={(e) => togglePiping(e.target.checked)} /> Piping
+          </label>
+          <Button variant="secondary" busy={cardBusy} onClick={downloadCard} title="The card of this unit as in the general daily report (with its activities from EPCS), as a PDF">Card PDF</Button>
           <Button variant="quiet" onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"}</Button>
         </div>
       </div>
