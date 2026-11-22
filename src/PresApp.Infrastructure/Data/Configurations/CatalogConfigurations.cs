@@ -54,6 +54,7 @@ internal sealed class DisciplineConfiguration : IEntityTypeConfiguration<Discipl
         b.ToTable("Discipline");
         b.Property(x => x.Name).HasMaxLength(100).IsRequired();
         b.Property(x => x.Prefix).HasMaxLength(4);
+        b.Property(x => x.RecordNoCode).HasMaxLength(Domain.GateForms.RecordNoFormat.CodeMaxLength);
         b.Property(x => x.AssetType).HasConversion<string>().HasMaxLength(30);
         b.HasIndex(x => x.Name).IsUnique();
     }

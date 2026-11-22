@@ -18,8 +18,10 @@ public sealed record GateFormTemplateSlotDto(int PlantId, string PlantName, stri
 public sealed record GateFormUploadResult(GateFormTemplateVersionDto Version, List<string> Notes);
 
 public sealed record GateFormPrepareRequest(string? Kind, IReadOnlyList<Guid>? AssetIds);
+/// <param name="RecordNoNext">Record No. the asset gets when printed with the field empty (null: typed by hand only).</param>
 public sealed record GateFormRowDto(Guid AssetId, string Code, string? Tag, string? Description, string? RecordNo, DateOnly? Date,
-    string Section, string SectionDefault, string? WorkPack, string? WorkPackDefault, string? UnitId, string? UnitIdDefault);
+    string Section, string SectionDefault, string? WorkPack, string? WorkPackDefault, string? UnitId, string? UnitIdDefault,
+    string? RecordNoNext = null);
 public sealed record GateFormSkippedDto(string Code, string? Tag, string Reason);
 public sealed record GateFormPrepareDto(string Kind, string TemplateName, bool IsBuiltIn, List<string> Fields, string? Source, bool CanSave,
     List<GateFormRowDto> Rows, List<GateFormSkippedDto> Skipped);
@@ -34,9 +36,10 @@ public sealed record GateFormGenerateRequest(string? Kind, IReadOnlyList<GateFor
 /// <item>Unit values (Admin → Gate forms): source document of each form and the default Unit ID.</item>
 /// <item>Asset values: Record No., date, and overrides of section (tag / line number), work pack (P&amp;ID number of a line)
 /// and Unit ID. They are saved with the asset so the next print starts from them.</item>
+/// <item>Record No.: an asset printed without one gets the next of its discipline and unit (<see cref="RecordNumbers"/>).</item>
 /// </list>
 /// </summary>
-public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
+public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, RecordNumbers recordNumbers)
 {
     public const string ElectricalDiscipline = "Electrical";
     public const int MaxAssets = 500;
@@ -182,14 +185,17 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
         var (assets, skipped) = await AssetsAsync(unitId, kind, request.AssetIds, ct);
         var (isBuiltIn, templateName, content) = await TemplateAsync(unit.PlantId, kind, null, ct);
         var unitIdDefault = setting?.DefaultUnitId;
+        // What the assets without a Record No. will get, in the order of the rows (only a role that saves takes numbers).
+        var counter = canSave ? await recordNumbers.CounterAsync(tracking: false, ct) : null;
 
         var rows = assets.Select(a =>
         {
             var sectionDefault = SectionDefault(a);
             var workPackDefault = WorkPackDefault(a);
             var e = a.Entry;
+            var next = counter is not null && e?.RecordNo is null && a.RecordNoCode is { } code ? counter.Next(code, unit.Number, a.Id) : null;
             return new GateFormRowDto(a.Id, a.Code, a.Tag, a.Description, e?.RecordNo, e?.Date,
-                e?.Section ?? sectionDefault, sectionDefault, e?.WorkPack ?? workPackDefault, workPackDefault, e?.UnitIdText ?? unitIdDefault, unitIdDefault);
+                e?.Section ?? sectionDefault, sectionDefault, e?.WorkPack ?? workPackDefault, workPackDefault, e?.UnitIdText ?? unitIdDefault, unitIdDefault, next);
         }).ToList();
         return new GateFormPrepareDto(kind.ToString(), templateName, isBuiltIn, GateFormDocument.Inspect(content).Fields, SourceOf(setting, kind), canSave, rows, skipped);
     }
@@ -199,6 +205,22 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
     /// order of the request. An empty field prints the blank line of the form.
     /// </summary>
     public async Task<(string FileName, byte[] Content)> GenerateAsync(int unitId, GateFormGenerateRequest request, bool save, CancellationToken ct)
+    {
+        var (kind, unit, setting, pages) = await ApplyAsync(unitId, request, save, assignRecordNo: save, ct);
+        var (_, _, content) = await TemplateAsync(unit.PlantId, kind, null, ct);
+        var bytes = GateFormDocument.Fill(content, UnitValues(unit, setting, kind), pages);
+        return ($"{FormTitle(kind)} - {unit.Name} - {SiteClock.Today(clock):yyyy-MM-dd}.docx", bytes);
+    }
+
+    /// <summary>
+    /// Saves the values typed for each asset without printing (forms made outside the app). An empty Record No. stays empty:
+    /// only a print takes a number.
+    /// </summary>
+    public async Task SaveAsync(int unitId, GateFormGenerateRequest request, CancellationToken ct) =>
+        await ApplyAsync(unitId, request, save: true, assignRecordNo: false, ct);
+
+    private async Task<(GateFormKind Kind, Unit Unit, GateFormUnitSetting? Setting, List<IReadOnlyDictionary<string, string?>> Pages)> ApplyAsync(
+        int unitId, GateFormGenerateRequest request, bool save, bool assignRecordNo, CancellationToken ct)
     {
         var kind = ParseKind(request.Kind);
         var unit = await UnitAsync(unitId, ct);
@@ -213,10 +235,12 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
         var pages = new List<IReadOnlyDictionary<string, string?>>();
         var rowIds = rows.Select(r => r.AssetId).ToList();
         var entries = save ? await db.GateFormEntries.Where(e => rowIds.Contains(e.AssetId)).ToDictionaryAsync(e => e.AssetId, ct) : [];
+        var counter = save ? await recordNumbers.CounterAsync(tracking: true, ct) : null;
         foreach (var r in rows)
         {
             var a = byId[r.AssetId];
             var recordNo = Clean(r.RecordNo, "Record No.");
+            if (counter is not null) recordNo = await RecordNoAsync(counter, a, unit, recordNo, entries.GetValueOrDefault(a.Id)?.RecordNo, assignRecordNo, ct);
             var section = Clean(r.Section, "System / circuit / section");
             var workPack = Clean(r.WorkPack, "Work pack");
             var unitIdText = Clean(r.UnitId, "Unit ID");
@@ -247,15 +271,32 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
             entry.UnitIdText = unitIdOverride;
         }
         if (save) await db.SaveChangesAsync(ct);
+        return (kind, unit, setting, pages);
+    }
 
-        var (_, _, content) = await TemplateAsync(unit.PlantId, kind, null, ct);
-        var bytes = GateFormDocument.Fill(content, UnitValues(unit, setting, kind), pages);
-        return ($"{FormTitle(kind)} - {unit.Name} - {SiteClock.Today(clock):yyyy-MM-dd}.docx", bytes);
+    /// <summary>
+    /// The Record No. kept for the asset: the one typed (written as ITR-CODE-UNIT-NNN when it follows that pattern; refused
+    /// when another asset has it). Left empty: the one it already has (a reprint never takes a new number), else, when
+    /// <paramref name="assign"/>, the next one of its discipline and unit.
+    /// </summary>
+    private async Task<string?> RecordNoAsync(RecordNoCounter counter, FormAsset a, Unit unit, string? typed, string? saved, bool assign, CancellationToken ct)
+    {
+        if (typed is null)
+            return saved ?? (assign && a.RecordNoCode is { } code ? counter.Next(code, unit.Number, a.Id) : null);
+        if (RecordNoFormat.TryParse(typed, out var c, out var u, out var n)) typed = RecordNoFormat.Build(c, u, n);
+        // A Record No. kept from before is printed again even when another asset has it too (values typed before the check).
+        if (!string.Equals(typed, saved, StringComparison.OrdinalIgnoreCase) && counter.HolderOtherThan(typed, a.Id) is { } other)
+        {
+            var tag = await db.Assets.AsNoTracking().Where(x => x.Id == other).Select(x => x.Tag ?? x.Code).FirstOrDefaultAsync(ct);
+            throw ApiProblem.Invalid($"Record No. {typed} is already used by {tag}. Leave {a.Tag ?? a.Code} empty to give it the next number, or type another one.");
+        }
+        counter.Use(a.Id, typed);
+        return typed;
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private sealed record FormAsset(Guid Id, string Code, string? Tag, string? Description, string? PidNumber, GateFormEntry? Entry);
+    private sealed record FormAsset(Guid Id, string Code, string? Tag, string? Description, string? PidNumber, GateFormEntry? Entry, string? RecordNoCode);
 
     /// <summary>The requested assets that have this form, in the order asked; the others with the reason.</summary>
     private async Task<(List<FormAsset> Assets, List<GateFormSkippedDto> Skipped)> AssetsAsync(int unitId, GateFormKind kind, IReadOnlyList<Guid>? requested, CancellationToken ct)
@@ -266,7 +307,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
         var found = await db.Assets.AsNoTracking().Where(a => ids.Contains(a.Id))
             .Select(a => new
             {
-                a.Id, a.Code, a.Tag, a.Description, a.UnitId, a.Type, a.IsActive, Discipline = a.Discipline.Name,
+                a.Id, a.Code, a.Tag, a.Description, a.UnitId, a.Type, a.IsActive, Discipline = a.Discipline.Name, a.Discipline.RecordNoCode,
                 Pid = a.Pipeline == null ? null : a.Pipeline.PidNumber
             }).ToDictionaryAsync(a => a.Id, ct);
         var entries = await db.GateFormEntries.AsNoTracking().Where(e => ids.Contains(e.AssetId)).ToDictionaryAsync(e => e.AssetId, ct);
@@ -283,7 +324,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock)
                 : kind == GateFormKind.Electrical && !string.Equals(a.Discipline, ElectricalDiscipline, StringComparison.OrdinalIgnoreCase)
                     ? $"Only discipline {ElectricalDiscipline} (motors) has this form; this item is {a.Discipline}."
                 : null;
-            if (reason is null) assets.Add(new FormAsset(a.Id, a.Code, a.Tag, a.Description, a.Pid, entries.GetValueOrDefault(a.Id)));
+            if (reason is null) assets.Add(new FormAsset(a.Id, a.Code, a.Tag, a.Description, a.Pid, entries.GetValueOrDefault(a.Id), a.RecordNoCode));
             else skipped.Add(new GateFormSkippedDto(a.Code, a.Tag, reason));
         }
         return (assets, skipped);

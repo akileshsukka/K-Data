@@ -10,8 +10,8 @@ namespace PresApp.Api.GateForms;
 public sealed record GateFormDocumentationRequest(string? Type, IReadOnlyList<Guid>? AssetIds);
 
 /// <summary>
-/// Excel of the assets shown in a register (usually filtered to "Documentation ready"): tag, description, and the date and
-/// work pack last printed on the asset's gate form, plus whether the signed file of the last gate (G8 / E8) is uploaded.
+/// Excel of the assets shown in a register (usually filtered to "Documentation ready"): tag, description, and the
+/// Record No., date and work pack last printed on the asset's gate form, plus whether the signed file of the last gate (G8 / E8) is uploaded.
 /// One signed document covers every gate of the asset, so the last gate is the one that counts. The list grows as more
 /// documents are signed: it is always built from what the register shows at that moment. A report only, never imported.
 /// </summary>
@@ -33,7 +33,7 @@ public sealed class GateFormDocumentationList(PresAppDbContext db, TimeProvider 
             .Select(a => new { a.Id, a.Code, a.Tag, a.Description, Pid = a.Pipeline == null ? null : a.Pipeline.PidNumber })
             .ToDictionaryAsync(a => a.Id, ct);
         var entries = await db.GateFormEntries.AsNoTracking().Where(e => ids.Contains(e.AssetId))
-            .Select(e => new { e.AssetId, e.Date, e.WorkPack }).ToDictionaryAsync(e => e.AssetId, ct);
+            .Select(e => new { e.AssetId, e.RecordNo, e.Date, e.WorkPack }).ToDictionaryAsync(e => e.AssetId, ct);
         var withFile = (await db.DocumentLinks.AsNoTracking()
             .Where(l => ids.Contains(l.AssetId) && l.Gate == LastGate && l.RemovedAtUtc == null && !l.Document.IsDeleted)
             .Select(l => l.AssetId).Distinct().ToListAsync(ct)).ToHashSet();
@@ -41,7 +41,7 @@ public sealed class GateFormDocumentationList(PresAppDbContext db, TimeProvider 
         var step = type == AssetType.ElectricalInstrument ? "E" : "G";
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("Documentation");
-        string[] headers = ["Tag", "Description", "Gate form date", "Work pack / P&ID rev.", $"{step}{LastGate} signed file uploaded"];
+        string[] headers = ["Tag", "Description", "Record No.", "Gate form date", "Work pack / P&ID rev.", $"{step}{LastGate} signed file uploaded"];
         for (var c = 0; c < headers.Length; c++) ws.Cell(1, c + 1).SetValue(headers[c]);
         var header = ws.Range(1, 1, 1, headers.Length);
         header.Style.Font.Bold = true;
@@ -54,16 +54,17 @@ public sealed class GateFormDocumentationList(PresAppDbContext db, TimeProvider 
             var entry = entries.GetValueOrDefault(id);
             ws.Cell(row, 1).SetValue(string.IsNullOrWhiteSpace(a.Tag) ? a.Code : a.Tag.Trim());
             ws.Cell(row, 2).SetValue(a.Description ?? "");
+            ws.Cell(row, 3).SetValue(entry?.RecordNo ?? "");
             if (entry?.Date is { } d)
             {
-                ws.Cell(row, 3).SetValue(d.ToDateTime(TimeOnly.MinValue));
-                ws.Cell(row, 3).Style.DateFormat.Format = "dd/mm/yyyy";
+                ws.Cell(row, 4).SetValue(d.ToDateTime(TimeOnly.MinValue));
+                ws.Cell(row, 4).Style.DateFormat.Format = "dd/mm/yyyy";
             }
             // What the form printed: the work pack typed, else the line's P&ID number (saved only when it differs).
-            ws.Cell(row, 4).SetValue(entry?.WorkPack ?? GateFormService.WorkPackFromPid(a.Pid) ?? "");
+            ws.Cell(row, 5).SetValue(entry?.WorkPack ?? GateFormService.WorkPackFromPid(a.Pid) ?? "");
             var uploaded = withFile.Contains(id);
-            ws.Cell(row, 5).SetValue(uploaded ? "Yes" : "No");
-            if (!uploaded) ws.Cell(row, 5).Style.Font.FontColor = XLColor.FromHtml("#B42318");
+            ws.Cell(row, 6).SetValue(uploaded ? "Yes" : "No");
+            if (!uploaded) ws.Cell(row, 6).Style.Font.FontColor = XLColor.FromHtml("#B42318");
             row++;
         }
         if (row == 2) throw ApiProblem.Invalid("None of the assets on screen belongs to this register.");

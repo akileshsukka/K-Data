@@ -161,14 +161,15 @@ public sealed partial class AssetSplit(PresAppDbContext db, AssetQueries queries
         asset.Tag = tags[0];
         asset.ClientTag = clientTag;
 
-        // Same signed documents (the file is not copied, only linked) and the same gate form header.
+        // Same signed documents (the file is not copied, only linked) and the same gate form header, except the Record No.:
+        // each part has its own (the first part keeps it; the others get theirs when their form is printed).
         var links = await db.DocumentLinks.Where(l => l.AssetId == id && l.RemovedAtUtc == null).ToListAsync(ct);
         var form = await db.GateFormEntries.AsNoTracking().FirstOrDefaultAsync(f => f.AssetId == id, ct);
         foreach (var b in assets.Skip(1))
         {
             foreach (var l in links) db.DocumentLinks.Add(new DocumentLink { DocumentId = l.DocumentId, AssetId = b.Id, Gate = l.Gate, LinkedAtUtc = now, LinkedBy = user });
             if (form is not null)
-                db.GateFormEntries.Add(new GateFormEntry { AssetId = b.Id, RecordNo = form.RecordNo, Date = form.Date, Section = form.Section, WorkPack = form.WorkPack, UnitIdText = form.UnitIdText });
+                db.GateFormEntries.Add(new GateFormEntry { AssetId = b.Id, RecordNo = null, Date = form.Date, Section = form.Section, WorkPack = form.WorkPack, UnitIdText = form.UnitIdText });
         }
 
         // Gates as set in the preview. Current Gate follows them when they changed (the engineer approved them in the preview).

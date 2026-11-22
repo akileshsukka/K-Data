@@ -855,6 +855,8 @@ export interface GateFormRow {
   workPackDefault: string | null;
   unitId: string | null;
   unitIdDefault: string | null;
+  /** Record No. the asset gets when printed with the field empty; null = typed by hand only. */
+  recordNoNext: string | null;
 }
 
 export interface GateFormPrepared {
@@ -866,6 +868,26 @@ export interface GateFormPrepared {
   canSave: boolean;
   rows: GateFormRow[];
   skipped: { code: string; tag: string | null; reason: string }[];
+}
+
+/** Record No. (ITR) code of a discipline: ITR-{code}-{unit}-{number}. */
+export interface RecordNoCode {
+  disciplineId: number;
+  discipline: string;
+  register: string;
+  code: string | null;
+}
+
+export interface RecordNoCounter {
+  unitNumber: number;
+  code: string;
+  lastNumber: number;
+  next: string;
+}
+
+export interface RecordNoSettings {
+  codes: RecordNoCode[];
+  counters: RecordNoCounter[];
 }
 
 export interface GateFormUnitSetting {

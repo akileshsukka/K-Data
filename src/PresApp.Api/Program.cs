@@ -53,6 +53,7 @@ builder.Services.AddScoped<PresApp.Api.Excel.OnboardingService>();
 builder.Services.AddScoped<PresApp.Api.Excel.ExcelTemplateService>();
 builder.Services.AddScoped<PresApp.Api.GateForms.GateFormService>();
 builder.Services.AddScoped<PresApp.Api.GateForms.GateFormDocumentationList>();
+builder.Services.AddScoped<PresApp.Api.GateForms.RecordNumbers>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitDashboard>();
 builder.Services.AddScoped<PresApp.Api.Monitoring.MonitoringService>();
 builder.Services.AddScoped<PresApp.Api.Groups.GroupService>();

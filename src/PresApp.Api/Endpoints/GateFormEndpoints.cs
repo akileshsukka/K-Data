@@ -22,6 +22,13 @@ public static class GateFormEndpoints
             return Results.File(content, GateFormService.DocxType, name);
         }).RequirePermission(Permissions.ExcelExport);
 
+        // The values typed, saved without printing (forms made outside the app: their Record No. typed by hand).
+        app.MapPost("/api/units/{unitId:int}/gate-forms/save", async (int unitId, GateFormGenerateRequest request, GateFormService s, CancellationToken ct) =>
+        {
+            await s.SaveAsync(unitId, request, ct);
+            return Results.NoContent();
+        }).RequirePermission(Permissions.AssetsEdit);
+
         // Excel of the assets on screen (e.g. "Documentation ready"): tag, description, date and work pack of the last gate form
         // printed, and whether the G8 / E8 signed file is uploaded.
         app.MapPost("/api/units/{unitId:int}/gate-forms/documentation", async (int unitId, GateFormDocumentationRequest request, GateFormDocumentationList list, CancellationToken ct) =>
@@ -36,6 +43,11 @@ public static class GateFormEndpoints
         admin.MapGet("/settings", (GateFormService s, CancellationToken ct) => s.SettingsAsync(ct));
         admin.MapPut("/settings/{unitId:int}", (int unitId, SaveGateFormUnitSetting request, GateFormService s, CancellationToken ct) =>
             s.SaveSettingAsync(unitId, request, ct));
+
+        // Record No. (ITR): code of each discipline and the counters per code and unit.
+        admin.MapGet("/record-numbers", (RecordNumbers r, CancellationToken ct) => r.SettingsAsync(ct));
+        admin.MapPut("/record-numbers/disciplines/{id:int}", (int id, SaveRecordNoCode request, RecordNumbers r, CancellationToken ct) =>
+            r.SaveCodeAsync(id, request, ct));
 
         admin.MapGet("/templates", (GateFormService s, CancellationToken ct) => s.TemplatesAsync(ct));
 

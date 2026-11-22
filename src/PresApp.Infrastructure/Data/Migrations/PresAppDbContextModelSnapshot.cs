@@ -812,6 +812,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(4)
                         .HasColumnType("nvarchar(4)");
 
+                    b.Property<string>("RecordNoCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
@@ -1299,6 +1303,8 @@ namespace PresApp.Infrastructure.Data.Migrations
 
                     b.HasKey("AssetId");
 
+                    b.HasIndex("RecordNo");
+
                     b.ToTable("GateFormEntry", (string)null);
                 });
 
@@ -1365,6 +1371,24 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.HasKey("UnitId");
 
                     b.ToTable("GateFormUnitSetting", (string)null);
+                });
+
+            modelBuilder.Entity("PresApp.Domain.GateForms.RecordNoSequence", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<int>("UnitNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LastNumber")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Code", "UnitNumber");
+
+                    b.ToTable("RecordNoSequence", (string)null);
                 });
 
             modelBuilder.Entity("PresApp.Domain.Groups.AssetGroup", b =>

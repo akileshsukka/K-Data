@@ -175,7 +175,8 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         {
             db.Disciplines.Add(new Discipline
             {
-                Name = d.Name, AssetType = d.Type, Prefix = d.Prefix, SyncToSimpro = d.Simpro, SortOrder = d.Sort
+                Name = d.Name, AssetType = d.Type, Prefix = d.Prefix, SyncToSimpro = d.Simpro, SortOrder = d.Sort,
+                RecordNoCode = SeedData.RecordNoCodes.GetValueOrDefault(d.Name)
             });
         }
     }

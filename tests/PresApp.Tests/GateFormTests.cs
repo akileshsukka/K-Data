@@ -62,8 +62,8 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Contains("Date 25/11/2026", doc.Pages[0]);
         Assert.Contains("System / circuit / section 39-V-901 / circuit 2", doc.Pages[0]);
         Assert.Contains("Work pack / P&ID rev. WP-12 rev B", doc.Pages[0]);
-        // Empty fields print the blank line of the client form.
-        Assert.Contains("Record No. __________________________", doc.Pages[1]);
+        // Empty fields print the blank line of the client form; an empty Record No. takes the next one of the discipline (Piping).
+        Assert.Contains("Record No. ITR-PIP-039-", doc.Pages[1]);
         Assert.Contains("Date ______________________________", doc.Pages[1]);
         Assert.Contains("System / circuit / section 39-0901-HC-4\"-77010-P", doc.Pages[1]);
         Assert.Contains("Work pack / P&ID rev. 39-00-30-201, 39-00-30-202", doc.Pages[1]);
@@ -74,7 +74,9 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal("REC-7", entries[vessel].RecordNo);
         Assert.Equal(new DateOnly(2026, 11, 25), entries[vessel].Date);
         Assert.Equal("39-V-901 / circuit 2", entries[vessel].Section);
-        Assert.False(entries.ContainsKey(line));
+        Assert.StartsWith("ITR-PIP-039-", entries[line].RecordNo);
+        Assert.Null(entries[line].Section);
+        Assert.Null(entries[line].WorkPack);
 
         var again = (await PrepareAsync(admin, unitId, "Mechanical", vessel)).GetProperty("rows")[0];
         Assert.Equal("REC-7", again.GetProperty("recordNo").GetString());
@@ -241,26 +243,86 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
         var ws = wb.Worksheet("Documentation");
-        Assert.Equal(["Tag", "Description", "Gate form date", "Work pack / P&ID rev.", "G8 signed file uploaded"], Enumerable.Range(1, 5).Select(c => ws.Cell(1, c).GetString()));
+        Assert.Equal(["Tag", "Description", "Record No.", "Gate form date", "Work pack / P&ID rev.", "G8 signed file uploaded"], Enumerable.Range(1, 6).Select(c => ws.Cell(1, c).GetString()));
         // The line is not in the Equipment register; the rest keep the order of the screen.
         Assert.Equal("39-V-952", ws.Cell(2, 1).GetString());
-        Assert.True(ws.Cell(2, 3).IsEmpty());
-        Assert.Equal("", ws.Cell(2, 4).GetString());
-        Assert.Equal("No", ws.Cell(2, 5).GetString());
+        Assert.Equal("", ws.Cell(2, 3).GetString());
+        Assert.True(ws.Cell(2, 4).IsEmpty());
+        Assert.Equal("", ws.Cell(2, 5).GetString());
+        Assert.Equal("No", ws.Cell(2, 6).GetString());
         Assert.Equal("39-V-951", ws.Cell(3, 1).GetString());
         Assert.Equal("Item 39-V-951", ws.Cell(3, 2).GetString());
-        Assert.Equal(new DateTime(2026, 11, 20), ws.Cell(3, 3).GetDateTime());
-        Assert.Equal("WP-2", ws.Cell(3, 4).GetString());
-        Assert.Equal("Yes", ws.Cell(3, 5).GetString());
+        Assert.StartsWith("ITR-STAT-039-", ws.Cell(3, 3).GetString());
+        Assert.Equal(new DateTime(2026, 11, 20), ws.Cell(3, 4).GetDateTime());
+        Assert.Equal("WP-2", ws.Cell(3, 5).GetString());
+        Assert.Equal("Yes", ws.Cell(3, 6).GetString());
         Assert.True(ws.Cell(4, 1).IsEmpty());
 
         // Lines: the work pack printed is the P&ID number when nothing else was typed.
         response = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/documentation", new { type = "Pipeline", assetIds = new[] { line } });
         using var lines = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
         var lws = lines.Worksheet("Documentation");
-        Assert.Equal(new DateTime(2026, 11, 21), lws.Cell(2, 3).GetDateTime());
-        Assert.Equal("39-00-30-951", lws.Cell(2, 4).GetString());
-        Assert.Equal("No", lws.Cell(2, 5).GetString());
+        Assert.Equal(new DateTime(2026, 11, 21), lws.Cell(2, 4).GetDateTime());
+        Assert.Equal("39-00-30-951", lws.Cell(2, 5).GetString());
+        Assert.Equal("No", lws.Cell(2, 6).GetString());
+    }
+
+    [Fact]
+    public async Task Record_no_is_the_next_of_the_discipline_and_unit_kept_on_reprints_and_can_be_typed_by_hand()
+    {
+        var unitId = await UnitAsync("Unit 41");
+        var a = await CreateAsync(unitId, "Equipment", "Static", "41-V-901");
+        var b = await CreateAsync(unitId, "Equipment", "Static", "41-V-902");
+        var c = await CreateAsync(unitId, "Equipment", "Static", "41-V-903");
+        var d = await CreateAsync(unitId, "Equipment", "Static", "41-V-904");
+        object Row(Guid id, string? recordNo = null) => new { assetId = id, recordNo, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null };
+
+        // The dialog shows what each asset will get, in the order of the rows.
+        var rows = (await PrepareAsync(admin, unitId, "Mechanical", a, b)).GetProperty("rows");
+        Assert.Equal("ITR-STAT-041-001", rows[0].GetProperty("recordNoNext").GetString());
+        Assert.Equal("ITR-STAT-041-002", rows[1].GetProperty("recordNoNext").GetString());
+
+        var doc = await GenerateAsync(admin, unitId, "Mechanical", Row(a), Row(b));
+        Assert.Contains("Record No. ITR-STAT-041-001", doc.Pages[0]);
+        Assert.Contains("Record No. ITR-STAT-041-002", doc.Pages[1]);
+
+        // A reprint keeps the number, even sent empty.
+        doc = await GenerateAsync(admin, unitId, "Mechanical", Row(a));
+        Assert.Contains("Record No. ITR-STAT-041-001", doc.Pages[0]);
+        Assert.Equal(JsonValueKind.Null, (await PrepareAsync(admin, unitId, "Mechanical", a)).GetProperty("rows")[0].GetProperty("recordNoNext").ValueKind);
+
+        // A form made outside the app: its number typed by hand and saved without printing. The counter follows it.
+        var saved = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { Row(c, " itr-stat-41-10 ") } });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        Assert.Equal("ITR-STAT-041-010", await app.WithDbAsync(db => db.GateFormEntries.Where(e => e.AssetId == c).Select(e => e.RecordNo).FirstAsync()));
+        doc = await GenerateAsync(admin, unitId, "Mechanical", Row(d));
+        Assert.Contains("Record No. ITR-STAT-041-011", doc.Pages[0]);
+
+        // Another asset's number is refused; saving without printing never takes a number.
+        var fifth = await CreateAsync(unitId, "Equipment", "Static", "41-V-905");
+        var taken = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/generate", new { kind = "Mechanical", rows = new[] { Row(fifth, "ITR-STAT-041-002") } });
+        Assert.Contains("already used by 41-V-902", await ErrorAsync(taken));
+        (await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { new { assetId = fifth, recordNo = (string?)null, date = "2026-11-22", section = (string?)null, workPack = (string?)null, unitId = (string?)null } } })).EnsureSuccessStatusCode();
+        Assert.Null(await app.WithDbAsync(db => db.GateFormEntries.Where(x => x.AssetId == fifth).Select(x => x.RecordNo).FirstAsync()));
+
+        // Admin: the counter of each code and unit, and the code of each discipline.
+        var settings = await admin.GetFromJsonAsync<JsonElement>("/api/gate-forms/record-numbers");
+        var counter = settings.GetProperty("counters").EnumerateArray().Single(x => x.GetProperty("unitNumber").GetInt32() == 41 && x.GetProperty("code").GetString() == "STAT");
+        Assert.Equal(11, counter.GetProperty("lastNumber").GetInt32());
+        Assert.Equal("ITR-STAT-041-012", counter.GetProperty("next").GetString());
+        var codes = settings.GetProperty("codes").EnumerateArray().ToDictionary(x => x.GetProperty("discipline").GetString()!, x => x);
+        Assert.Equal("STAT", codes["Static"].GetProperty("code").GetString());
+        Assert.Equal("ELEC", codes["Electrical"].GetProperty("code").GetString());
+        Assert.Equal("PIP", codes["Piping"].GetProperty("code").GetString());
+
+        // Without a code, the Record No. is typed by hand.
+        var staticId = codes["Static"].GetProperty("disciplineId").GetInt32();
+        Assert.Contains("letters and digits", await ErrorAsync(await admin.PutAsJsonAsync($"/api/gate-forms/record-numbers/disciplines/{staticId}", new { code = "ST-1" })));
+        (await admin.PutAsJsonAsync($"/api/gate-forms/record-numbers/disciplines/{staticId}", new { code = "" })).EnsureSuccessStatusCode();
+        Assert.Equal(JsonValueKind.Null, (await PrepareAsync(admin, unitId, "Mechanical", fifth)).GetProperty("rows")[0].GetProperty("recordNoNext").ValueKind);
+        var put = await admin.PutAsJsonAsync($"/api/gate-forms/record-numbers/disciplines/{staticId}", new { code = "stat" });
+        Assert.Equal("STAT", (await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        Assert.Equal("ITR-STAT-041-012", (await PrepareAsync(admin, unitId, "Mechanical", fifth)).GetProperty("rows")[0].GetProperty("recordNoNext").GetString());
     }
 
     // ------------------------------------------------------------------ helpers

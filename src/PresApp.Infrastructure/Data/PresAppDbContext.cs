@@ -63,6 +63,7 @@ public class PresAppDbContext(DbContextOptions<PresAppDbContext> options) : DbCo
     public DbSet<GateFormTemplate> GateFormTemplates => Set<GateFormTemplate>();
     public DbSet<GateFormUnitSetting> GateFormUnitSettings => Set<GateFormUnitSetting>();
     public DbSet<GateFormEntry> GateFormEntries => Set<GateFormEntry>();
+    public DbSet<RecordNoSequence> RecordNoSequences => Set<RecordNoSequence>();
     public DbSet<SimproSyncRun> SimproSyncRuns => Set<SimproSyncRun>();
     public DbSet<SimproSyncItem> SimproSyncItems => Set<SimproSyncItem>();
     public DbSet<SimproBeforeImage> SimproBeforeImages => Set<SimproBeforeImage>();

@@ -84,6 +84,17 @@ internal static class SeedData
         ("Piping", AssetType.Pipeline, "PL", false, 100),
     ];
 
+    /// <summary>
+    /// Code of the gate form Record No. (ITR-STAT-541-001) given to a discipline when it is created. Existing databases get
+    /// them from migration Phase19RecordNo; an admin changes them in Admin → Gate forms.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> RecordNoCodes = new Dictionary<string, string>
+    {
+        ["Static"] = "STAT",
+        ["Electrical"] = "ELEC",
+        ["Piping"] = "PIP",
+    };
+
     /// <summary>Plants and units with their Simpro tbl_locationBreakdown ids (schema export 24-Oct-2026).</summary>
     public static readonly (string Plant, Guid PlantId, (string Unit, int Number, Guid Id)[] Units)[] Plants =
     [

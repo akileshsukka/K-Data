@@ -1,3 +1,4 @@
+using System.Globalization;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Catalog;
 using PresApp.Domain.Common;
@@ -75,4 +76,43 @@ public class GateFormEntry : AuditableEntity, IFieldAudited
     public string? UnitIdText { get; set; }
 
     Guid? IFieldAudited.AuditAssetId => AssetId;
+}
+
+/// <summary>
+/// Last Record No. number used per discipline code and unit, for Record Nos. like ITR-STAT-541-001. Each (code, unit) pair
+/// counts independently. A number typed by hand above it moves it up, so the next automatic one follows it.
+/// </summary>
+public class RecordNoSequence
+{
+    public string Code { get; set; } = "";
+    public int UnitNumber { get; set; }
+    public int LastNumber { get; set; }
+}
+
+public static class RecordNoFormat
+{
+    public const string Start = "ITR";
+    public const int CodeMaxLength = 10;
+
+    /// <summary>Builds e.g. ITR-STAT-541-001 (unit and number padded to 3 digits, as in the Equipment IDs).</summary>
+    public static string Build(string code, int unitNumber, int number) =>
+        $"{Start}-{code.Trim().ToUpperInvariant()}-{unitNumber:000}-{number:000}";
+
+    /// <summary>Reads ITR-CODE-UNIT-NUMBER in any case and padding; false for anything else.</summary>
+    public static bool TryParse(string? value, out string code, out int unitNumber, out int number)
+    {
+        code = "";
+        unitNumber = number = 0;
+        var parts = value?.Trim().Split('-');
+        if (parts is not { Length: 4 } || !string.Equals(parts[0], Start, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!IsCode(parts[1])) return false;
+        if (!int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out unitNumber)) return false;
+        if (!int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out number) || number <= 0) return false;
+        code = parts[1].ToUpperInvariant();
+        return true;
+    }
+
+    /// <summary>Letters and digits, 1 to <see cref="CodeMaxLength"/>.</summary>
+    public static bool IsCode(string? code) =>
+        code is { Length: > 0 and <= CodeMaxLength } && code.All(char.IsAsciiLetterOrDigit);
 }

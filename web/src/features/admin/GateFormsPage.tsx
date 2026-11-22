@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, download, upload } from "../../api/client";
-import type { GateFormTemplateSlot, GateFormTemplateVersion, GateFormUnitSetting } from "../../api/types";
+import type { GateFormTemplateSlot, GateFormTemplateVersion, GateFormUnitSetting, RecordNoCode, RecordNoSettings } from "../../api/types";
 import { Button } from "../../components/Button";
 import { TextInput } from "../../components/Field";
 import { PageHeader } from "../../components/PageHeader";
@@ -44,6 +44,8 @@ export function GateFormsPage() {
         </div>
       </section>
 
+      <RecordNumbersSection />
+
       <section className="mt-6 rounded-lg border border-line bg-panel p-5">
         <h2 className="text-xl font-semibold">Templates</h2>
         <p className="mt-1 max-w-4xl text-muted">
@@ -57,6 +59,69 @@ export function GateFormsPage() {
         <div className="mt-5 space-y-4">{templates.data?.map((t) => <TemplateSlot key={`${t.plantId}-${t.kind}`} t={t} />)}</div>
       </section>
     </div>
+  );
+}
+
+const registerLabel: Record<string, string> = { Equipment: "Equipment", Pipeline: "Pipeline", ElectricalInstrument: "E&I" };
+
+/** Record No. (ITR) of the forms: code of each discipline and where each counter is. */
+function RecordNumbersSection() {
+  const data = useQuery({ queryKey: ["record-numbers"], queryFn: ({ signal }) => api<RecordNoSettings>("/api/gate-forms/record-numbers", { signal }) });
+  return (
+    <section className="mt-6 rounded-lg border border-line bg-panel p-5">
+      <h2 className="text-xl font-semibold">Record No. (ITR)</h2>
+      <p className="mt-1 max-w-4xl text-muted">
+        An asset printed with the Record No. empty gets the next one of its discipline and unit: <code>ITR-STAT-541-001</code>, <code>ITR-STAT-541-002</code>…
+        Reprints keep it. It can always be typed by hand in the form dialog (with “Save without printing” for forms made outside the app);
+        a typed number above the counter moves the counter up. A discipline without a code has its Record No. typed by hand.
+      </p>
+      <div className="mt-4 grid gap-6 lg:grid-cols-2">
+        <table className="w-full text-left">
+          <thead className="text-sm text-muted">
+            <tr>{["Discipline", "Register", "Code", ""].map((h) => <th key={h} className="border-b border-line py-2 pr-3 font-semibold">{h}</th>)}</tr>
+          </thead>
+          <tbody>{data.data?.codes.map((c) => <CodeRow key={c.disciplineId} c={c} />)}</tbody>
+        </table>
+        <div>
+          <table className="w-full text-left">
+            <thead className="text-sm text-muted">
+              <tr>{["Unit", "Code", "Last used", "Next"].map((h) => <th key={h} className="border-b border-line py-2 pr-3 font-semibold">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {data.data?.counters.map((c) => (
+                <tr key={`${c.code}-${c.unitNumber}`} className="border-b border-line last:border-0">
+                  <td className="py-2 pr-3">{c.unitNumber}</td>
+                  <td className="py-2 pr-3">{c.code}</td>
+                  <td className="py-2 pr-3">{String(c.lastNumber).padStart(3, "0")}</td>
+                  <td className="py-2 pr-3 font-semibold text-ink">{c.next}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.data?.counters.length === 0 && <p className="mt-2 text-muted">No Record No. given yet: each code and unit starts at 001.</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CodeRow({ c }: { c: RecordNoCode }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [code, setCode] = useState(c.code ?? "");
+  useEffect(() => setCode(c.code ?? ""), [c]);
+  const save = useMutation({
+    mutationFn: () => api<RecordNoCode>(`/api/gate-forms/record-numbers/disciplines/${c.disciplineId}`, { method: "PUT", body: { code } }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["record-numbers"] }); toast(`${c.discipline} saved`); },
+    onError: (e) => toast(e.message, "error"),
+  });
+  return (
+    <tr className="border-b border-line last:border-0">
+      <td className="py-2 pr-3 font-semibold text-ink">{c.discipline}</td>
+      <td className="py-2 pr-3 text-muted">{registerLabel[c.register] ?? c.register}</td>
+      <td className="py-2 pr-3"><TextInput value={code} className="w-28 uppercase" maxLength={10} placeholder="By hand" onChange={(e) => setCode(e.target.value.toUpperCase())} /></td>
+      <td className="py-2 text-right"><Button variant="secondary" busy={save.isPending} disabled={code.trim() === (c.code ?? "")} onClick={() => save.mutate()}>Save</Button></td>
+    </tr>
   );
 }
 

@@ -41,5 +41,18 @@ internal sealed class GateFormEntryConfiguration : IEntityTypeConfiguration<Gate
         b.Property(x => x.WorkPack).HasMaxLength(GateFormEntry.TextMaxLength);
         b.Property(x => x.UnitIdText).HasMaxLength(GateFormEntry.TextMaxLength);
         b.HasOne(x => x.Asset).WithOne().HasForeignKey<GateFormEntry>(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
+        b.HasIndex(x => x.RecordNo);
+    }
+}
+
+internal sealed class RecordNoSequenceConfiguration : IEntityTypeConfiguration<RecordNoSequence>
+{
+    public void Configure(EntityTypeBuilder<RecordNoSequence> b)
+    {
+        b.ToTable("RecordNoSequence");
+        b.HasKey(x => new { x.Code, x.UnitNumber });
+        b.Property(x => x.Code).HasMaxLength(RecordNoFormat.CodeMaxLength);
+        // Two prints at once must not take the same number: the second one is refused and can be repeated.
+        b.Property(x => x.LastNumber).IsConcurrencyToken();
     }
 }

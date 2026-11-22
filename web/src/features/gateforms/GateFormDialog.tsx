@@ -16,8 +16,9 @@ const titles: Record<GateFormKind, string> = {
 
 /**
  * Word file of the printable section acceptance gate, one page per selected asset. Each row starts from what was saved
- * for the asset (or the tag / P&ID number / unit Unit ID); Record No., date and the other fields can be set for all at once
- * or row by row. Generating saves the values with the assets (roles that may edit).
+ * for the asset (or the tag / P&ID number / unit Unit ID); date and the other fields can be set for all at once or row by
+ * row. Generating saves the values with the assets (roles that may edit), and an empty Record No. takes the next one of
+ * its discipline and unit (ITR-STAT-541-001). "Save without printing" keeps Record Nos. typed for forms made outside the app.
  */
 export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open: boolean; onClose: () => void; unitId: number; kind: GateFormKind; assetIds: string[] }) {
   const toast = useToast();
@@ -33,14 +34,14 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
     refetchOnReconnect: false,
   });
   const [rows, setRows] = useState<Editable[]>([]);
-  const [all, setAll] = useState({ recordNo: "", date: "", workPack: "", unitId: "" });
+  const [all, setAll] = useState({ date: "", workPack: "", unitId: "" });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (prepared.data) setRows(prepared.data.rows.map(({ assetId, recordNo, date, section, workPack, unitId }) => ({ assetId, recordNo, date, section, workPack, unitId })));
   }, [prepared.data]);
   useEffect(() => {
-    if (!open) setAll({ recordNo: "", date: "", workPack: "", unitId: "" });
+    if (!open) setAll({ date: "", workPack: "", unitId: "" });
   }, [open]);
 
   const data = prepared.data;
@@ -50,10 +51,20 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
   function update(i: number, patch: Partial<Editable>) {
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
   }
-  function applyToAll(key: "recordNo" | "date" | "workPack" | "unitId") {
+  function applyToAll(key: "date" | "workPack" | "unitId") {
     const value = all[key].trim() || null;
     setRows((prev) => prev.map((r) => ({ ...r, [key]: value })));
   }
+
+  const body = () => ({
+    kind,
+    rows: rows.map((r) => ({ ...r, recordNo: r.recordNo?.trim() || null, date: r.date || null, workPack: r.workPack || null, unitId: r.unitId || null })),
+  });
+  const done = () => {
+    queryClient.invalidateQueries({ queryKey: ["gate-form-prepare"] });
+    queryClient.invalidateQueries({ queryKey: ["asset"] });
+    onClose();
+  };
 
   async function generate() {
     if (!data) return;
@@ -61,14 +72,22 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
       && !window.confirm(`The source document of this unit is not set (Admin → Gate forms). The forms will be printed with the source left empty.\n\nGenerate anyway?`)) return;
     setBusy(true);
     try {
-      const name = await download(`/api/units/${unitId}/gate-forms/generate`, {
-        kind,
-        rows: rows.map((r) => ({ ...r, recordNo: r.recordNo || null, date: r.date || null, workPack: r.workPack || null, unitId: r.unitId || null })),
-      });
+      const name = await download(`/api/units/${unitId}/gate-forms/generate`, body());
       toast(`${name} downloaded${data.canSave ? "; the values were saved with the assets" : ""}`);
-      queryClient.invalidateQueries({ queryKey: ["gate-form-prepare"] });
-      queryClient.invalidateQueries({ queryKey: ["asset"] });
-      onClose();
+      done();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveOnly() {
+    setBusy(true);
+    try {
+      await api<void>(`/api/units/${unitId}/gate-forms/save`, { method: "POST", body: body() });
+      toast("Values saved with the assets (no file printed)");
+      done();
     } catch (e) {
       toast((e as Error).message, "error");
     } finally {
@@ -107,7 +126,6 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
           ) : (
             <>
               <div className="flex flex-wrap items-end gap-3 rounded-md bg-violet-soft/40 p-3">
-                <AllField label="Record No. for all" value={all.recordNo} onChange={(v) => setAll({ ...all, recordNo: v })} onApply={() => applyToAll("recordNo")} />
                 <AllField label="Date for all" type="date" value={all.date} onChange={(v) => setAll({ ...all, date: v })} onApply={() => applyToAll("date")} />
                 {has("WORKPACK") && <AllField label="Work pack / P&ID rev. for all" value={all.workPack} onChange={(v) => setAll({ ...all, workPack: v })} onApply={() => applyToAll("workPack")} />}
                 {has("UNIT_ID") && <AllField label="Unit ID for all" value={all.unitId} onChange={(v) => setAll({ ...all, unitId: v })} onApply={() => applyToAll("unitId")} />}
@@ -130,7 +148,11 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
                             <span className="block font-semibold text-ink">{a.tag ?? a.code}</span>
                             <span className="block max-w-56 truncate text-muted" title={a.description ?? undefined}>{a.description}</span>
                           </td>
-                          <td className="px-2 py-1.5"><Cell value={r.recordNo} onChange={(v) => update(i, { recordNo: v })} /></td>
+                          <td className="px-2 py-1.5">
+                            <Cell value={r.recordNo} onChange={(v) => update(i, { recordNo: v })}
+                              placeholder={a.recordNoNext ? `Next: ${a.recordNoNext}` : data.canSave ? "Type it" : ""}
+                              title={a.recordNoNext ? "Left empty, the asset gets this number when printed. Type another one to use it instead." : "This discipline has no Record No. code (Admin → Gate forms): type it."} />
+                          </td>
                           <td className="px-2 py-1.5"><Cell type="date" value={r.date} onChange={(v) => update(i, { date: v })} /></td>
                           <td className="px-2 py-1.5">
                             <Cell value={r.section} onChange={(v) => update(i, { section: v ?? "" })} placeholder={a.sectionDefault} />
@@ -148,6 +170,12 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
 
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            {data.canSave && (
+              <Button variant="secondary" disabled={busy || rows.length === 0} onClick={saveOnly}
+                title="Keep the values typed (e.g. the Record No. of a form made outside the app) without printing. Empty Record Nos. stay empty.">
+                Save without printing
+              </Button>
+            )}
             <Button busy={busy} disabled={rows.length === 0} onClick={generate}>Generate Word ({rows.length} page{rows.length === 1 ? "" : "s"})</Button>
           </div>
         </div>
@@ -168,12 +196,13 @@ function AllField({ label, value, onChange, onApply, type = "text" }: { label: s
   );
 }
 
-function Cell({ value, onChange, type = "text", placeholder }: { value: string | null; onChange: (v: string | null) => void; type?: string; placeholder?: string }) {
+function Cell({ value, onChange, type = "text", placeholder, title }: { value: string | null; onChange: (v: string | null) => void; type?: string; placeholder?: string; title?: string }) {
   return (
     <input
       type={type}
       value={value ?? ""}
       placeholder={placeholder}
+      title={title}
       maxLength={200}
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
       className="block min-h-9 w-full min-w-32 rounded-md border border-line bg-panel px-2 text-[14px] text-text placeholder:text-muted/70 focus:border-violet focus:outline-none"
