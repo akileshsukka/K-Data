@@ -41,6 +41,7 @@ internal sealed class ElectricalTestConfiguration : IEntityTypeConfiguration<Ele
         b.ToTable("ElectricalTest");
         b.HasKey(x => x.AssetId);
         foreach (var m in ElectricalTestSpec.Measures) b.Property(m.Key).HasPrecision(18, 4);
+        b.Property(x => x.TeraOhm).HasMaxLength(400);
         b.HasIndex(x => x.Required);
     }
 }

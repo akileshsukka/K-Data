@@ -7,6 +7,7 @@ namespace PresApp.Domain.Assets;
 /// <see cref="Required"/> need it; any asset type can be marked. Columns follow the client's E7 test sheet:
 /// winding resistance (Ω), insulation resistance at 1 kV (Ω), four DAR tests (30 s / 60 s, GΩ) and six optional PI tests
 /// (1 / 10 min, GΩ: U-V, V-W, U-W, U-G, V-G, W-G).
+/// A DAR value in the thousands of GΩ can be recorded in TΩ instead (<see cref="TeraOhm"/>).
 /// The DAR and PI ratios are never stored: they are calculated (<see cref="ElectricalTestSpec"/>).
 /// </summary>
 public class ElectricalTest : AuditableEntity, IFieldAudited
@@ -57,6 +58,12 @@ public class ElectricalTest : AuditableEntity, IFieldAudited
     public decimal? PiWG1 { get; set; }
     public decimal? PiWG10 { get; set; }
 
+    /// <summary>
+    /// Keys of the values recorded in TΩ instead of GΩ (comma separated, e.g. "DarUVwe60,DarUvwToE60"). Only the blocks
+    /// with an <see cref="ElectricalBlock.AltUnit"/> (DAR) allow it; the value is kept as read on the meter, in TΩ.
+    /// </summary>
+    public string? TeraOhm { get; set; }
+
     Guid? IFieldAudited.AuditAssetId => AssetId;
 }
 
@@ -64,7 +71,9 @@ public class ElectricalTest : AuditableEntity, IFieldAudited
 public sealed record ElectricalMeasure(string Key, string Label, string Block, bool Required);
 
 /// <summary>A block of the sheet (one colour): its values and, for DAR / PI, the ratio = second value ÷ first value.</summary>
-public sealed record ElectricalBlock(string Key, string Title, string? Unit, bool Required, IReadOnlyList<ElectricalMeasure> Measures, string? RatioLabel);
+/// <remarks>AltUnit: second unit a value of the block can be recorded in, chosen per value (DAR: TΩ for the values in the thousands of GΩ).</remarks>
+public sealed record ElectricalBlock(string Key, string Title, string? Unit, bool Required, IReadOnlyList<ElectricalMeasure> Measures, string? RatioLabel,
+    string? AltUnit = null);
 
 /// <summary>Layout and rules of the E7 test: blocks in the order of the client sheet, required values, ratios.</summary>
 public static class ElectricalTestSpec
@@ -82,6 +91,38 @@ public static class ElectricalTestSpec
 
     public static void Set(ElectricalTest t, string key, decimal? value) => Properties[key].SetValue(t, value);
 
+    public const string Tera = "TΩ";
+
+    /// <summary>1 TΩ = 1000 GΩ.</summary>
+    public const decimal TeraInGiga = 1000m;
+
+    /// <summary>The block of a measure lets it be recorded in TΩ (the DAR tests).</summary>
+    public static bool AllowsTera(ElectricalMeasure m) => Blocks.First(b => b.Key == m.Block).AltUnit == Tera;
+
+    /// <summary>Keys of the values recorded in TΩ, in the order of the sheet.</summary>
+    public static IReadOnlyList<string> TeraKeys(ElectricalTest t)
+    {
+        var keys = (t.TeraOhm ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return Measures.Where(m => keys.Contains(m.Key, StringComparer.OrdinalIgnoreCase)).Select(m => m.Key).ToList();
+    }
+
+    public static bool IsTera(ElectricalTest t, string key) => TeraKeys(t).Contains(key, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Marks a value as recorded in TΩ (true) or in the block unit, GΩ (false). Ignored where the block has no TΩ.</summary>
+    public static void SetTera(ElectricalTest t, string key, bool tera)
+    {
+        var m = Find(key);
+        if (m is null || (tera && !AllowsTera(m))) return;
+        var keys = TeraKeys(t).Where(k => !string.Equals(k, m.Key, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (tera) keys.Add(m.Key);
+        var ordered = Measures.Select(x => x.Key).Where(keys.Contains).ToList();
+        t.TeraOhm = ordered.Count == 0 ? null : string.Join(",", ordered);
+    }
+
+    /// <summary>Value in the block unit (GΩ for DAR): a value recorded in TΩ counts 1000 times more.</summary>
+    private static decimal? InBlockUnit(ElectricalTest t, string key) =>
+        Get(t, key) is { } v ? IsTera(t, key) ? v * TeraInGiga : v : null;
+
     /// <summary>
     /// Ratio of a DAR or PI block (60 s ÷ 30 s, 10 min ÷ 1 min), cut after the second decimal, never rounded
     /// (engineers' rule: 1.5178 → 1.51, 1.5231 → 1.52). Null when a value is missing or the first one is zero.
@@ -89,8 +130,9 @@ public static class ElectricalTestSpec
     public static decimal? Ratio(ElectricalTest t, ElectricalBlock block)
     {
         if (block.RatioLabel is null) return null;
-        var first = Get(t, block.Measures[0].Key);
-        var second = Get(t, block.Measures[1].Key);
+        // Both values in the same unit: a value in TΩ is turned into GΩ first (30 s 950 GΩ, 60 s 1.2 TΩ → 1200 ÷ 950).
+        var first = InBlockUnit(t, block.Measures[0].Key);
+        var second = InBlockUnit(t, block.Measures[1].Key);
         return first is > 0 && second is not null ? Math.Truncate(second.Value / first.Value * 100) / 100 : null;
     }
 
@@ -104,7 +146,7 @@ public static class ElectricalTestSpec
     private static List<ElectricalBlock> Build()
     {
         ElectricalBlock Dar(string key, string title, string prefix) => new(key, title, "GΩ", true,
-            [new($"{prefix}30", $"{title} 30 s", key, true), new($"{prefix}60", $"{title} 60 s", key, true)], "DAR Ratio");
+            [new($"{prefix}30", $"{title} 30 s", key, true), new($"{prefix}60", $"{title} 60 s", key, true)], "DAR Ratio", Tera);
 
         ElectricalBlock Pi(string key, string phases) => new(key, $"PI {phases}", "GΩ", false,
             [new($"{key}1", $"PI {phases} 1 min", key, false), new($"{key}10", $"PI {phases} 10 min", key, false)], "PI Ratio");

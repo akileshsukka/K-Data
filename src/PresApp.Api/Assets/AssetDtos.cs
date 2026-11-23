@@ -33,12 +33,20 @@ public sealed record AssetProfile(
     AssetCategoryDto? DashboardCategory = null, LineNumberCheck? LineNumberCheck = null, ElectricalTestDto? ElectricalTest = null,
     string? ClientTag = null);
 
-/// <summary>E7 electrical test of an asset: values by measure key, calculated DAR / PI ratios by block key, required values still missing.</summary>
+/// <summary>
+/// E7 electrical test of an asset: values by measure key, calculated DAR / PI ratios by block key, required values still missing.
+/// Tera: keys of the values recorded in TΩ instead of GΩ (DAR only).
+/// </summary>
 public sealed record ElectricalTestDto(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values,
-    IReadOnlyDictionary<string, decimal?> Ratios, bool Complete, IReadOnlyList<string> Missing, string UpdatedBy, DateTime UpdatedAtUtc);
+    IReadOnlyDictionary<string, decimal?> Ratios, bool Complete, IReadOnlyList<string> Missing, string UpdatedBy, DateTime UpdatedAtUtc,
+    IReadOnlyList<string> Tera);
 
-/// <summary>Saves the E7 test. Values: every measure key (null = empty). Expected: UpdatedAtUtc the user saw (null when there was no test yet).</summary>
-public sealed record SaveElectricalTestRequest(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values, DateTime? Expected);
+/// <summary>
+/// Saves the E7 test. Values: every measure key (null = empty). Expected: UpdatedAtUtc the user saw (null when there was no test yet).
+/// Tera: keys of the values in TΩ (the others are GΩ); null keeps the current choice.
+/// </summary>
+public sealed record SaveElectricalTestRequest(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values, DateTime? Expected,
+    IReadOnlyList<string>? Tera = null);
 
 /// <summary>Hold / N/A dashboard category of an asset (template v4).</summary>
 public sealed record AssetCategoryDto(int Id, string? Code, string Label, string Section);

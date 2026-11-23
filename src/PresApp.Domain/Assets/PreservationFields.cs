@@ -161,6 +161,7 @@ public static class PreservationFields
     {
         nameof(ElectricalTest.Required) => "Electrical test (E7) required",
         nameof(ElectricalTest.TestedOn) => "Electrical test date",
+        nameof(ElectricalTest.TeraOhm) => "E7 values in TΩ",
         "(created)" => "Created",
         nameof(Asset.IsActive) => "Active",
         nameof(Asset.DisciplineId) => "Discipline",

@@ -536,6 +536,10 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("TeraOhm")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
                     b.Property<DateOnly?>("TestedOn")
                         .HasColumnType("date");
 
