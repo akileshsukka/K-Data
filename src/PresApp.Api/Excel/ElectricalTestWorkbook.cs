@@ -21,8 +21,8 @@ namespace PresApp.Api.Excel;
 /// Filled cells set the value; empty cells never clear anything; the DAR / PI ratio columns are calculated, never read.
 /// DESCRIPTION fills the Nameplate Data. A loaded row marks the asset as requiring the test.</item>
 /// </list>
-/// DAR values recorded in TΩ are printed with "TΩ" after the number (the cell stays a number); on upload a DAR cell is in TΩ
-/// when it shows TΩ (that format, or a text such as "1.2 T" / "1.2 TΩ"), otherwise in GΩ as the column header says.
+/// IR and DAR values recorded in TΩ are printed with "TΩ" after the number (the cell stays a number); on upload such a cell is
+/// in TΩ when it shows TΩ (that format, or a text such as "1.2 T" / "1.2 TΩ"), otherwise in the column header unit (Ω / GΩ).
 /// Same two steps as the other uploads: preview, then apply against the data as it is at that moment.
 /// </summary>
 public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext audit, TimeProvider clock)
@@ -162,13 +162,14 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         cell.Style.NumberFormat.Format = $"{format.Split(';')[0]}\" {ElectricalTestSpec.Tera}\"";
     }
 
-    /// <summary>"1.2 T", "1.2TΩ", "1.2 TOhm", "950 GΩ": the number and its unit, read from a DAR cell typed as text.</summary>
+    /// <summary>"1.2 T", "1.2TΩ", "1.2 TOhm", "950 GΩ": the number and its unit, read from an IR / DAR cell typed as text.</summary>
     private static readonly System.Text.RegularExpressions.Regex UnitSuffix =
         new(@"^(?<n>.*?\d)\s*(?<u>[TG])\s*(Ω|Ω|ohms?)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Text of a value cell and, for a DAR cell, whether it is in TΩ: a number formatted with TΩ (as the report prints it)
-    /// or a text ending in T / TΩ. A "G" / "GΩ" ending is the default unit. Other cells are read as they are.
+    /// Text of a value cell and, for an IR / DAR cell, whether it is in TΩ: a number formatted with TΩ (as the report prints it)
+    /// or a text ending in T / TΩ. A "G" / "GΩ" ending is accepted only where GΩ is the column unit (DAR); in an IR (Ω) cell
+    /// it stays in the text, so the value is reported as not a number. Other cells are read as they are.
     /// </summary>
     private static (string Text, bool Tera)? ReadValue(IXLCell cell, ElectricalMeasure measure)
     {
@@ -177,7 +178,10 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         if (!ElectricalTestSpec.AllowsTera(measure)) return (text, false);
         if (cell.DataType == XLDataType.Number) return (text, cell.Style.NumberFormat.Format.Contains(ElectricalTestSpec.Tera, StringComparison.Ordinal));
         var m = UnitSuffix.Match(text);
-        return m.Success ? (m.Groups["n"].Value.Trim(), m.Groups["u"].Value.Equals("T", StringComparison.OrdinalIgnoreCase)) : (text, false);
+        if (!m.Success) return (text, false);
+        var tera = m.Groups["u"].Value.Equals("T", StringComparison.OrdinalIgnoreCase);
+        var giga = ElectricalTestSpec.Blocks.First(b => b.Key == measure.Block).Unit == "GΩ";
+        return tera || giga ? (m.Groups["n"].Value.Trim(), tera) : (text, false);
     }
 
     /// <summary>A value as the preview shows it: "1.2 TΩ" when in TΩ, the plain number otherwise.</summary>

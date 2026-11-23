@@ -35,7 +35,7 @@ public sealed record AssetProfile(
 
 /// <summary>
 /// E7 electrical test of an asset: values by measure key, calculated DAR / PI ratios by block key, required values still missing.
-/// Tera: keys of the values recorded in TΩ instead of GΩ (DAR only).
+/// Tera: keys of the values recorded in TΩ instead of the sheet unit (IR and DAR only).
 /// </summary>
 public sealed record ElectricalTestDto(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values,
     IReadOnlyDictionary<string, decimal?> Ratios, bool Complete, IReadOnlyList<string> Missing, string UpdatedBy, DateTime UpdatedAtUtc,
@@ -43,7 +43,7 @@ public sealed record ElectricalTestDto(bool Required, DateOnly? TestedOn, IReadO
 
 /// <summary>
 /// Saves the E7 test. Values: every measure key (null = empty). Expected: UpdatedAtUtc the user saw (null when there was no test yet).
-/// Tera: keys of the values in TΩ (the others are GΩ); null keeps the current choice.
+/// Tera: keys of the values in TΩ (the others are in the sheet unit: Ω for IR, GΩ for DAR); null keeps the current choice.
 /// </summary>
 public sealed record SaveElectricalTestRequest(bool Required, DateOnly? TestedOn, IReadOnlyDictionary<string, decimal?> Values, DateTime? Expected,
     IReadOnlyList<string>? Tera = null);

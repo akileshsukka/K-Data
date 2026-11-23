@@ -22,7 +22,7 @@ const groups = [
   { key: "pi", title: "PI tests (GΩ)", tone: "border-[#b4a0d9] bg-[#ece6f6]", match: (k: string) => k.startsWith("Pi") },
 ] as const;
 
-/** tera: keys of the values recorded in TΩ instead of GΩ (DAR only; GΩ by default). */
+/** tera: keys of the values recorded in TΩ instead of the sheet unit (IR: Ω, DAR: GΩ, the default). */
 type Form = { required: boolean; testedOn: string; values: Record<string, string>; tera: string[] };
 
 const toText = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
@@ -90,6 +90,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
   const blockLegend = (b: ElectricalBlock) => (
     <legend className="px-1 font-semibold text-ink">
       {b.title}{b.unit ? ` (${b.unit})` : ""}{!b.required && <span className="ml-2 text-sm font-normal text-muted">optional</span>}
+      {b.altUnit && <span className="ml-2 text-sm font-normal text-muted">click the unit of a value to record it in {b.altUnit}</span>}
     </legend>
   );
 
@@ -106,7 +107,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
                 aria-label={m.label} onChange={(e) => setForm({ ...form, values: { ...form.values, [m.key]: e.target.value } })} />
             </label>
           );
-          // DAR: GΩ by default; the unit button switches this value to TΩ (printed as TΩ in the E7 report).
+          // IR and DAR: the sheet unit by default (Ω / GΩ); the unit button switches this value to TΩ (printed as TΩ in the E7 report).
           const tera = form.tera.includes(m.key);
           const unit = tera ? b.altUnit : b.unit;
           return (
