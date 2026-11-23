@@ -78,6 +78,48 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task A_split_item_is_one_client_tag_and_its_parts_born_completed_count_on_the_day_of_the_split()
+    {
+        var unitId = await UnitIdAsync("Unit 41");
+        var item = await CreateAsync(unitId, "41-E-919 (S/N: 09107-11B-047 & 048)", "Equipment", "Static");
+        await CreateAsync(unitId, "41-V-920", "Equipment", "Static");                          // never preserved
+        var mine = await app.WithDbAsync(db => db.Assets.Where(a => a.UnitId == unitId).Select(a => a.Id).ToListAsync());
+        await app.WithDbAsync(db => db.ChangeLogs.Where(c => c.AssetId != null && mine.Contains(c.AssetId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.ChangedAtUtc, At(Day.AddDays(-2)))));
+
+        // Split on the day, with G1–G4 completed in the preview for both parts: the new part is born completed.
+        var preview = await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{item}/split");
+        var split = await admin.PostAsJsonAsync($"/api/assets/{item}/split", new
+        {
+            stamp = preview.GetProperty("stamp").GetString(),
+            parts = new[] { "41-E-919 (S/N: 09107-11B-047)", "41-E-919 (S/N: 09107-11B-048)" }
+                .Select(tag => new { tag, gates = preview.GetProperty("gates").EnumerateArray().Select(g => new
+                {
+                    gate = g.GetProperty("gate").GetInt32(),
+                    status = g.GetProperty("gate").GetInt32() <= 4 ? "Completed" : g.GetProperty("status").GetString(),
+                    comments = (string?)null,
+                }).ToArray() }).ToArray(),
+            readings = Array.Empty<object>(),
+        });
+        Assert.True(split.IsSuccessStatusCode, await split.Content.ReadAsStringAsync());
+        var since = At(Day.AddDays(-1));
+        await app.WithDbAsync(db => db.ChangeLogs.Where(c => c.AssetId != null && c.ChangedAtUtc > since && db.Assets.Any(a => a.Id == c.AssetId && a.UnitId == unitId))
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.ChangedAtUtc, At(Day))));
+
+        // As the client: the two parts are one tag, completed on the day (not before), under its client tag.
+        var unit = await UnitAsync(Day, unitId);
+        Assert.True(unit.GetProperty("grouped").GetBoolean());
+        Assert.Equal(2, unit.GetProperty("tags").GetInt32());
+        Assert.Equal(1, unit.GetProperty("preserved").GetInt32());
+        Assert.Equal(0, unit.GetProperty("preservedDayBefore").GetInt32());
+        Assert.Equal(["41-E-919 (S/N: 09107-11B-047 & 048)"], Strings(unit.GetProperty("completedTags")));
+
+        var before = await UnitAsync(Day.AddDays(-1), unitId);
+        Assert.Equal(0, before.GetProperty("preserved").GetInt32());
+        Assert.Empty(before.GetProperty("completedTags").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Highlights_are_written_per_unit_and_day_and_appear_in_the_report()
     {
         var unitId = await UnitIdAsync("Unit 541");

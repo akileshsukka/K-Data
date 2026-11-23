@@ -15,7 +15,7 @@ public sealed record ClientViewDto(bool Grouped, int SplitItems = 0);
 
 /// <summary>
 /// How each unit shows the parts of a split item (P-101A, P-101B of the client's P-101A/B) by default: "By equipment"
-/// (each part on its own) or "As the client" (one row, counted once, like the client Excel). Kept as a setting
+/// (each part on its own) or "As the client" (one row, counted once, like the client Excel; the default). Kept as a setting
 /// (<see cref="AppSettingKeys.ClientTagsGrouped"/>); the assets never change. The client Excel is always grouped.
 /// </summary>
 public sealed class ClientViewSettings(PresAppDbContext db)
@@ -28,8 +28,9 @@ public sealed class ClientViewSettings(PresAppDbContext db)
         return new ClientViewDto(await GroupedAsync(unitId, ct), split);
     }
 
+    /// <summary>"As the client" unless the unit was set to "By equipment" (23-nov: as the client is the default).</summary>
     public async Task<bool> GroupedAsync(int unitId, CancellationToken ct) =>
-        await db.Settings.AsNoTracking().Where(s => s.Key == AppSettingKeys.ClientTagsGrouped(unitId)).Select(s => s.Value).FirstOrDefaultAsync(ct) == "Yes";
+        await db.Settings.AsNoTracking().Where(s => s.Key == AppSettingKeys.ClientTagsGrouped(unitId)).Select(s => s.Value).FirstOrDefaultAsync(ct) != "No";
 
     /// <summary>The value asked for, or the unit's default when none was given.</summary>
     public async Task<bool> ResolveAsync(int unitId, bool? asked, CancellationToken ct) => asked ?? await GroupedAsync(unitId, ct);

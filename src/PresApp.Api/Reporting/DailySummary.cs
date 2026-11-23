@@ -37,12 +37,12 @@ public sealed record DailySummaryDto(DateOnly Date, DateTime CutoffUtc, DateTime
 
 /// <summary>
 /// Preservation figures of every unit for the daily report, the same counting as the Unit overview (Preserved = G4 N2
-/// blanketing completed, E&amp;I = E1–E7 closed; categories for hold and not applicable; each unit in its default
-/// view, by equipment or as the client). Statuses are those at the end of the day, rebuilt from the change log, so the
+/// blanketing completed, E&amp;I = E1–E7 closed; categories for hold and not applicable; always as the client, a split
+/// item being one tag). Statuses are those at the end of the day, rebuilt from the change log, so the
 /// report of a past day does not move when work continues; "completed on the day" = tags preserved at the end of the
 /// day that were not at its start.
 /// </summary>
-public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, ClientViewSettings view, UnitHighlightService highlights, TimeProvider clock)
+public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, UnitHighlightService highlights, TimeProvider clock)
 {
     /// <param name="unitId">Only this unit (its panel in the Unit overview); null = every unit with active equipment.</param>
     public async Task<DailySummaryDto> GetAsync(DateOnly? date, CancellationToken ct, int? unitId = null)
@@ -64,7 +64,9 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, C
             var history = await StatusHistory.LoadAsync(db, unit.Id, startUtc, ct);
             string? AtEnd(Guid id, string field, string? current) => history.ValueAt(id, field, current, endUtc);
             string? AtStart(Guid id, string field, string? current) => history.ValueAt(id, field, current, startUtc);
-            var grouped = await view.GroupedAsync(unit.Id, ct);
+            // Always as the client: a split item is one tag (its client tag), preserved once any part has G4 / E1–E7 closed,
+            // so splitting never raises the counts the client already had.
+            const bool grouped = true;
 
             var mechanical = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.Mechanical, grouped, AtEnd, ct);
             var ei = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtEnd, ct);
