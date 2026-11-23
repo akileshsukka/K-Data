@@ -182,24 +182,24 @@ public sealed class ElectricalTestTests : IClassFixture<TestApp>
     }
 
     [Fact]
-    public async Task A_DAR_value_can_be_in_TOhm_in_the_app_the_ratio_the_report_and_the_upload()
+    public async Task IR_and_DAR_values_can_be_in_TOhm_in_the_app_the_ratio_the_report_and_the_upload()
     {
         var unitId = await UnitAsync("Unit 39");
         var motor = await CreateAsync(unitId, "39-EM-701");
 
-        // 30 s 950 GΩ, 60 s 1.2 TΩ: ratio 1200 ÷ 950 = 1.26. GΩ is the default for the others.
+        // 30 s 950 GΩ, 60 s 1.2 TΩ: ratio 1200 ÷ 950 = 1.26. IR U-V 21.1 TΩ. The sheet unit is the default for the others.
         var values = new Dictionary<string, decimal?>(FullTest) { ["DarUVwe30"] = 950m, ["DarUVwe60"] = 1.2m };
         var response = await admin.PutAsJsonAsync($"/api/assets/{motor}/electrical-test",
-            new { required = true, testedOn = (string?)null, values, expected = (DateTime?)null, tera = new[] { "DarUVwe60" } });
+            new { required = true, testedOn = (string?)null, values, expected = (DateTime?)null, tera = new[] { "DarUVwe60", "IrUV" } });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         var test = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("electricalTest");
-        Assert.Equal(["DarUVwe60"], test.GetProperty("tera").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(["IrUV", "DarUVwe60"], test.GetProperty("tera").EnumerateArray().Select(x => x.GetString()));
         Assert.Equal(1.26m, test.GetProperty("ratios").GetProperty("DarU").GetDecimal());
         Assert.Equal(1.51m, test.GetProperty("ratios").GetProperty("DarV").GetDecimal());
 
-        // Only DAR values can be in TΩ.
+        // Only IR and DAR values can be in TΩ.
         var wrong = await admin.PutAsJsonAsync($"/api/assets/{motor}/electrical-test",
-            new { required = true, testedOn = (string?)null, values, expected = test.GetProperty("updatedAtUtc").GetDateTime(), tera = new[] { "IrUV" } });
+            new { required = true, testedOn = (string?)null, values, expected = test.GetProperty("updatedAtUtc").GetDateTime(), tera = new[] { "WrU1U2" } });
         Assert.Equal(HttpStatusCode.BadRequest, wrong.StatusCode);
 
         // Report: the number stays a number, printed with TΩ; the GΩ cells are unchanged.
@@ -213,25 +213,32 @@ public sealed class ElectricalTestTests : IClassFixture<TestApp>
             Assert.Equal("1.2 TΩ", ws.Cell("M4").GetFormattedString());
             Assert.DoesNotContain("TΩ", ws.Cell("L4").Style.NumberFormat.Format);
             Assert.Equal(1.26, ws.Cell("N4").GetDouble());
+            Assert.Equal("21.1 TΩ", ws.Cell("F4").GetFormattedString());   // IR U-V
+            Assert.DoesNotContain("TΩ", ws.Cell("G4").Style.NumberFormat.Format);
         }
 
-        // Upload of the report as it is: nothing changes (the TΩ cell is read as TΩ).
+        // Upload of the report as it is: nothing changes (the TΩ cells are read as TΩ).
         var same = await PostFileAsync($"/api/units/{unitId}/electrical-tests/import", bytes);
         Assert.Contains(("39-EM-701", "DarUVwe60", "No change"), Changes(same));
+        Assert.Contains(("39-EM-701", "IrUV", "No change"), Changes(same));
 
         // A cell typed "2.5 T" is in TΩ; a plain number in a TΩ cell of before goes back to GΩ (the column header unit).
+        // "5 G" in an IR cell (Ω column) is not a number.
         var edited = TestWorkbooks.Edit(bytes, wb =>
         {
             var ws = wb.Worksheet(1);
             ws.Cell("P4").Value = "2.5 T";
             ws.Cell("M4").Value = 1100; ws.Cell("M4").Style.NumberFormat.Format = "General";
+            ws.Cell("G4").Value = "5 G";
         });
         var preview = await PostFileAsync($"/api/units/{unitId}/electrical-tests/import", edited);
+        Assert.Contains(("39-EM-701", "IrUW", "Invalid"), Changes(preview));
         var runId = preview.GetProperty("run").GetProperty("id").GetInt64();
         var applied = await admin.PostAsJsonAsync($"/api/imports/{runId}/apply", new { decisions = new Dictionary<int, string> { [1] = "replace" } });
         Assert.True(applied.IsSuccessStatusCode, await applied.Content.ReadAsStringAsync());
         test = (await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{motor}")).GetProperty("electricalTest");
-        Assert.Equal(["DarVUwe60"], test.GetProperty("tera").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(["IrUV", "DarVUwe60"], test.GetProperty("tera").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(19.49m, test.GetProperty("values").GetProperty("IrUW").GetDecimal());   // the invalid cell changed nothing
         Assert.Equal(2.5m, test.GetProperty("values").GetProperty("DarVUwe60").GetDecimal());
         Assert.Equal(1100m, test.GetProperty("values").GetProperty("DarUVwe60").GetDecimal());
         Assert.Equal(275.02m, test.GetProperty("ratios").GetProperty("DarV").GetDecimal());   // 2500 ÷ 9.09 = 275.027…, cut

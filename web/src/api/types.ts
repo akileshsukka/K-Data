@@ -354,7 +354,7 @@ export interface ElectricalTest {
   missing: string[];
   updatedBy: string;
   updatedAtUtc: string;
-  /** Keys of the values recorded in TΩ instead of GΩ (DAR only). */
+  /** Keys of the values recorded in TΩ instead of the sheet unit (IR and DAR only). */
   tera: string[];
 }
 
@@ -362,7 +362,7 @@ export interface ElectricalMeasure { key: string; label: string; block: string; 
 
 /**
  * A block of the client E7 sheet (one colour). The ratio, when there is one, is the second value ÷ the first.
- * altUnit: second unit each value can be recorded in (DAR: "TΩ", for the values in the thousands of GΩ).
+ * altUnit: second unit each value can be recorded in (IR and DAR: "TΩ", for the very high values).
  */
 export interface ElectricalBlock { key: string; title: string; unit: string | null; required: boolean; measures: ElectricalMeasure[]; ratioLabel: string | null; altUnit?: string | null }
 

@@ -7,7 +7,7 @@ namespace PresApp.Domain.Assets;
 /// <see cref="Required"/> need it; any asset type can be marked. Columns follow the client's E7 test sheet:
 /// winding resistance (Ω), insulation resistance at 1 kV (Ω), four DAR tests (30 s / 60 s, GΩ) and six optional PI tests
 /// (1 / 10 min, GΩ: U-V, V-W, U-W, U-G, V-G, W-G).
-/// A DAR value in the thousands of GΩ can be recorded in TΩ instead (<see cref="TeraOhm"/>).
+/// An IR or DAR value can be recorded in TΩ instead of the sheet unit (Ω for IR, GΩ for DAR) (<see cref="TeraOhm"/>).
 /// The DAR and PI ratios are never stored: they are calculated (<see cref="ElectricalTestSpec"/>).
 /// </summary>
 public class ElectricalTest : AuditableEntity, IFieldAudited
@@ -59,8 +59,8 @@ public class ElectricalTest : AuditableEntity, IFieldAudited
     public decimal? PiWG10 { get; set; }
 
     /// <summary>
-    /// Keys of the values recorded in TΩ instead of GΩ (comma separated, e.g. "DarUVwe60,DarUvwToE60"). Only the blocks
-    /// with an <see cref="ElectricalBlock.AltUnit"/> (DAR) allow it; the value is kept as read on the meter, in TΩ.
+    /// Keys of the values recorded in TΩ instead of the block unit (comma separated, e.g. "IrUV,DarUVwe60"). Only the blocks
+    /// with an <see cref="ElectricalBlock.AltUnit"/> (IR, DAR) allow it; the value is kept as read on the meter, in TΩ.
     /// </summary>
     public string? TeraOhm { get; set; }
 
@@ -71,7 +71,7 @@ public class ElectricalTest : AuditableEntity, IFieldAudited
 public sealed record ElectricalMeasure(string Key, string Label, string Block, bool Required);
 
 /// <summary>A block of the sheet (one colour): its values and, for DAR / PI, the ratio = second value ÷ first value.</summary>
-/// <remarks>AltUnit: second unit a value of the block can be recorded in, chosen per value (DAR: TΩ for the values in the thousands of GΩ).</remarks>
+/// <remarks>AltUnit: second unit a value of the block can be recorded in, chosen per value (IR and DAR: TΩ for the very high values).</remarks>
 public sealed record ElectricalBlock(string Key, string Title, string? Unit, bool Required, IReadOnlyList<ElectricalMeasure> Measures, string? RatioLabel,
     string? AltUnit = null);
 
@@ -96,7 +96,7 @@ public static class ElectricalTestSpec
     /// <summary>1 TΩ = 1000 GΩ.</summary>
     public const decimal TeraInGiga = 1000m;
 
-    /// <summary>The block of a measure lets it be recorded in TΩ (the DAR tests).</summary>
+    /// <summary>The block of a measure lets it be recorded in TΩ (insulation resistance IR and the DAR tests).</summary>
     public static bool AllowsTera(ElectricalMeasure m) => Blocks.First(b => b.Key == m.Block).AltUnit == Tera;
 
     /// <summary>Keys of the values recorded in TΩ, in the order of the sheet.</summary>
@@ -119,7 +119,7 @@ public static class ElectricalTestSpec
         t.TeraOhm = ordered.Count == 0 ? null : string.Join(",", ordered);
     }
 
-    /// <summary>Value in the block unit (GΩ for DAR): a value recorded in TΩ counts 1000 times more.</summary>
+    /// <summary>Value in GΩ for a DAR ratio: a value recorded in TΩ counts 1000 times more. (IR has no ratio.)</summary>
     private static decimal? InBlockUnit(ElectricalTest t, string key) =>
         Get(t, key) is { } v ? IsTera(t, key) ? v * TeraInGiga : v : null;
 
@@ -167,7 +167,7 @@ public static class ElectricalTestSpec
                 new(nameof(ElectricalTest.IrUG), "IR U-G", "Insulation", true),
                 new(nameof(ElectricalTest.IrVG), "IR V-G", "Insulation", true),
                 new(nameof(ElectricalTest.IrWG), "IR W-G", "Insulation", true),
-            ], null),
+            ], null, Tera),
             Dar("DarU", "U-VWE", "DarUVwe"),
             Dar("DarV", "V-UWE", "DarVUwe"),
             Dar("DarW", "W-UVE", "DarWUve"),
