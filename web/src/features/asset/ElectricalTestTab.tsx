@@ -18,20 +18,25 @@ import { useSaveElectricalTest } from "./useAsset";
 const groups = [
   { key: "winding", title: null, tone: "border-[#e6d600] bg-[#fff9c4]", match: (k: string) => k === "Winding" },
   { key: "insulation", title: null, tone: "border-[#9dc3e6] bg-[#deebf7]", match: (k: string) => k === "Insulation" },
-  { key: "dar", title: "DAR tests (GΩ)", tone: "border-[#8fc46a] bg-[#e2f0d9]", match: (k: string) => k.startsWith("Dar") },
+  { key: "dar", title: "DAR tests", tone: "border-[#8fc46a] bg-[#e2f0d9]", match: (k: string) => k.startsWith("Dar") },
   { key: "pi", title: "PI tests (GΩ)", tone: "border-[#b4a0d9] bg-[#ece6f6]", match: (k: string) => k.startsWith("Pi") },
 ] as const;
 
-type Form = { required: boolean; testedOn: string; values: Record<string, string> };
+/** tera: keys of the values recorded in TΩ instead of GΩ (DAR only; GΩ by default). */
+type Form = { required: boolean; testedOn: string; values: Record<string, string>; tera: string[] };
 
 const toText = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const toNumber = (s: string) => (s.trim() === "" ? null : Number(s.trim().replace(",", ".")));
 
-/** Ratio of a DAR / PI block, as the server calculates it: second value ÷ first value, cut (not rounded) after 2 decimals. */
-function ratio(block: ElectricalBlock, values: Record<string, string>) {
+/**
+ * Ratio of a DAR / PI block, as the server calculates it: second value ÷ first value, cut (not rounded) after 2 decimals.
+ * A value in TΩ counts as 1000 GΩ, so 950 GΩ at 30 s and 1.2 TΩ at 60 s give 1200 ÷ 950.
+ */
+function ratio(block: ElectricalBlock, values: Record<string, string>, tera: string[]) {
   if (!block.ratioLabel) return null;
-  const first = toNumber(values[block.measures[0].key] ?? "");
-  const second = toNumber(values[block.measures[1].key] ?? "");
+  const inBase = (key: string) => { const n = toNumber(values[key] ?? ""); return n === null ? null : tera.includes(key) ? n * 1000 : n; };
+  const first = inBase(block.measures[0].key);
+  const second = inBase(block.measures[1].key);
   if (first === null || second === null || Number.isNaN(first) || Number.isNaN(second) || first <= 0) return null;
   // toPrecision first: 1.15 * 100 is 114.99999… in floating point and must still give 1.15.
   return Math.trunc(Number(((second / first) * 100).toPrecision(12))) / 100;
@@ -61,6 +66,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
     required: test?.required ?? false,
     testedOn: test?.testedOn ?? "",
     values: Object.fromEntries(Object.entries(test?.values ?? {}).map(([k, v]) => [k, toText(v)])),
+    tera: test?.tera ?? [],
   };
   const [form, setForm] = useState<Form>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -88,16 +94,40 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
   );
 
   const blockInputs = (b: ElectricalBlock) => {
-    const r = ratio(b, form.values);
+    const r = ratio(b, form.values, form.tera);
     return (
       <div className="flex flex-wrap items-end gap-3">
-        {b.measures.map((m) => (
-          <label key={m.key} className="block w-28">
-            <span className="text-sm text-ink">{m.label.replace(`${b.title} `, "").replace(/^(Winding|IR|PI) /, "")}</span>
-            <TextInput inputMode="decimal" value={form.values[m.key] ?? ""} disabled={!editable} aria-invalid={bad.includes(m)}
-              aria-label={m.label} onChange={(e) => setForm({ ...form, values: { ...form.values, [m.key]: e.target.value } })} />
-          </label>
-        ))}
+        {b.measures.map((m) => {
+          const name = m.label.replace(`${b.title} `, "").replace(/^(Winding|IR|PI) /, "");
+          if (!b.altUnit) return (
+            <label key={m.key} className="block w-28">
+              <span className="text-sm text-ink">{name}</span>
+              <TextInput inputMode="decimal" value={form.values[m.key] ?? ""} disabled={!editable} aria-invalid={bad.includes(m)}
+                aria-label={m.label} onChange={(e) => setForm({ ...form, values: { ...form.values, [m.key]: e.target.value } })} />
+            </label>
+          );
+          // DAR: GΩ by default; the unit button switches this value to TΩ (printed as TΩ in the E7 report).
+          const tera = form.tera.includes(m.key);
+          const unit = tera ? b.altUnit : b.unit;
+          return (
+            <div key={m.key} className="w-36">
+              <label htmlFor={`e7-${m.key}`} className="text-sm text-ink">{name}</label>
+              <div className="flex gap-1">
+                <TextInput id={`e7-${m.key}`} inputMode="decimal" value={form.values[m.key] ?? ""} disabled={!editable} aria-invalid={bad.includes(m)}
+                  aria-label={`${m.label} (${unit})`} className="min-w-0 flex-1"
+                  onChange={(e) => setForm({ ...form, values: { ...form.values, [m.key]: e.target.value } })} />
+                <button type="button" disabled={!editable} aria-pressed={tera}
+                  title={tera ? `In ${b.altUnit}. Click to record it in ${b.unit}.` : `In ${b.unit}. Click if the value is in ${b.altUnit}.`}
+                  aria-label={`${m.label}: unit ${unit}. Switch to ${tera ? b.unit : b.altUnit}`}
+                  onClick={() => setForm({ ...form, tera: tera ? form.tera.filter((k) => k !== m.key) : [...form.tera, m.key] })}
+                  className={`min-h-10 w-11 shrink-0 rounded-md border text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-70 ${
+                    tera ? "border-violet bg-violet text-white" : "border-line bg-panel text-ink hover:bg-line/40"}`}>
+                  {unit}
+                </button>
+              </div>
+            </div>
+          );
+        })}
         {b.ratioLabel && (
           <div className="w-24">
             <span className="text-sm text-muted">{b.ratioLabel}</span>
@@ -117,6 +147,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
         testedOn: next.testedOn || null,
         values: Object.fromEntries(measures.map((m) => [m.key, toNumber(next.values[m.key] ?? "")])),
         expected: test?.updatedAtUtc ?? null,
+        tera: next.tera,
       });
       toast(`${step} electrical test saved`);
     } catch (err) {
@@ -186,6 +217,11 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
             <fieldset key={g.key} className={`rounded-lg border-2 px-4 py-3 ${g.tone}`}>
               <legend className="px-1 font-semibold text-ink">
                 {g.title}{inGroup.every((b) => !b.required) && <span className="ml-2 text-sm font-normal text-muted">optional</span>}
+                {inGroup.some((b) => b.altUnit) && (
+                  <span className="ml-2 text-sm font-normal text-muted">
+                    in {inGroup[0].unit}; click the unit of a value to record it in {inGroup.find((b) => b.altUnit)!.altUnit}
+                  </span>
+                )}
               </legend>
               <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {inGroup.map((b) => (
@@ -230,7 +266,7 @@ function ElectricalTestForm({ asset }: { asset: AssetProfile }) {
         <div className="mt-5 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setConfirmNew(false)}>Cancel</Button>
           <Button variant="danger" onClick={() => {
-            setForm({ required: form.required, testedOn: "", values: {} });
+            setForm({ required: form.required, testedOn: "", values: {}, tera: [] });
             setReplacing(true);
             setError(null);
             setConfirmNew(false);

@@ -33,6 +33,11 @@ public sealed class ElectricalTestService(PresAppDbContext db, AssetQueries quer
             if (ElectricalTestSpec.Find(key) is null) errors[key] = ["Unknown value of the electrical test."];
             else if (request.Values![key] is < 0) errors[key] = [$"{ElectricalTestSpec.Find(key)!.Label} cannot be negative."];
         }
+        foreach (var key in request.Tera ?? [])
+        {
+            if (ElectricalTestSpec.Find(key) is not { } m) errors[key] = ["Unknown value of the electrical test."];
+            else if (!ElectricalTestSpec.AllowsTera(m)) errors[key] = [$"{m.Label} cannot be recorded in TΩ."];
+        }
         if (errors.Count > 0) throw ApiProblem.Invalid(errors.Values.First()[0], errors);
 
         if (test is null)
@@ -45,6 +50,9 @@ public sealed class ElectricalTestService(PresAppDbContext db, AssetQueries quer
         test.TestedOn = request.TestedOn;
         foreach (var (key, value) in request.Values ?? new Dictionary<string, decimal?>())
             ElectricalTestSpec.Set(test, ElectricalTestSpec.Find(key)!.Key, value);
+        if (request.Tera is { } tera)
+            foreach (var m in ElectricalTestSpec.Measures.Where(ElectricalTestSpec.AllowsTera))
+                ElectricalTestSpec.SetTera(test, m.Key, tera.Contains(m.Key, StringComparer.OrdinalIgnoreCase));
 
         await db.SaveChangesAsync(ct);
         return await queries.ProfileAsync(id, ct);

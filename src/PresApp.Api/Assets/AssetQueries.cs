@@ -125,7 +125,8 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
         t.Required, t.TestedOn,
         ElectricalTestSpec.Measures.ToDictionary(m => m.Key, m => ElectricalTestSpec.Get(t, m.Key)),
         ElectricalTestSpec.Blocks.Where(b => b.RatioLabel is not null).ToDictionary(b => b.Key, b => ElectricalTestSpec.Ratio(t, b)),
-        ElectricalTestSpec.IsComplete(t), ElectricalTestSpec.Missing(t).Select(m => m.Key).ToList(), t.UpdatedBy, t.UpdatedAtUtc);
+        ElectricalTestSpec.IsComplete(t), ElectricalTestSpec.Missing(t).Select(m => m.Key).ToList(), t.UpdatedBy, t.UpdatedAtUtc,
+        ElectricalTestSpec.TeraKeys(t));
 
     public async Task<List<SearchHit>> SearchAsync(string q, int? unitId, AssetType? type, int take, CancellationToken ct)
     {

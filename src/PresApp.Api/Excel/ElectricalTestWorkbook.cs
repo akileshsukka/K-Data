@@ -21,6 +21,8 @@ namespace PresApp.Api.Excel;
 /// Filled cells set the value; empty cells never clear anything; the DAR / PI ratio columns are calculated, never read.
 /// DESCRIPTION fills the Nameplate Data. A loaded row marks the asset as requiring the test.</item>
 /// </list>
+/// DAR values recorded in TΩ are printed with "TΩ" after the number (the cell stays a number); on upload a DAR cell is in TΩ
+/// when it shows TΩ (that format, or a text such as "1.2 T" / "1.2 TΩ"), otherwise in GΩ as the column header says.
 /// Same two steps as the other uploads: preview, then apply against the data as it is at that moment.
 /// </summary>
 public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext audit, TimeProvider clock)
@@ -109,7 +111,10 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
             foreach (var (offset, measure, ratioOf) in Layout)
             {
                 var value = measure is not null ? ElectricalTestSpec.Get(t, measure.Key) : ElectricalTestSpec.Ratio(t, ratioOf!);
-                if (value is { } v) ws.Cell(row, 1 + offset).SetValue(v);
+                if (value is not { } v) continue;
+                var cell = ws.Cell(row, 1 + offset);
+                cell.SetValue(v);
+                if (measure is not null && ElectricalTestSpec.IsTera(t, measure.Key)) MarkTera(cell);
             }
         }
 
@@ -148,9 +153,40 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
         return new XLWorkbook(copy);
     }
 
+    /// <summary>A value in TΩ: the cell keeps its number and its template format, followed by " TΩ" (e.g. "1.2 TΩ").</summary>
+    private static void MarkTera(IXLCell cell)
+    {
+        var format = cell.Style.NumberFormat.Format;
+        if (string.IsNullOrEmpty(format))
+            format = cell.Style.NumberFormat.NumberFormatId switch { 1 => "0", 2 => "0.00", 3 => "#,##0", 4 => "#,##0.00", _ => "General" };
+        cell.Style.NumberFormat.Format = $"{format.Split(';')[0]}\" {ElectricalTestSpec.Tera}\"";
+    }
+
+    /// <summary>"1.2 T", "1.2TΩ", "1.2 TOhm", "950 GΩ": the number and its unit, read from a DAR cell typed as text.</summary>
+    private static readonly System.Text.RegularExpressions.Regex UnitSuffix =
+        new(@"^(?<n>.*?\d)\s*(?<u>[TG])\s*(Ω|Ω|ohms?)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Text of a value cell and, for a DAR cell, whether it is in TΩ: a number formatted with TΩ (as the report prints it)
+    /// or a text ending in T / TΩ. A "G" / "GΩ" ending is the default unit. Other cells are read as they are.
+    /// </summary>
+    private static (string Text, bool Tera)? ReadValue(IXLCell cell, ElectricalMeasure measure)
+    {
+        var text = ValueNormalizer.CleanText(WorkbookFormat.CellText(cell));
+        if (text is null) return null;
+        if (!ElectricalTestSpec.AllowsTera(measure)) return (text, false);
+        if (cell.DataType == XLDataType.Number) return (text, cell.Style.NumberFormat.Format.Contains(ElectricalTestSpec.Tera, StringComparison.Ordinal));
+        var m = UnitSuffix.Match(text);
+        return m.Success ? (m.Groups["n"].Value.Trim(), m.Groups["u"].Value.Equals("T", StringComparison.OrdinalIgnoreCase)) : (text, false);
+    }
+
+    /// <summary>A value as the preview shows it: "1.2 TΩ" when in TΩ, the plain number otherwise.</summary>
+    private static string Show(decimal value, bool tera) =>
+        value.ToString(CultureInfo.InvariantCulture) + (tera ? $" {ElectricalTestSpec.Tera}" : "");
+
     // ------------------------------------------------------------------ upload
 
-    private sealed record SourceRow(int Number, string Tag, string? Nameplate, Dictionary<ElectricalMeasure, string> Values);
+    private sealed record SourceRow(int Number, string Tag, string? Nameplate, Dictionary<ElectricalMeasure, (string Text, bool Tera)> Values);
 
     public async Task<ImportRunDetail> PreviewAsync(Stream file, string fileName, int unitId, string uploadedBy, CancellationToken ct)
     {
@@ -235,12 +271,11 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
                 {
                     var tag = ValueNormalizer.CleanText(WorkbookFormat.CellText(ws.Cell(r, left)));
                     if (tag is null) continue;
-                    var values = new Dictionary<ElectricalMeasure, string>();
+                    var values = new Dictionary<ElectricalMeasure, (string, bool)>();
                     foreach (var (offset, measure, _) in Layout)
                     {
                         if (measure is null || absent.Contains(measure)) continue;
-                        var text = ValueNormalizer.CleanText(WorkbookFormat.CellText(ws.Cell(r, left + offset)));
-                        if (text is not null) values[measure] = text;
+                        if (ReadValue(ws.Cell(r, left + offset), measure) is { } read) values[measure] = read;
                     }
                     result.Add(new SourceRow(r - top - 1, tag, ValueNormalizer.CleanText(WorkbookFormat.CellText(ws.Cell(r, left + 1))), values));
                 }
@@ -287,22 +322,24 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
             if (!seen.Add(asset.Id)) { changes.Add(Change(asset, RowField, ImportOutcome.Rejected, "The tag appears twice in the file; only its first row was read.")); continue; }
 
             var test = asset.ElectricalTest;
-            var proposed = new Dictionary<ElectricalMeasure, decimal>();
+            var proposed = new Dictionary<ElectricalMeasure, (decimal Value, bool Tera)>();
             var testChanges = new List<ImportChange>();
             var overwritten = 0;
-            foreach (var (measure, text) in row.Values)
+            foreach (var (measure, (text, tera)) in row.Values)
             {
                 var current = test is null ? null : ElectricalTestSpec.Get(test, measure.Key);
-                var currentText = current?.ToString(CultureInfo.InvariantCulture);
+                var currentTera = test is not null && ElectricalTestSpec.IsTera(test, measure.Key);
+                var currentText = current is { } cv ? Show(cv, currentTera) : null;
+                var excelText = tera ? $"{text} {ElectricalTestSpec.Tera}" : text;
                 if (!ValueNormalizer.TryParseDecimal(text, out var value) || value < 0)
                 {
-                    testChanges.Add(Change(asset, measure.Key, ImportOutcome.Invalid, $"{measure.Label} must be a number (0 or more).", text, currentText));
+                    testChanges.Add(Change(asset, measure.Key, ImportOutcome.Invalid, $"{measure.Label} must be a number (0 or more).", excelText, currentText));
                     continue;
                 }
-                if (current == value) { testChanges.Add(Change(asset, measure.Key, ImportOutcome.NoChange, "The app already has this value.", text, currentText, currentText)); continue; }
-                proposed[measure] = value;
+                if (current == value && currentTera == tera) { testChanges.Add(Change(asset, measure.Key, ImportOutcome.NoChange, "The app already has this value.", excelText, currentText, currentText)); continue; }
+                proposed[measure] = (value, tera);
                 if (current is not null) overwritten++;
-                testChanges.Add(Change(asset, measure.Key, ImportOutcome.Applied, null, text, currentText, value.ToString(CultureInfo.InvariantCulture)));
+                testChanges.Add(Change(asset, measure.Key, ImportOutcome.Applied, null, excelText, currentText, Show(value, tera)));
             }
 
             // A complete test is locked in the app: changing its values from the file needs a yes / no in the preview.
@@ -364,7 +401,11 @@ public sealed class ElectricalTestWorkbook(PresAppDbContext db, AuditContext aud
                 db.ElectricalTests.Add(test);
             }
             if (activate) test.Required = true;
-            foreach (var (measure, value) in proposed) ElectricalTestSpec.Set(test, measure.Key, value);
+            foreach (var (measure, (value, tera)) in proposed)
+            {
+                ElectricalTestSpec.Set(test, measure.Key, value);
+                ElectricalTestSpec.SetTera(test, measure.Key, tera);
+            }
         }
         return changes;
     }

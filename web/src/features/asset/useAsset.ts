@@ -64,7 +64,7 @@ export function useMarkPreserved(id: string) {
 export function useSaveElectricalTest(id: string) {
   return useAssetMutation(
     id,
-    (body: { required: boolean; testedOn: string | null; values: Record<string, number | null>; expected: string | null }) =>
+    (body: { required: boolean; testedOn: string | null; values: Record<string, number | null>; expected: string | null; tera: string[] }) =>
       api<AssetProfile>(`/api/assets/${id}/electrical-test`, { method: "PUT", body }),
     (r) => r,
   );
