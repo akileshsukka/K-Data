@@ -119,11 +119,14 @@ public sealed class GroupedExcelTests : IClassFixture<TestApp>
         var b = await SplitAsync(a, "39-P-801A", "39-P-801B", (g, s) => g == 1 ? "Ongoing" : s);
         await PatchAsync(b, "ReadyForPreservation", "Yes");
 
-        // The unit has one split item and opens "By equipment" until someone changes the default.
+        // The unit has one split item and opens "As the client" until someone changes the default.
         var view = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/client-view");
-        Assert.False(view.GetProperty("grouped").GetBoolean());
+        Assert.True(view.GetProperty("grouped").GetBoolean());
         Assert.Equal(1, view.GetProperty("splitItems").GetInt32());
+        Assert.True((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard")).GetProperty("grouped").GetBoolean());
 
+        // Set to "By equipment": the dashboard (and the PDF, which asks without a view) shows each part.
+        (await admin.PutAsJsonAsync($"/api/units/{unitId}/client-view", new { grouped = false })).EnsureSuccessStatusCode();
         static int G1(JsonElement d, string what) => d.GetProperty("activities").EnumerateArray().First(x => x.GetProperty("code").GetString() == "G1").GetProperty(what).GetInt32();
         var byEquipment = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard");
         Assert.False(byEquipment.GetProperty("grouped").GetBoolean());
@@ -145,7 +148,7 @@ public sealed class GroupedExcelTests : IClassFixture<TestApp>
         Assert.Contains(a, ids);
         Assert.Contains(b, ids);
 
-        // As the unit default, the dashboard (and the PDF, which asks without a view) is grouped.
+        // Back to "As the client": the dashboard is grouped again.
         (await admin.PutAsJsonAsync($"/api/units/{unitId}/client-view", new { grouped = true })).EnsureSuccessStatusCode();
         Assert.True((await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard")).GetProperty("grouped").GetBoolean());
         Assert.Equal("39-P-801A/B", (await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/assets?type=Equipment"))
