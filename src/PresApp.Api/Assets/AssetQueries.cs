@@ -27,6 +27,9 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
                 DocsDone = a.GateDocuments.Count(d => d.Status != DocumentationStatus.Pending),
                 Docs = a.GateDocuments.Select(d => new { d.Gate, d.Status }).ToList()
             })
+            // Groups and gate documents as separate queries: in one they multiply the rows (assets × documents × groups),
+            // which weighs on the 2,000+ item E&I registers.
+            .AsSplitQuery()
             .ToListAsync(ct);
 
         // Custom fields marked "show in register" for this asset type.

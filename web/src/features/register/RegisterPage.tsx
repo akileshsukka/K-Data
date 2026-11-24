@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -12,6 +12,7 @@ import { CurrentGateChip, GateStatus, gatePrefix, gateText } from "../../compone
 import { PageHeader } from "../../components/PageHeader";
 import { TagListFilter, tagKey, tagList } from "../../components/TagListFilter";
 import { useDebounced } from "../../components/useDebounced";
+import { useMediaQuery, useProgressiveList } from "../../components/useProgressiveList";
 import { formatDate } from "../../components/dates";
 import { formatSize } from "../lines/lineNumber";
 import { StatusTick, drainedTick, walkdownTick, yesTick } from "../lines/StatusTick";
@@ -26,6 +27,9 @@ import { DownloadExcelButton } from "../excel/DownloadExcelButton";
 import { GateFormDialog } from "../gateforms/GateFormDialog";
 import { groupLines } from "../lines/lineGroups";
 import { groupByClientTag } from "./clientGroups";
+
+/** The register while it loads: always the same empty list, so what depends on it is not recomputed on every render. */
+const NO_ROWS: RegisterRow[] = [];
 
 const titles: Record<AssetType, string> = {
   Equipment: "Equipment Register",
@@ -208,7 +212,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     queryFn: ({ signal }) => api<RegisterRow[]>(`/api/units/${unitId}/assets?type=${type}&inactiveOnly=${f.inactive}`, { signal }),
   });
 
-  const all = rows.data ?? [];
+  const all = rows.data ?? NO_ROWS;
   const lines = type === "Pipeline";
 
   // Grouped view (lines only): sections of one line that change size shown as one row; only the view changes.
@@ -247,7 +251,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     enabled: !!f.card && (pipingCard ? !!view.data : lines || !!clientView.data),
   });
   const cardIds = useMemo(() => (card.data ? new Set(card.data.assetIds) : null), [card.data]);
-  const outsideCard = card.data ? card.data.assetIds.filter((id) => !all.some((r) => r.id === id)).length : 0;
+  const allIds = useMemo(() => new Set(all.map((r) => r.id)), [all]);
+  const outsideCard = useMemo(() => (card.data ? card.data.assetIds.filter((id) => !allIds.has(id)).length : 0), [card.data, allIds]);
   const distinct = (pick: (r: RegisterRow) => string | null) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const showLaterGates = all.some((r) => r.gates.slice(4).some(Boolean));
   // E&I items always show their 8 steps (E1–E8); equipment and lines show G5–G8 only once someone uses them.
@@ -258,29 +263,35 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
   const tagSet = useMemo(() => new Set(tagList(f.tags)), [f.tags]);
   // A pasted client tag (P-101A/B) finds its parts, in either view.
-  const tagsNotFound = [...tagSet].filter((t) => !all.some((r) => tagKey(r.tag ?? "") === t || tagKey(r.code) === t || (!!r.clientTag && tagKey(r.clientTag) === t)));
+  const tagsNotFound = useMemo(() => {
+    if (tagSet.size === 0) return [];
+    const known = new Set(all.flatMap((r) => [tagKey(r.tag ?? ""), tagKey(r.code), ...(r.clientTag ? [tagKey(r.clientTag)] : [])]));
+    return [...tagSet].filter((t) => !known.has(t));
+  }, [tagSet, all]);
   // As the client, the filters look at the row the client sees (its combined values) and keep all its parts.
   const clientRows = useMemo(() => (asClient ? groupByClientTag(all) : null), [asClient, all]);
+  // The list follows the filters a moment later (React draws the click first, then the list), so a filter never freezes the page.
+  const fd = useDeferredValue(f);
   const matches = useCallback(
     (r: RegisterRow, members: RegisterRow[] = [r]) =>
           (!text || `${r.tag ?? ""} ${r.code} ${r.description ?? ""} ${r.preservationRemarks ?? ""} ${r.line?.pipeSpec ?? ""} ${r.line?.pidNumber ?? ""} ${r.line?.service ?? ""} ${r.circuit ?? ""} ${Object.values(r.custom ?? {}).join(" ")} ${codes.describe("Service", r.line?.service, unitId) ?? ""}`.toLowerCase().includes(text)) &&
-          anyOf(f.discipline, (v) => r.discipline === v) &&
-          anyOf(f.currentGate, (v) => r.currentGate === v) &&
-          gateMatch(r, f.gates, f.gateStatus, gateCount) &&
-          anyOf(f.actionBy, (v) => r.actionBy === v) &&
-          anyOf(f.emWalkdown, (v) => (v === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === v.toLowerCase())) &&
-          anyOf(f.ready, (v) => (v === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === v.toLowerCase())) &&
-          (!f.drained || (f.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
-          anyOf(f.inspection, (v) => ({ Yes: "done", No: "missing", NA: "na" } as Record<string, string>)[v] === yesTick(r.custom?.[PipingFieldKeys.inspectionDone])) &&
-          anyOf(f.cleaning, (v) => (v === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === v)) &&
-          anyOf(f.activity, (v) => (v === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(v))) &&
-          (!f.numberCheck || (f.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
-          docsMatch(r, f.docs, f.gates, gateCount) &&
-          (!f.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
-          (!f.card || !!cardIds?.has(r.id)) &&
+          anyOf(fd.discipline, (v) => r.discipline === v) &&
+          anyOf(fd.currentGate, (v) => r.currentGate === v) &&
+          gateMatch(r, fd.gates, fd.gateStatus, gateCount) &&
+          anyOf(fd.actionBy, (v) => r.actionBy === v) &&
+          anyOf(fd.emWalkdown, (v) => (v === "(not set)" ? !r.emWalkdown : r.emWalkdown?.toLowerCase() === v.toLowerCase())) &&
+          anyOf(fd.ready, (v) => (v === "(not set)" ? !r.readyForPreservation : r.readyForPreservation?.toLowerCase() === v.toLowerCase())) &&
+          (!fd.drained || (fd.drained === "done") === (drainedTick(r.bulkLiquidDrained) === "done")) &&
+          anyOf(fd.inspection, (v) => ({ Yes: "done", No: "missing", NA: "na" } as Record<string, string>)[v] === yesTick(r.custom?.[PipingFieldKeys.inspectionDone])) &&
+          anyOf(fd.cleaning, (v) => (v === "(not set)" ? !r.custom?.[PipingFieldKeys.cleaningRequired] : r.custom?.[PipingFieldKeys.cleaningRequired] === v)) &&
+          anyOf(fd.activity, (v) => (v === "(none)" ? !r.currentActivity : (r.currentActivity ?? "").split("\n").includes(v))) &&
+          (!fd.numberCheck || (fd.numberCheck === "nonstandard") === !!r.line?.numberCheck?.nonStandard) &&
+          docsMatch(r, fd.docs, fd.gates, gateCount) &&
+          (!fd.e7 || (type === "ElectricalInstrument" && e7TestMissing(r))) &&
+          (!fd.card || !!cardIds?.has(r.id)) &&
           (tagSet.size === 0 || members.some((m) => tagSet.has(tagKey(m.tag ?? "")) || tagSet.has(tagKey(m.code)) || (!!m.clientTag && tagSet.has(tagKey(m.clientTag))))) &&
-          anyOf(f.group, (v) => (v === "(none)" ? !r.groups?.length : !!r.groups?.includes(v))),
-    [text, f, gateCount, codes, cardIds, tagSet, type, unitId],
+          anyOf(fd.group, (v) => (v === "(none)" ? !r.groups?.length : !!r.groups?.includes(v))),
+    [text, fd, gateCount, codes, cardIds, tagSet, type, unitId],
   );
   const clientShown = useMemo(() => clientRows?.filter((g) => matches(g.row, g.members)) ?? null, [clientRows, matches]);
   const filtered = useMemo(() => (clientShown ? clientShown.flatMap((g) => g.members) : all.filter((r) => matches(r))), [clientShown, all, matches]);
@@ -315,6 +326,9 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
     () => clientShown ?? (grouped ? groupLines(filtered) : filtered.map((r) => ({ key: r.id, members: [r], row: r }))),
     [clientShown, grouped, filtered],
   );
+  // Only the rows near the screen are drawn (more while scrolling), and only the layout of this screen size.
+  const desktop = useMediaQuery("(min-width: 48rem)");
+  const drawn = useProgressiveList(shown);
   /** Rows on screen are groups (sizes of a line, or parts of a split item). */
   const rowsGrouped = grouped || asClient;
 
@@ -657,7 +671,8 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
       {filtered.length > 0 && (
         <>
-          <div className="mt-4 hidden overflow-x-auto rounded-lg border border-line bg-panel md:block">
+          {desktop ? (
+          <div className="mt-4 overflow-x-auto rounded-lg border border-line bg-panel">
             <table className="w-full border-separate border-spacing-0 text-left text-[15px]">
               <thead className="sticky top-0 bg-panel font-display text-muted">
                 <tr>
@@ -693,7 +708,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 </tr>
               </thead>
               <tbody>
-                {shown.map(({ key, members, row: r }) => {
+                {drawn.visible.map(({ key, members, row: r }) => {
                   const ids = members.filter(selectable).map((m) => m.id);
                   return (
                   <tr key={key} className={`group ${r.isActive ? "" : "text-muted"} hover:bg-violet-soft/50`}>
@@ -773,9 +788,9 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
               </tbody>
             </table>
           </div>
-
-          <ul className="mt-4 space-y-2 md:hidden">
-            {shown.map(({ key, members, row: r }) => {
+          ) : (
+          <ul className="mt-4 space-y-2">
+            {drawn.visible.map(({ key, members, row: r }) => {
               const card = `block rounded-lg border border-line bg-panel p-3 ${r.isActive ? "" : "opacity-70"}`;
               const content = (
                 <>
@@ -813,6 +828,13 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
               );
             })}
           </ul>
+          )}
+          {drawn.hasMore && (
+            <div ref={drawn.sentinel} className="mt-3 flex items-center justify-center gap-3 text-sm text-muted">
+              Showing {drawn.visible.length} of {drawn.total} rows
+              <button type="button" onClick={drawn.more} className="font-semibold text-violet">Show more</button>
+            </div>
+          )}
         </>
       )}
     </div>

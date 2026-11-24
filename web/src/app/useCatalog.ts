@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AssetType, CustomField, ElectricalBlock, Discipline, FieldDef, LineCode, LineCodeKind, Measurement, OptionSet, PipeSpec, Plant, Unit } from "../api/types";
@@ -38,14 +39,17 @@ export interface LineCodeBook {
 /** Service and insulation codes of the line numbers (admin-editable list). */
 export function useLineCodes(): LineCodeBook {
   const q = useQuery({ queryKey: ["catalog", "line-codes"], queryFn: ({ signal }) => api<LineCode[]>("/api/catalog/line-codes", { signal }), staleTime: LONG });
-  const all = q.data ?? [];
-  const map = new Map(all.filter((c) => c.isActive).map((c) => [`${c.kind}:${c.code}:${c.unitId ?? ""}`, c.description]));
-  const describe = (kind: LineCodeKind, code: string | null | undefined, unitId: number | undefined) => {
-    if (!code) return undefined;
-    const key = `${kind}:${code.toUpperCase()}:`;
-    return (unitId ? map.get(key + unitId) : undefined) ?? map.get(key);
-  };
-  return { describe, all };
+  // The same book until the codes change: registers filter thousands of rows with it and must not redo it on every render.
+  return useMemo(() => {
+    const all = q.data ?? [];
+    const map = new Map(all.filter((c) => c.isActive).map((c) => [`${c.kind}:${c.code}:${c.unitId ?? ""}`, c.description]));
+    const describe = (kind: LineCodeKind, code: string | null | undefined, unitId: number | undefined) => {
+      if (!code) return undefined;
+      const key = `${kind}:${code.toUpperCase()}:`;
+      return (unitId ? map.get(key + unitId) : undefined) ?? map.get(key);
+    };
+    return { describe, all };
+  }, [q.data]);
 }
 
 /** Pipe spec catalogue: class and flange type of a spec code (active specs only). */
