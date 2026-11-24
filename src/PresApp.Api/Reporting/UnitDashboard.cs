@@ -165,8 +165,12 @@ public sealed class UnitDashboard(PresAppDbContext db)
             return new DailyDisciplineRow(g.Name, g.Rows.Count, na, g.Rows.Count(a => preservedIds.Contains(a.Id)), g.Rows.Count(a => holdIds.Contains(a.Id)),
                 na == g.Rows.Count ? null : g.Pct);
         }).ToList();
+        // Each preserved tag with the name of its row in the table, so the report can list them by discipline.
+        var rowOf = new Dictionary<Guid, string>();
+        foreach (var g in groups)
+            foreach (var a in g.Rows) rowOf.TryAdd(a.Id, g.Name);
         return new ReportFigures(d.TotalTags, d.TotalNotApplicable, d.Preserved, d.TotalHold, rows,
-            preserved.ToDictionary(i => i.Ids.Min(), i => i.Tag ?? i.Code));
+            preserved.ToDictionary(i => i.Ids.Min(), i => new PreservedTag(i.Tag ?? i.Code, rowOf.GetValueOrDefault(i.Id, "Other"))));
     }
 
     /// <summary>

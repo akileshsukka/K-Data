@@ -25,6 +25,7 @@ interface DailyUnit {
   preservedPct: number;
   preservedPctDayBefore: number;
   completedTags: string[];
+  completedByDiscipline: { discipline: string; tags: string[] }[];
   lines: number;
   linesPreserved: number;
   highlights: Highlight[];
@@ -131,7 +132,14 @@ export function DailyReportPanel({ unitId }: { unitId: number }) {
               <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Completed on {formatDate(day)}</h3>
               {completed.length === 0
                 ? <p className="mt-1 text-muted">No tags completed{day === today ? " yet today" : ""}.</p>
-                : <ul className="mt-1.5 flex flex-wrap gap-1.5">{completed.map((t) => <li key={t} className="rounded bg-done/10 px-2 py-0.5 text-sm font-semibold text-done tabular-nums">{t}</li>)}</ul>}
+                : <div className="mt-1.5 space-y-1.5">
+                    {u.completedByDiscipline.map((g) => (
+                      <div key={g.discipline} className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                        <span className="min-w-36 text-sm font-semibold text-ink">{g.discipline} <span className="font-normal text-muted">({g.tags.length})</span></span>
+                        <ul className="flex flex-wrap gap-1.5">{g.tags.map((t) => <li key={t} className="rounded bg-done/10 px-2 py-0.5 text-sm font-semibold text-done tabular-nums">{t}</li>)}</ul>
+                      </div>
+                    ))}
+                  </div>}
             </div>
           )}
           <div>
