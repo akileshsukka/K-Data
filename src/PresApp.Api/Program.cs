@@ -55,6 +55,7 @@ builder.Services.AddScoped<PresApp.Api.GateForms.GateFormService>();
 builder.Services.AddScoped<PresApp.Api.GateForms.GateFormDocumentationList>();
 builder.Services.AddScoped<PresApp.Api.GateForms.RecordNumbers>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitDashboard>();
+builder.Services.AddScoped<PresApp.Api.Reporting.EiSettings>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitHighlightService>();
 builder.Services.AddScoped<PresApp.Api.Reporting.DailySummary>();
 builder.Services.AddHttpClient<PresApp.Api.Reporting.EpcsClient>(c => c.Timeout = TimeSpan.FromSeconds(20));

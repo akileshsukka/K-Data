@@ -26,6 +26,8 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
     public const string CustomFieldPrefix = "cf:";
     /// <summary>Bulk edit pseudo-field: the dashboard category (value = category id, empty clears it).</summary>
     public const string CategoryField = "DashboardCategory";
+    /// <summary>Bulk edit pseudo-field: the discipline (value = discipline id), within the asset's register.</summary>
+    public const string DisciplineField = "Discipline";
 
     public async Task<PatchResponse> PatchAsync(Guid id, PatchRequest request, ClaimsPrincipal user, CancellationToken ct)
     {
@@ -440,6 +442,7 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         if (request.AssetIds is not { Count: > 0 }) throw ApiProblem.Invalid("Select at least one asset.");
         if (request.AssetIds.Count > 2000) throw ApiProblem.Invalid("Select at most 2,000 assets at a time.");
         if (request.Field.Equals(CategoryField, StringComparison.OrdinalIgnoreCase)) return await BulkCategoryAsync(request, apply, user, ct);
+        if (request.Field.Equals(DisciplineField, StringComparison.OrdinalIgnoreCase)) return await BulkDisciplineAsync(request, apply, user, ct);
         if (request.Field.StartsWith(CustomFieldPrefix, StringComparison.OrdinalIgnoreCase)) return await BulkCustomAsync(request, apply, user, ct);
 
         var isPreserved = request.Field.Equals(PreservedAtField, StringComparison.OrdinalIgnoreCase);
@@ -539,6 +542,44 @@ public sealed class AssetEditor(PresAppDbContext db, AssetQueries queries, Audit
         {
             rows.Add(new BulkRow(missing, "?", null, null, newText, "Skipped", "Asset not found"));
         }
+
+        if (apply) await db.SaveChangesAsync(ct);
+        return new BulkResult(rows.Count(r => r.Outcome == "Change"), rows.Count(r => r.Outcome == "No change"),
+            rows.Count(r => r.Outcome == "Skipped"), rows);
+    }
+
+    /// <summary>
+    /// Bulk change of the discipline (24-nov: the instrument lists arrived as "E&amp;I" and belong to Instrumentation, which the
+    /// E&amp;I dashboard counts apart). Only to a discipline of the asset's own register (an E&amp;I item never becomes equipment);
+    /// the Equipment ID, gates, documents and Record No. stay as they are. Audited like any change.
+    /// </summary>
+    private async Task<BulkResult> BulkDisciplineAsync(BulkRequest request, bool apply, ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (!user.HasPermission(Permissions.AssetsManage)) throw ApiProblem.Forbidden("Your role cannot change the discipline.");
+        if (!int.TryParse(request.Value, out var disciplineId)) throw ApiProblem.Invalid("Choose a discipline from the list.");
+        var discipline = await db.Disciplines.AsNoTracking().FirstOrDefaultAsync(d => d.Id == disciplineId && d.IsActive, ct)
+                         ?? throw ApiProblem.Invalid("That discipline is not active. Refresh the page and choose it again.");
+
+        var ids = request.AssetIds.Distinct().ToList();
+        var assets = await db.Assets.Include(a => a.Discipline).Where(a => ids.Contains(a.Id)).ToListAsync(ct);
+        var rows = new List<BulkRow>();
+        audit.Source = ChangeSource.Bulk;
+
+        foreach (var asset in assets.OrderBy(a => a.Tag ?? a.Code, NaturalComparer.Instance))
+        {
+            var current = asset.Discipline.Name;
+            string? skip = !asset.IsActive ? "Inactive asset"
+                : asset.Type != discipline.AssetType ? $"{discipline.Name} is not a discipline of this register"
+                : null;
+            if (skip is not null) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, discipline.Name, "Skipped", skip)); continue; }
+            if (asset.DisciplineId == discipline.Id) { rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, discipline.Name, "No change", null)); continue; }
+
+            rows.Add(new BulkRow(asset.Id, asset.Code, asset.Tag, current, discipline.Name, "Change", null));
+            if (!apply) continue;
+            asset.DisciplineId = discipline.Id;
+        }
+        foreach (var missing in ids.Except(assets.Select(a => a.Id)))
+            rows.Add(new BulkRow(missing, "?", null, null, discipline.Name, "Skipped", "Asset not found"));
 
         if (apply) await db.SaveChangesAsync(ct);
         return new BulkResult(rows.Count(r => r.Outcome == "Change"), rows.Count(r => r.Outcome == "No change"),

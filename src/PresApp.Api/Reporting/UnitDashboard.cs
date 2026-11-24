@@ -26,6 +26,9 @@ public sealed record CategoryRow(int Id, string? Code, string Label, string Sect
 
 /// <summary>
 /// The dashboard of one unit for one scope: "mechanical" (static, rotating, package) or "ei" (Electrical &amp; Instrumentation).
+/// E&amp;I: <see cref="Part"/> = the part counted ("electrical", "instrumentation" or "all"); <see cref="Parts"/> = the figures of
+/// each part, whichever part is shown, and <see cref="WeightedPreservedPct"/> their % weighted by the unit's weights (parts
+/// without applicable tags left out); null on the mechanical dashboard.
 /// </summary>
 public sealed record DashboardDto(
     int UnitId, string UnitName, string PlantName, string Scope, int TotalTags,
@@ -33,7 +36,11 @@ public sealed record DashboardDto(
     List<CategoryRow> Hold, int TotalHold, List<CategoryRow> NotApplicable, int TotalNotApplicable,
     int GrandTotal, int AvailableForPreservation, int Preserved, int ReadyForPreservation,
     Dictionary<string, int> ByCurrentGate, int DocumentsPending, int ElectricalInstrumentCount, int InactiveCount,
-    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource, bool Grouped = false);
+    int LineCount, decimal LineLengthM, int LinesBlanketed, string CategorySource, bool Grouped = false,
+    string Part = "all", List<EiPartRow>? Parts = null, decimal? WeightedPreservedPct = null);
+
+/// <summary>One part of the E&amp;I items: tags, not applicable, preserved, preserved ÷ (tags − not applicable), weight (%).</summary>
+public sealed record EiPartRow(string Part, string Label, int Tags, int NotApplicable, int Preserved, decimal PreservedPct, int Weight);
 
 /// <summary>
 /// One category in the editor. Code is assigned by the app. Keywords and priority are optional: they only feed the
@@ -83,32 +90,35 @@ public sealed class UnitDashboard(PresAppDbContext db)
     public const string EiCardPrefix = "ei-";
 
     /// <param name="grouped">"As the client": the parts of a split item are one tag, with the values of its client Excel row (GroupedRows).</param>
-    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct, CategoryScope scope = CategoryScope.Mechanical, bool grouped = false) =>
-        (await ComputeAsync(unitId, scope, grouped, ct)).Dashboard;
+    /// <param name="part">E&amp;I only: electrical, instrumentation or both (the client Excel).</param>
+    public async Task<DashboardDto> GetAsync(int unitId, CancellationToken ct, CategoryScope scope = CategoryScope.Mechanical, bool grouped = false, EiPart part = EiPart.All) =>
+        (await ComputeAsync(unitId, scope, grouped, ct, part: part)).Dashboard;
 
     /// <summary>
     /// Equipment counted by one dashboard figure; same computation as the dashboard, so the counts always agree.
     /// Grouped, a split item counts once and its figure lists all its parts.
     /// </summary>
-    public async Task<DashboardCardDto> CardAsync(int unitId, string card, CancellationToken ct, bool grouped = false)
+    public async Task<DashboardCardDto> CardAsync(int unitId, string card, CancellationToken ct, bool grouped = false, EiPart part = EiPart.All)
     {
         var key = (card ?? "").Trim().ToLowerInvariant();
         var scope = key.StartsWith(EiCardPrefix, StringComparison.Ordinal) ? CategoryScope.ElectricalInstrument : CategoryScope.Mechanical;
         if (key.StartsWith("category-", StringComparison.Ordinal) && int.TryParse(key["category-".Length..], out var categoryId))
             scope = await db.DashboardCategories.Where(c => c.Id == categoryId && c.UnitId == unitId).Select(c => (CategoryScope?)c.Scope).FirstOrDefaultAsync(ct)
                     ?? throw ApiProblem.NotFound("Dashboard figure not found.");
-        var (dashboard, cards) = await ComputeAsync(unitId, scope, grouped, ct);
+        var ei = scope == CategoryScope.ElectricalInstrument;
+        if (!ei) part = EiPart.All;
+        var (dashboard, cards) = await ComputeAsync(unitId, scope, grouped, ct, part: part);
         if (!cards.TryGetValue(key, out var items)) throw ApiProblem.NotFound("Dashboard figure not found.");
         var ids = items.SelectMany(i => i.Ids).ToList();
-        var ei = scope == CategoryScope.ElectricalInstrument;
+        var name = EiParts.Label(part);
         var label = (ei ? key[EiCardPrefix.Length..] : key) switch
         {
-            "tags" => ei ? "E&I tags" : "Equipment tags",
-            "preserved" => ei ? "E&I preserved" : "Preserved",
+            "tags" => ei ? $"{name} tags" : "Equipment tags",
+            "preserved" => ei ? $"{name} preserved" : "Preserved",
             "ready" => "Ready for preservation",
-            "hold" => ei ? "E&I on hold" : "On hold",
-            "na" => ei ? "E&I not applicable" : "Not applicable",
-            "available" => ei ? "E&I available" : "Available",
+            "hold" => ei ? $"{name} on hold" : "On hold",
+            "na" => ei ? $"{name} not applicable" : "Not applicable",
+            "available" => ei ? $"{name} available" : "Available",
             _ => dashboard.Hold.Concat(dashboard.NotApplicable).Where(c => $"category-{c.Id}" == key)
                 .Select(c => $"{(c.Section == "Hold" ? "Hold" : "N/A")} {c.Code}: {c.Label}".Replace("  ", " ")).FirstOrDefault() ?? "Category"
         };
@@ -120,10 +130,13 @@ public sealed class UnitDashboard(PresAppDbContext db)
     /// discipline (E&amp;I as one row) and the tags preserved, keyed by their first asset. <paramref name="valueAt"/> gives the
     /// statuses at an earlier moment; categories (hold, not applicable) are always the current ones.
     /// </summary>
-    internal async Task<ReportFigures> ReportFiguresAsync(int unitId, CategoryScope scope, bool grouped, Func<Guid, string, string?, string?>? valueAt, CancellationToken ct)
+    /// <param name="part">E&amp;I items counted: electrical only (one "Electrical" row) or all (an "Electrical" and an
+    /// "Instrumentation" row).</param>
+    internal async Task<ReportFigures> ReportFiguresAsync(int unitId, CategoryScope scope, bool grouped, Func<Guid, string, string?, string?>? valueAt, CancellationToken ct,
+        EiPart part = EiPart.All)
     {
-        var (d, cards) = await ComputeAsync(unitId, scope, grouped, ct, valueAt);
         var ei = scope == CategoryScope.ElectricalInstrument;
+        var (d, cards) = await ComputeAsync(unitId, scope, grouped, ct, valueAt, ei ? part : EiPart.All);
         var prefix = ei ? EiCardPrefix : "";
         var items = cards[prefix + "tags"];
         var preserved = cards[prefix + "preserved"];
@@ -133,7 +146,11 @@ public sealed class UnitDashboard(PresAppDbContext db)
 
         var groups = new List<(string Name, List<Item> Rows, decimal Pct)>();
         if (ei)
-            groups.Add(("E&I", items, Pct(items.Sum(a => a.Steps.Count(IsCompleted)), items.Sum(a => a.Steps.Count(s => !IsNotApplicable(s))))));
+            foreach (var p in part == EiPart.All ? [EiPart.Electrical, EiPart.Instrumentation] : new[] { part })
+            {
+                var inPart = items.Where(a => EiParts.Of(a.Discipline) == p).ToList();
+                groups.Add((EiParts.Label(p), inPart, Pct(inPart.Sum(a => a.Steps.Count(IsCompleted)), inPart.Sum(a => a.Steps.Count(s => !IsNotApplicable(s))))));
+            }
         else
         {
             foreach (var name in MechanicalDisciplines)
@@ -160,13 +177,15 @@ public sealed class UnitDashboard(PresAppDbContext db)
         IReadOnlyList<Guid> Ids);
 
     /// <param name="valueAt">Statuses at an earlier moment (asset, field, current value → value then); null = the current ones.</param>
+    /// <param name="part">E&amp;I only: the items counted (by discipline, <see cref="EiParts.Of"/>); ignored for mechanical.</param>
     private async Task<(DashboardDto Dashboard, Dictionary<string, List<Item>> Cards)> ComputeAsync(int unitId, CategoryScope scope, bool grouped, CancellationToken ct,
-        Func<Guid, string, string?, string?>? valueAt = null)
+        Func<Guid, string, string?, string?>? valueAt = null, EiPart part = EiPart.All)
     {
         string? V(Guid id, string field, string? current) => valueAt is null ? current : valueAt(id, field, current);
         var unit = await db.Units.AsNoTracking().Include(u => u.Plant).FirstOrDefaultAsync(u => u.Id == unitId, ct)
                    ?? throw ApiProblem.NotFound("Unit not found.");
         var ei = scope == CategoryScope.ElectricalInstrument;
+        if (!ei) part = EiPart.All;
         var all = await db.Assets.AsNoTracking().Where(a => a.UnitId == unitId && a.Type != AssetType.Pipeline)
             .Select(a => new
             {
@@ -194,7 +213,9 @@ public sealed class UnitDashboard(PresAppDbContext db)
             .ToList();
         // "As the client": the parts of a split item are one tag, with the values of its row in the client Excel.
         var clientTags = scope0.Where(a => a.ClientTag is not null).ToDictionary(a => a.Id, a => (a.ClientTag!, a.Type));
-        var items = grouped ? Join(single, clientTags, categories) : single;
+        var everything = grouped ? Join(single, clientTags, categories) : single;
+        // E&I: only the part asked for (a split item goes by the discipline of its first part).
+        var items = everything.Where(a => EiParts.Contains(part, a.Discipline)).ToList();
         var total = items.Count;
 
         (string Code, string Label)[] activityNames = ei
@@ -210,7 +231,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
             return new ActivityRow(n.Code, n.Label, done, pending, hold, na, total - done - pending - hold - na, total, Pct(done, total - na));
         }).ToList();
 
-        var disciplines = (ei ? EiDisciplines : MechanicalDisciplines).Select(d =>
+        var disciplines = (ei ? EiDisciplines.Where(d => EiParts.Contains(part, d)) : MechanicalDisciplines).Select(d =>
         {
             var rows = items.Where(a => ei ? string.Equals(a.Discipline.Trim(), d, StringComparison.OrdinalIgnoreCase)
                 : a.Discipline.Contains(d, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -224,8 +245,10 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var assigned = ei || all.Any(a => a.Type == AssetType.Equipment && a.CategoryId is not null);
         var activeIds = categories.Select(c => c.Id).ToHashSet();
         var matcher = new CategoryMatcher(categories);
+        int? CategoryOf(Item a) => assigned ? (a.CategoryId is { } id && activeIds.Contains(id) ? id : null) : matcher.Match(a.Remarks)?.Id;
+        bool IsPreserved(Item a) => ei ? AllStepsClosed(a.Steps[1..8]) : IsCompleted(a.Steps[4]);
         var byCategory = items
-            .Select(a => (Asset: a, CategoryId: assigned ? (a.CategoryId is { } id && activeIds.Contains(id) ? id : (int?)null) : matcher.Match(a.Remarks)?.Id))
+            .Select(a => (Asset: a, CategoryId: CategoryOf(a)))
             .Where(x => x.CategoryId is not null)
             .GroupBy(x => x.CategoryId!.Value).ToDictionary(g => g.Key, g => g.Select(x => x.Asset).OrderBy(x => x.Tag ?? x.Code, NaturalComparer.Instance).ToList());
         List<CategoryRow> Section(CategorySection s) => categories.Where(c => c.Section == s).OrderBy(c => c.SortOrder).ThenBy(c => c.Priority)
@@ -239,7 +262,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
         // Grouped, a split item is one tag here too (its highest Current Gate).
         string KeyOf(Guid id, AssetType type, string? clientTag) => grouped && clientTag is not null ? $"{type}|{ValueNormalizer.ListKey(clientTag)}" : id.ToString();
         var gateField = PreservationFields.Find(nameof(AssetPreservation.CurrentGate))!;
-        var gates = active.Where(a => a.Type == (ei ? AssetType.ElectricalInstrument : AssetType.Equipment))
+        var gates = active.Where(a => a.Type == (ei ? AssetType.ElectricalInstrument : AssetType.Equipment) && (!ei || EiParts.Contains(part, a.Discipline)))
             .GroupBy(a => KeyOf(a.Id, a.Type, a.ClientTag))
             .Select(g => GroupedRows.Combine(gateField, g.Select(a => (a.Tag ?? a.Code, (string?)FieldValues.CurrentGateText(a.Gate ?? CurrentGate.New))).ToList())!)
             .ToList();
@@ -253,7 +276,26 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var naItems = na.SelectMany(c => byCategory.GetValueOrDefault(c.Id) ?? []).ToList();
         var categorized = holdItems.Concat(naItems).Select(a => a.Id).ToHashSet();
         var ready = items.Where(a => Is(a.Ready, "Yes")).ToList();
-        var preserved = items.Where(a => ei ? AllStepsClosed(a.Steps[1..8]) : IsCompleted(a.Steps[4])).ToList();
+        var preserved = items.Where(IsPreserved).ToList();
+
+        // E&I: the figures of each part, whichever is shown, and their % weighted by the unit's weights.
+        List<EiPartRow>? parts = null;
+        decimal? weighted = null;
+        if (ei)
+        {
+            var settings = await EiSettings.ReadAsync(db, unitId, ct);
+            var naCategories = na.Select(c => c.Id).ToHashSet();
+            parts = [.. new[] { EiPart.Electrical, EiPart.Instrumentation }.Select(p =>
+            {
+                var rows = everything.Where(a => EiParts.Of(a.Discipline) == p).ToList();
+                var notApplicable = rows.Count(a => CategoryOf(a) is { } c && naCategories.Contains(c));
+                var done = rows.Count(IsPreserved);
+                return new EiPartRow(EiParts.Key(p), EiParts.Label(p), rows.Count, notApplicable, done, Pct(done, rows.Count - notApplicable),
+                    p == EiPart.Electrical ? settings.ElectricalWeight : settings.InstrumentationWeight);
+            })];
+            var counted = parts.Where(p => p.Tags > p.NotApplicable && p.Weight > 0).ToList();
+            weighted = counted.Count == 0 ? null : Math.Round(counted.Sum(p => p.Weight * p.PreservedPct) / counted.Sum(p => p.Weight), 1);
+        }
         var prefix = ei ? EiCardPrefix : "";
         var cards = new Dictionary<string, List<Item>>
         {
@@ -275,7 +317,7 @@ public sealed class UnitDashboard(PresAppDbContext db)
                 .ToDictionary(g => g.Key, g => g.Count()),
             pendingDocs, active.Where(a => a.Type == AssetType.ElectricalInstrument).Select(a => KeyOf(a.Id, a.Type, a.ClientTag)).Distinct().Count(), all.Count(a => !a.IsActive),
             lines.Count, lines.Sum(l => l.Length ?? 0), lines.Count(l => IsCompleted(l.G4Status)),
-            assigned ? "Assigned" : "Keywords", grouped);
+            assigned ? "Assigned" : "Keywords", grouped, EiParts.Key(part), parts, weighted);
         return (dto, cards);
     }
 

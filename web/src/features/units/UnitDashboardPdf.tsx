@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { EiPart } from "../../api/types";
 import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
 
@@ -8,8 +9,11 @@ import { useToast } from "../../components/Toast";
  * then Electrical & Instrumentation, then pipelines, each section starting on its own page.
  * The PDF code (and its libraries) only loads when the button is pressed.
  */
-/** grouped: the view on screen (split items as the client or by equipment); not given = the unit default. */
-export function ExportPdfButton({ unitId, unitName, plantName, grouped }: { unitId: number; unitName: string; plantName: string; grouped?: boolean }) {
+/**
+ * grouped: the view on screen (split items as the client or by equipment); not given = the unit default.
+ * eiPart: the E&I part on screen (Electrical by default), which is the E&I section of the PDF.
+ */
+export function ExportPdfButton({ unitId, unitName, plantName, grouped, eiPart }: { unitId: number; unitName: string; plantName: string; grouped?: boolean; eiPart?: EiPart }) {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -17,7 +21,7 @@ export function ExportPdfButton({ unitId, unitName, plantName, grouped }: { unit
     setBusy(true);
     try {
       const { exportUnitPdf } = await import("./unitPdfReport");
-      const name = await exportUnitPdf({ unitId, unitName, plantName, grouped });
+      const name = await exportUnitPdf({ unitId, unitName, plantName, grouped, eiPart });
       toast(`${name} downloaded`);
     } catch (e) {
       toast((e as Error).message || "Could not create the PDF.", "error");

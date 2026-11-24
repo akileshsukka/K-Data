@@ -233,13 +233,20 @@ public static class ExcelEndpoints
 
         // ---------------------------------------------------------------- dashboard and categories
         // grouped=true: "As the client" (the parts of a split item count once); not given: the unit's default view.
-        app.MapGet("/api/units/{unitId:int}/dashboard", async (int unitId, string? scope, bool? grouped, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
-                await d.GetAsync(unitId, ct, CategoryScopes.Parse(scope), await view.ResolveAsync(unitId, grouped, ct)))
+        // E&I: part=electrical|instrumentation; not given = both (the client Excel's E&I Dashboard).
+        app.MapGet("/api/units/{unitId:int}/dashboard", async (int unitId, string? scope, bool? grouped, string? part, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
+                await d.GetAsync(unitId, ct, CategoryScopes.Parse(scope), await view.ResolveAsync(unitId, grouped, ct), EiParts.Parse(part)))
             .RequirePermission(Permissions.AssetsView);
 
-        app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", async (int unitId, string card, bool? grouped, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
-                await d.CardAsync(unitId, card, ct, await view.ResolveAsync(unitId, grouped, ct)))
+        app.MapGet("/api/units/{unitId:int}/dashboard/cards/{card}", async (int unitId, string card, bool? grouped, string? part, UnitDashboard d, Assets.ClientViewSettings view, CancellationToken ct) =>
+                await d.CardAsync(unitId, card, ct, await view.ResolveAsync(unitId, grouped, ct), EiParts.Parse(part)))
             .RequirePermission(Permissions.AssetsView);
+
+        // E&I settings of the unit: weight of electrical in the weighted E&I %, instrumentation in the daily report or not.
+        app.MapGet("/api/units/{unitId:int}/ei-settings", (int unitId, EiSettings s, CancellationToken ct) => s.GetAsync(unitId, ct))
+            .RequirePermission(Permissions.AssetsView);
+        app.MapPut("/api/units/{unitId:int}/ei-settings", (int unitId, SaveEiSettings request, EiSettings s, CancellationToken ct) => s.SetAsync(unitId, request, ct))
+            .RequirePermission(Permissions.AssetsManage);
 
         app.MapGet("/api/units/{unitId:int}/categories", (int unitId, string? scope, UnitDashboard d, CancellationToken ct) => d.CategoriesAsync(unitId, CategoryScopes.Parse(scope), ct))
             .RequirePermission(Permissions.AssetsView);

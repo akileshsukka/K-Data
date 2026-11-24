@@ -62,7 +62,7 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
         Assert.Equal(3, disciplines["Static"].GetProperty("tags").GetInt32());
         Assert.Equal(2, disciplines["Static"].GetProperty("preserved").GetInt32());
         Assert.Equal(1, disciplines["Rotating"].GetProperty("preserved").GetInt32());
-        Assert.Equal(1, disciplines["E&I"].GetProperty("preserved").GetInt32());
+        Assert.Equal(1, disciplines["Electrical"].GetProperty("preserved").GetInt32());
         Assert.False(disciplines.ContainsKey("Package Mechanical"));
 
         // The day before: only 39-V-901 was completed then.

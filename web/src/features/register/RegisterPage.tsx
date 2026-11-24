@@ -67,6 +67,8 @@ interface Filters {
   tags: string;
   /** Split items: "1" as the client (one row), "0" by equipment, "" the unit default. A view, not a filter. */
   client: string;
+  /** E&I part of the dashboard figure the register was opened from ("electrical", "instrumentation"; "" = all). */
+  part: string;
 }
 
 /** The filters where several values can be ticked. */
@@ -75,14 +77,14 @@ const listKeys: ListKey[] = ["discipline", "currentGate", "gateStatus", "actionB
 
 const empty: Filters = {
   text: "", discipline: [], currentGate: [], gates: [], gateStatus: [], actionBy: [], emWalkdown: [], ready: [], drained: "", inspection: [],
-  cleaning: [], activity: [], numberCheck: "", docs: "", e7: "", inactive: false, group: [], card: "", tags: "", client: "",
+  cleaning: [], activity: [], numberCheck: "", docs: "", e7: "", inactive: false, group: [], card: "", tags: "", client: "", part: "",
 };
 
 /** Name of each filter in the page address (?status=Ongoing&status=Hold&gates=1,2…). */
 const param: Record<keyof Filters, string> = {
   text: "q", discipline: "discipline", currentGate: "currentGate", gates: "gates", gateStatus: "status", actionBy: "actionBy",
   emWalkdown: "walkdown", ready: "ready", drained: "drained", inspection: "inspection", cleaning: "cleaning", activity: "activity",
-  numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags", client: "client",
+  numberCheck: "number", docs: "docs", e7: "e7", inactive: "inactive", group: "group", card: "card", tags: "tags", client: "client", part: "part",
 };
 
 /**
@@ -238,10 +240,10 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
   // counted like the view on screen (grouped lines, split items as the client), so they wait for it and follow the switch.
   const pipingCard = lines && f.card.startsWith("piping-");
   const card = useQuery({
-    queryKey: ["dashboard-card", unitId, f.card, pipingCard ? grouped : asClient],
+    queryKey: ["dashboard-card", unitId, f.card, pipingCard ? grouped : asClient, f.part],
     queryFn: ({ signal }) => api<DashboardCard>(pipingCard
       ? `/api/units/${unitId}/piping-summary/cards/${encodeURIComponent(f.card.slice("piping-".length))}?grouped=${grouped}`
-      : `/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}?grouped=${asClient}`, { signal }),
+      : `/api/units/${unitId}/dashboard/cards/${encodeURIComponent(f.card)}?grouped=${asClient}${f.part ? `&part=${encodeURIComponent(f.part)}` : ""}`, { signal }),
     enabled: !!f.card && (pipingCard ? !!view.data : lines || !!clientView.data),
   });
   const cardIds = useMemo(() => (card.data ? new Set(card.data.assetIds) : null), [card.data]);
@@ -318,7 +320,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
 
   const totalLength = lines ? filtered.reduce((sum, r) => sum + (r.line?.lengthM ?? 0), 0) : 0;
   // The view (inactive, as the client) is not a filter.
-  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && k !== "client" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
+  const active = Object.entries(f).filter(([k, v]) => k !== "inactive" && k !== "client" && k !== "part" && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0)).length;
   // Rows can be selected for bulk edit, groups, gate forms and (E&I register) the E7 report of the selected motors.
   // Roles that may delete or reactivate can also select inactive rows (an asset loaded by mistake may already be deactivated).
   const canDelete = session.can(Perm.assetsDelete);
@@ -628,7 +630,7 @@ function RegisterView({ unitId, type }: { unitId: number; type: AssetType }) {
                 {/* A grouped piping card counts groups: the same number as the grouped rows shown. */}
                 {card.data && ` (${card.data.count}${pipingCard ? (grouped ? " grouped rows" : " lines") : ""})`}
                 {!pipingCard && <>{" · "}<Link to={`/u/${unitId}`} className="font-semibold text-violet">Back to dashboard</Link></>}
-                {" · "}<button type="button" className="font-semibold text-violet" onClick={() => set("card", "")}>Remove this filter</button>
+                {" · "}<button type="button" className="font-semibold text-violet" onClick={() => setF((prev) => ({ ...prev, card: "", part: "" }))}>Remove this filter</button>
               </p>
             )}
             {outsideCard > 0 && otherRegister[type] && (

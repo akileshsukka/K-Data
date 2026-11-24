@@ -37,7 +37,8 @@ public sealed record DailySummaryDto(DateOnly Date, DateTime CutoffUtc, DateTime
 
 /// <summary>
 /// Preservation figures of every unit for the daily report, the same counting as the Unit overview (Preserved = G4 N2
-/// blanketing completed, E&amp;I = E1–E7 closed; categories for hold and not applicable; always as the client, a split
+/// blanketing completed, E&amp;I = E1–E7 closed, electrical items only unless the unit's E&amp;I settings count the instruments
+/// (<see cref="EiSettings"/>); categories for hold and not applicable; always as the client, a split
 /// item being one tag). Statuses are those at the end of the day, rebuilt from the change log, so the
 /// report of a past day does not move when work continues; "completed on the day" = tags preserved at the end of the
 /// day that were not at its start.
@@ -68,10 +69,12 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, U
             // so splitting never raises the counts the client already had.
             const bool grouped = true;
 
+            // E&I: electrical only unless the unit counts its instruments too (24-nov: the instrument lists are far larger).
+            var part = await EiSettings.ReportPartAsync(db, unit.Id, ct);
             var mechanical = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.Mechanical, grouped, AtEnd, ct);
-            var ei = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtEnd, ct);
+            var ei = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtEnd, ct, part);
             var mechanicalBefore = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.Mechanical, grouped, AtStart, ct);
-            var eiBefore = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtStart, ct);
+            var eiBefore = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtStart, ct, part);
 
             var before = mechanicalBefore.PreservedTags.Keys.Concat(eiBefore.PreservedTags.Keys).ToHashSet();
             var completed = mechanical.PreservedTags.Concat(ei.PreservedTags).Where(p => !before.Contains(p.Key))
