@@ -11,19 +11,27 @@ namespace PresApp.Api.Reporting;
 /// <summary>One discipline of a unit in the daily report. <see cref="GateProgressPct"/> null: every tag is not applicable.</summary>
 public sealed record DailyDisciplineRow(string Discipline, int Tags, int NotApplicable, int Preserved, int Hold, decimal? GateProgressPct);
 
+/// <summary>Tags completed on the day of one discipline row (same name as in <see cref="DailyUnitDto.Disciplines"/>).</summary>
+public sealed record DailyCompletedGroup(string Discipline, List<string> Tags);
+
+/// <summary>A preserved tag and the discipline row it is counted in.</summary>
+internal sealed record PreservedTag(string Tag, string Discipline);
+
 /// <summary>Figures of one scope (mechanical or E&amp;I) of a unit at a moment; <see cref="PreservedTags"/> by first asset id.</summary>
-internal sealed record ReportFigures(int Tags, int NotApplicable, int Preserved, int Hold, List<DailyDisciplineRow> Disciplines, Dictionary<Guid, string> PreservedTags);
+internal sealed record ReportFigures(int Tags, int NotApplicable, int Preserved, int Hold, List<DailyDisciplineRow> Disciplines, Dictionary<Guid, PreservedTag> PreservedTags);
 
 /// <summary>
 /// One unit in the daily report, at the end of the day (and, for the change, at the end of the day before).
 /// <see cref="PreservedPct"/> = preserved ÷ (tags − not applicable). Piping lines are apart and never in these figures.
+/// <see cref="CompletedByDiscipline"/> = the same tags as <see cref="CompletedTags"/>, by discipline in the order of the
+/// table (24-nov; <see cref="CompletedTags"/> stays for readers that do not know the groups).
 /// </summary>
 public sealed record DailyUnitDto(
     int UnitId, int UnitNumber, string UnitName, string PlantName, bool Grouped,
     int Tags, int NotApplicable, int Applicable, int Preserved, int Hold, decimal PreservedPct,
     int PreservedDayBefore, decimal PreservedPctDayBefore,
     List<DailyDisciplineRow> Disciplines, List<string> CompletedTags,
-    int Lines, int LinesPreserved, List<UnitHighlightDto> Highlights);
+    int Lines, int LinesPreserved, List<UnitHighlightDto> Highlights, List<DailyCompletedGroup> CompletedByDiscipline);
 
 /// <summary>Sum of the units, counted by tag (never an average of the unit %).</summary>
 public sealed record DailyTotalsDto(int Tags, int NotApplicable, int Applicable, int Preserved, int Hold, decimal PreservedPct, int CompletedOnDay,
@@ -77,8 +85,13 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, U
             var eiBefore = await dashboard.ReportFiguresAsync(unit.Id, CategoryScope.ElectricalInstrument, grouped, AtStart, ct, part);
 
             var before = mechanicalBefore.PreservedTags.Keys.Concat(eiBefore.PreservedTags.Keys).ToHashSet();
-            var completed = mechanical.PreservedTags.Concat(ei.PreservedTags).Where(p => !before.Contains(p.Key))
-                .Select(p => p.Value).Order(NaturalComparer.Instance).ToList();
+            var completedNow = mechanical.PreservedTags.Concat(ei.PreservedTags).Where(p => !before.Contains(p.Key)).Select(p => p.Value).ToList();
+            var completed = completedNow.Select(p => p.Tag).Order(NaturalComparer.Instance).ToList();
+            // By discipline, in the order of the "Status by discipline" table.
+            var order = mechanical.Disciplines.Concat(ei.Disciplines).Select(r => r.Discipline).ToList();
+            var byDiscipline = completedNow.GroupBy(p => p.Discipline)
+                .OrderBy(g => order.IndexOf(g.Key) is var i and >= 0 ? i : int.MaxValue)
+                .Select(g => new DailyCompletedGroup(g.Key, [.. g.Select(p => p.Tag).Order(NaturalComparer.Instance)])).ToList();
 
             var tags = mechanical.Tags + ei.Tags;
             var na = mechanical.NotApplicable + ei.NotApplicable;
@@ -94,7 +107,7 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, U
                 tags, na, tags - na, preserved, mechanical.Hold + ei.Hold, Pct(preserved, tags - na),
                 preservedBefore, Pct(preservedBefore, tags - na),
                 [.. mechanical.Disciplines, .. ei.Disciplines], completed,
-                lines.Count, linesPreserved, notes.GetValueOrDefault(unit.Id) ?? []));
+                lines.Count, linesPreserved, notes.GetValueOrDefault(unit.Id) ?? [], byDiscipline));
         }
 
         var t = new DailyTotalsDto(result.Sum(u => u.Tags), result.Sum(u => u.NotApplicable), result.Sum(u => u.Applicable), result.Sum(u => u.Preserved),

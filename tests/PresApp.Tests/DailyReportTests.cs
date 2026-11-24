@@ -58,6 +58,12 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
         Assert.Equal(2, unit.GetProperty("preservedDayBefore").GetInt32());   // the migrated value counts as always there
         Assert.Equal(80m, unit.GetProperty("preservedPct").GetDecimal());
         Assert.Equal(["39-EM-903", "39-P-902"], Strings(unit.GetProperty("completedTags")));
+        // The same tags by discipline, in the order of the table (mechanical first, then E&I).
+        var groups = unit.GetProperty("completedByDiscipline").EnumerateArray()
+            .Select(g => (g.GetProperty("discipline").GetString(), Strings(g.GetProperty("tags")))).ToList();
+        Assert.Equal(["Rotating", "Electrical"], groups.Select(g => g.Item1));
+        Assert.Equal(["39-P-902"], groups[0].Item2);
+        Assert.Equal(["39-EM-903"], groups[1].Item2);
         var disciplines = unit.GetProperty("disciplines").EnumerateArray().ToDictionary(d => d.GetProperty("discipline").GetString()!);
         Assert.Equal(3, disciplines["Static"].GetProperty("tags").GetInt32());
         Assert.Equal(2, disciplines["Static"].GetProperty("preserved").GetInt32());

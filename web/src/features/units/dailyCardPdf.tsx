@@ -13,6 +13,7 @@ interface Discipline { discipline: string; tags: number; notApplicable: number; 
 interface DailyUnit {
   unitNumber: number; unitName: string; plantName: string; applicable: number; preserved: number; hold: number;
   preservedPct: number; preservedPctDayBefore: number; disciplines: Discipline[]; completedTags: string[];
+  completedByDiscipline: { discipline: string; tags: string[] }[];
   lines: number; linesPreserved: number; highlights: { id: number; text: string }[];
 }
 interface Activity { id: number; name: string; status: "Planned" | "Ongoing" | "Hold" | "Completed"; people: number; comment: string | null; isHighlight: boolean }
@@ -64,6 +65,10 @@ const CSS = `
 .kc .chips { display:flex; flex-wrap:wrap; gap:6px; margin:0; padding:0; list-style:none; }
 .kc .chip { font-size:13px; font-weight:600; padding:3px 8px; border-radius:5px; background:var(--done-soft); color:var(--done); }
 .kc .chip.more { background:var(--na-soft); color:var(--muted); }
+.kc .cgroups { display:grid; gap:8px; }
+.kc .cgroup { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+.kc .cgroup .cname { min-width:150px; font-size:13px; font-weight:600; color:var(--ink); }
+.kc .cgroup .cname small { font-weight:500; color:var(--muted); margin-left:4px; }
 .kc .empty { font-size:14px; color:var(--muted); margin:0; }
 .kc .warn { font-size:13px; color:var(--hold); margin:0; }
 .kc .hl { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
@@ -88,6 +93,8 @@ const LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric",
 const SHORT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 const day = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`);
 const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(n >= 10 || n === 0 ? 0 : 1);
+/** Tags shown per discipline in "Completed on" (same as the EPCS daily report); the rest as "+N more". */
+const TAGS_PER_GROUP = 4;
 
 export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boolean }) {
   const u = c.unit;
@@ -95,7 +102,6 @@ export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boo
   const delta = u.preservedPct - u.preservedPctDayBefore;
   const completed = u.completedTags;
   const w = (n: number) => `${u.applicable > 0 ? Math.max(0, Math.min(100, (100 * n) / u.applicable)) : 0}%`;
-  const shown = completed.slice(0, 6);
   return (
     <div className="kc">
       <style>{CSS}</style>
@@ -142,10 +148,17 @@ export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boo
         <div className="sec">
           <h4>Completed on {d}</h4>
           {completed.length === 0 ? <p className="empty">No tags completed on {d}.</p> : (
-            <ul className="chips">
-              {shown.map((t) => <li key={t} className="chip">{t}</li>)}
-              {completed.length > shown.length && <li className="chip more">+{completed.length - shown.length} more</li>}
-            </ul>
+            <div className="cgroups">
+              {u.completedByDiscipline.map((g) => (
+                <div key={g.discipline} className="cgroup">
+                  <span className="cname">{g.discipline}<small>({g.tags.length})</small></span>
+                  <ul className="chips">
+                    {g.tags.slice(0, TAGS_PER_GROUP).map((t) => <li key={t} className="chip">{t}</li>)}
+                    {g.tags.length > TAGS_PER_GROUP && <li className="chip more">+{g.tags.length - TAGS_PER_GROUP} more</li>}
+                  </ul>
+                </div>
+              ))}
+            </div>
           )}
         </div>
         {u.highlights.length > 0 && <div className="sec"><h4>Highlights</h4><ul className="hl">{u.highlights.map((h) => <li key={h.id}>{h.text}</li>)}</ul></div>}
