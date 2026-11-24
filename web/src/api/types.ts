@@ -541,6 +541,27 @@ export interface ExcelTemplateInfo {
 /** Dashboard of a unit: mechanical equipment (static, rotating, package) or Electrical & Instrumentation items. */
 export type DashboardScope = "mechanical" | "ei";
 
+/** Part of the E&I items: Electrical (every E&I discipline but Instrumentation), Instrumentation, or both ("all", the client Excel). */
+export type EiPart = "electrical" | "instrumentation" | "all";
+
+/** Figures of one E&I part; preservedPct = preserved ÷ (tags − not applicable); weight in % of the weighted E&I %. */
+export interface EiPartRow {
+  part: Exclude<EiPart, "all">;
+  label: string;
+  tags: number;
+  notApplicable: number;
+  preserved: number;
+  preservedPct: number;
+  weight: number;
+}
+
+/** E&I settings of a unit: weights of the weighted %, and whether the daily report counts the instruments. */
+export interface EiSettings {
+  electricalWeight: number;
+  instrumentationWeight: number;
+  instrumentationInReport: boolean;
+}
+
 export interface ActivityRow {
   /** Short column title: "Walkdown", "G1"…, "E1"… */
   code: string;
@@ -627,6 +648,12 @@ export interface Dashboard {
   categorySource: "Assigned" | "Keywords";
   /** Counted "As the client": the parts of a split item count once, like the client Excel. */
   grouped?: boolean;
+  /** E&I: the part counted ("all" on the mechanical dashboard). */
+  part: EiPart;
+  /** E&I: the figures of each part, whichever part is shown; null on the mechanical dashboard. */
+  parts: EiPartRow[] | null;
+  /** E&I: the parts' % weighted by the unit's weights (parts without applicable tags left out). */
+  weightedPreservedPct: number | null;
 }
 
 // ---------------------------------------------------------------- Simpro

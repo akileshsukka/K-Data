@@ -175,7 +175,83 @@ public sealed class EiDashboardTests : IClassFixture<TestApp>
         Assert.Equal([.. Enumerable.Repeat("Pending", 7), null], rows[noDocs]);
     }
 
+    [Fact]
+    public async Task Electrical_and_instrumentation_are_counted_apart_weighted_together_and_the_daily_report_counts_electrical_only()
+    {
+        var unitId = await UnitIdAsync("Unit 42");
+        await app.WithDbAsync(async db =>
+        {
+            var instrumentation = await db.Disciplines.FirstAsync(d => d.Name == "Instrumentation");
+            instrumentation.Prefix ??= "IN";
+            return await db.SaveChangesAsync();
+        });
+        var motors = new[] { await CreateEiAsync(unitId, "42-EM-1"), await CreateEiAsync(unitId, "42-EM-2") };
+        var mixed = await CreateEiAsync(unitId, "42-JB-1", "E&I");
+        var instruments = new[] { await CreateEiAsync(unitId, "42-PT-1", "Instrumentation"), await CreateEiAsync(unitId, "42-PT-2", "Instrumentation"),
+            await CreateEiAsync(unitId, "42-TT-1", "Instrumentation") };
+        // Preserved: both motors (electrical 2 of 3) and one instrument (1 of 3).
+        foreach (var id in motors.Append(instruments[0])) await PatchAsync(id, [.. Enumerable.Range(1, 7).Select(g => ($"G{g}Status", "Completed"))]);
+
+        var electrical = await DashboardAsync(unitId, "electrical");
+        Assert.Equal("electrical", electrical.GetProperty("part").GetString());
+        Assert.Equal(3, electrical.GetProperty("totalTags").GetInt32());
+        Assert.Equal(2, electrical.GetProperty("preserved").GetInt32());
+        Assert.Equal("Electrical,E&I", string.Join(",", electrical.GetProperty("disciplines").EnumerateArray().Select(r => r.GetProperty("discipline").GetString())));
+
+        var instrumentation = await DashboardAsync(unitId, "instrumentation");
+        Assert.Equal(3, instrumentation.GetProperty("totalTags").GetInt32());
+        Assert.Equal(1, instrumentation.GetProperty("preserved").GetInt32());
+        Assert.Equal("Instrumentation", instrumentation.GetProperty("disciplines")[0].GetProperty("discipline").GetString());
+        var card = await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard/cards/ei-tags?part=instrumentation");
+        Assert.Equal(instruments.OrderBy(x => x), card.GetProperty("assetIds").EnumerateArray().Select(x => x.GetGuid()).OrderBy(x => x));
+        Assert.Equal("Instrumentation tags", card.GetProperty("label").GetString());
+
+        // Combined (no part, the client Excel): every item, and the parts weighted 60 / 40 by default.
+        var all = await DashboardAsync(unitId, null);
+        Assert.Equal(6, all.GetProperty("totalTags").GetInt32());
+        var parts = all.GetProperty("parts").EnumerateArray().ToDictionary(p => p.GetProperty("part").GetString()!);
+        Assert.Equal(66.7m, parts["electrical"].GetProperty("preservedPct").GetDecimal());
+        Assert.Equal(33.3m, parts["instrumentation"].GetProperty("preservedPct").GetDecimal());
+        Assert.Equal(60, parts["electrical"].GetProperty("weight").GetInt32());
+        Assert.Equal(53.3m, all.GetProperty("weightedPreservedPct").GetDecimal());   // (60 × 66.7 + 40 × 33.3) ÷ 100
+        Assert.Equal(53.3m, electrical.GetProperty("weightedPreservedPct").GetDecimal());   // the same whichever part is shown
+
+        // The daily report counts the electrical items only, until the unit's switch counts the instruments.
+        var report = await ReportDisciplinesAsync(unitId);
+        Assert.Equal(3, report["Electrical"].GetProperty("tags").GetInt32());
+        Assert.False(report.ContainsKey("Instrumentation"));
+        var saved = await admin.PutAsJsonAsync($"/api/units/{unitId}/ei-settings", new { electricalWeight = 50, instrumentationInReport = true });
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync());
+        Assert.Equal(50, (await saved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("instrumentationWeight").GetInt32());
+        Assert.Equal(50m, (await DashboardAsync(unitId, null)).GetProperty("weightedPreservedPct").GetDecimal());
+        report = await ReportDisciplinesAsync(unitId);
+        Assert.Equal(3, report["Instrumentation"].GetProperty("tags").GetInt32());
+        Assert.Equal(1, report["Instrumentation"].GetProperty("preserved").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync($"/api/units/{unitId}/ei-settings", new { electricalWeight = 120, instrumentationInReport = false })).StatusCode);
+
+        // Bulk edit moves an E&I item to Instrumentation; equipment disciplines are refused for it.
+        var staticId = await app.WithDbAsync(db => db.Disciplines.Where(d => d.Name == "Static").Select(d => d.Id).FirstAsync());
+        var instrumentationId = await app.WithDbAsync(db => db.Disciplines.Where(d => d.Name == "Instrumentation").Select(d => d.Id).FirstAsync());
+        var refused = await admin.PostAsJsonAsync("/api/bulk/preview", new { field = "Discipline", value = staticId.ToString(), assetIds = new[] { mixed } });
+        Assert.Equal("Skipped", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("rows")[0].GetProperty("outcome").GetString());
+        var moved = await admin.PostAsJsonAsync("/api/bulk/apply", new { field = "Discipline", value = instrumentationId.ToString(), assetIds = new[] { mixed } });
+        Assert.True(moved.IsSuccessStatusCode, await moved.Content.ReadAsStringAsync());
+        Assert.Equal(1, (await moved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("changed").GetInt32());
+        Assert.Equal(4, (await DashboardAsync(unitId, "instrumentation")).GetProperty("totalTags").GetInt32());
+        Assert.Equal(2, (await DashboardAsync(unitId, "electrical")).GetProperty("totalTags").GetInt32());
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private async Task<JsonElement> DashboardAsync(int unitId, string? part) =>
+        await admin.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/dashboard?scope=ei{(part is null ? "" : $"&part={part}")}");
+
+    private async Task<Dictionary<string, JsonElement>> ReportDisciplinesAsync(int unitId)
+    {
+        var today = PresApp.Domain.Rules.SiteClock.Today(TimeProvider.System);
+        var report = await admin.GetFromJsonAsync<JsonElement>($"/api/reports/daily?date={today:yyyy-MM-dd}&unitId={unitId}");
+        return report.GetProperty("units")[0].GetProperty("disciplines").EnumerateArray().ToDictionary(d => d.GetProperty("discipline").GetString()!);
+    }
 
     private Task<int> UnitIdAsync(string unit) => app.WithDbAsync(db => db.Units.Where(u => u.Name == unit).Select(u => u.Id).FirstAsync());
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { Perm, type ActivityRow, type CategoryRow, type ClientView, type Dashboard, type DashboardScope } from "../../api/types";
+import { Perm, type ActivityRow, type CategoryRow, type ClientView, type Dashboard, type DashboardScope, type EiPart, type EiSettings } from "../../api/types";
 import { lastUnit, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { PageHeader } from "../../components/PageHeader";
@@ -17,14 +17,28 @@ export const scopeNames: Record<DashboardScope, { tab: string; title: string; re
   ei: { tab: "Electrical & Instrumentation", title: "Electrical & Instrumentation", register: "E&I Register", path: "ei" },
 };
 
+/** The parts of the E&I dashboard, as its switch names them (24-nov: instrument lists are far larger than electrical ones). */
+export const eiPartNames: Record<EiPart, { tab: string; title: string; tags: string; detail: string }> = {
+  electrical: { tab: "Electrical", title: "Electrical", tags: "Electrical tags", detail: "Electrical and mixed E&I items" },
+  instrumentation: { tab: "Instrumentation", title: "Instrumentation", tags: "Instrument tags", detail: "Instrumentation discipline" },
+  all: { tab: "Combined", title: "Electrical & Instrumentation", tags: "E&I tags", detail: "Electrical and instrumentation" },
+};
+
+/** Title of a dashboard: its scope, or for E&I the part shown. */
+export const dashboardTitle = (d: Dashboard) => (d.scope === "ei" ? eiPartNames[d.part ?? "all"].title : scopeNames[d.scope].title);
+
 /** Dashboard of one scope, shared by the overview and the PDF. */
-/** Without grouped: the unit's default view of split items (by equipment or as the client). */
-export const dashboardUrl = (unitId: number, scope: DashboardScope, grouped?: boolean) => {
+/** Without grouped: the unit's default view of split items (by equipment or as the client). Without part: every E&I item. */
+export const dashboardUrl = (unitId: number, scope: DashboardScope, grouped?: boolean, part?: EiPart) => {
   const q = new URLSearchParams();
   if (scope === "ei") q.set("scope", "ei");
   if (grouped !== undefined) q.set("grouped", String(grouped));
+  if (scope === "ei" && part && part !== "all") q.set("part", part);
   return `/api/units/${unitId}/dashboard${q.size ? `?${q}` : ""}`;
 };
+
+/** E&I part of the page address (?part=instrumentation|all); Electrical when not given. */
+const readPart = (v: string | null): EiPart => (v === "instrumentation" || v === "all" ? v : "electrical");
 
 /**
  * Unit overview = the client dashboards, computed by the API exactly like the dashboard sheets of the unit Excel, so
@@ -37,6 +51,8 @@ export function UnitHomePage() {
   const session = useSession();
   const [params, setParams] = useSearchParams();
   const scope: DashboardScope = params.get("view") === "ei" ? "ei" : "mechanical";
+  // E&I: Electrical, Instrumentation or both (Combined); Electrical by default, kept in the address (?part=).
+  const part = readPart(params.get("part"));
   // Split items (P-101A, P-101B of the client's P-101A/B): counted by equipment or once, as the client Excel. Opens as the
   // unit's default; ?client=1/0 overrides it for this visit (the switch is only shown when the unit has split items).
   const clientView = useQuery({
@@ -47,8 +63,8 @@ export function UnitHomePage() {
   const asked = params.get("client");
   const grouped = asked === "1" ? true : asked === "0" ? false : clientView.data?.grouped;
   const dashboard = useQuery({
-    queryKey: ["dashboard", unitId, scope, grouped],
-    queryFn: ({ signal }) => api<Dashboard>(dashboardUrl(unitId, scope, grouped), { signal }),
+    queryKey: ["dashboard", unitId, scope, grouped, scope === "ei" ? part : null],
+    queryFn: ({ signal }) => api<Dashboard>(dashboardUrl(unitId, scope, grouped, part), { signal }),
     enabled: !!unit && grouped !== undefined,
   });
   const setGrouped = (on: boolean) =>
@@ -72,12 +88,21 @@ export function UnitHomePage() {
     );
   }
 
-  const d = dashboard.data?.scope === scope ? dashboard.data : undefined;
+  const d = dashboard.data?.scope === scope && (scope !== "ei" || dashboard.data.part === part) ? dashboard.data : undefined;
   const ei = scope === "ei";
   const setScope = (s: DashboardScope) =>
     setParams((p) => {
       if (s === "ei") p.set("view", "ei");
-      else p.delete("view");
+      else {
+        p.delete("view");
+        p.delete("part");
+      }
+      return p;
+    }, { replace: true });
+  const setPart = (v: EiPart) =>
+    setParams((p) => {
+      if (v === "electrical") p.delete("part");
+      else p.set("part", v);
       return p;
     }, { replace: true });
 
@@ -88,7 +113,7 @@ export function UnitHomePage() {
         description={`${plantName} · preservation dashboard`}
         actions={
           <>
-            <ExportPdfButton unitId={unit.id} unitName={unit.name} plantName={plantName ?? ""} grouped={grouped} />
+            <ExportPdfButton unitId={unit.id} unitName={unit.name} plantName={plantName ?? ""} grouped={grouped} eiPart={part} />
             {session.can(Perm.excelExport) && <DownloadExcelButton unitId={unit.id} variant="secondary" />}
             {session.can(Perm.assetsManage) && (
               <Link to={`/u/${unit.id}/new`} className="inline-flex min-h-10 items-center rounded-md bg-violet px-4 font-semibold text-white hover:bg-violet-dark">New equipment</Link>
@@ -120,14 +145,27 @@ export function UnitHomePage() {
         </label>
       )}
 
+      {ei && (
+        <div className="mt-3 flex w-fit max-w-full flex-wrap rounded-md border border-line bg-panel p-1" role="tablist" aria-label="E&I part">
+          {(["electrical", "instrumentation", "all"] as const).map((v) => (
+            <button key={v} type="button" role="tab" aria-selected={part === v} onClick={() => setPart(v)}
+              className={`min-h-8 rounded px-3 text-sm font-semibold ${part === v ? "bg-violet text-white" : "text-ink hover:text-violet"}`}>
+              {eiPartNames[v].tab}
+            </button>
+          ))}
+        </div>
+      )}
+
       <DailyReportPanel unitId={unit.id} />
 
       {dashboard.isPending && <p className="mt-6 text-muted">Loading dashboard…</p>}
       {dashboard.isError && <p className="mt-6 text-hold">{dashboard.error.message}</p>}
 
+      {d && ei && d.parts && <EiPartsPanel d={d} unitId={unit.id} canEdit={session.can(Perm.assetsManage)} />}
+
       {d && d.totalTags === 0 && (
         <div className="mt-6 max-w-xl rounded-lg border border-dashed border-line bg-panel p-6">
-          <h2 className="text-xl font-semibold">{ei ? "No E&I items in this unit yet" : "No equipment in this unit yet"}</h2>
+          <h2 className="text-xl font-semibold">{ei ? `No ${part === "all" ? "E&I" : part} items in this unit yet` : "No equipment in this unit yet"}</h2>
           <p className="mt-2 text-muted">
             {ei
               ? "E&I items arrive with an Onboarding list on the Excel page (E&I list), or “New equipment” with an Electrical or Instrumentation discipline."
@@ -183,16 +221,17 @@ function ScopeDashboard({ d, unitId, canEdit }: { d: Dashboard; unitId: number; 
       </section>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <CategoryPanel title="Hold categories" card={`${prefix}hold`} rows={d.hold} total={d.totalHold} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} />
-        <CategoryPanel title="Not applicable categories" card={`${prefix}na`} rows={d.notApplicable} total={d.totalNotApplicable} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} />
+        <CategoryPanel title="Hold categories" card={`${prefix}hold`} rows={d.hold} total={d.totalHold} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} part={d.part} />
+        <CategoryPanel title="Not applicable categories" card={`${prefix}na`} rows={d.notApplicable} total={d.totalNotApplicable} unitId={unitId} scope={d.scope} canEdit={canEdit} byKeyword={byKeyword} grouped={d.grouped} part={d.part} />
       </div>
     </>
   );
 }
 
 /** Register (Equipment or E&I) showing exactly the equipment behind one dashboard figure. */
-export const cardLink = (unitId: number, card: string, scope: DashboardScope = "mechanical", grouped?: boolean) =>
-  `/u/${unitId}/${scopeNames[scope].path}?card=${encodeURIComponent(card)}${grouped === undefined ? "" : `&client=${grouped ? 1 : 0}`}`;
+export const cardLink = (unitId: number, card: string, scope: DashboardScope = "mechanical", grouped?: boolean, part?: EiPart) =>
+  `/u/${unitId}/${scopeNames[scope].path}?card=${encodeURIComponent(card)}${grouped === undefined ? "" : `&client=${grouped ? 1 : 0}`}` +
+  (scope === "ei" && part && part !== "all" ? `&part=${part}` : "");
 
 /** Category editor of one catalogue. */
 export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${unitId}/categories${scope === "ei" ? "?scope=ei" : ""}`;
@@ -203,11 +242,12 @@ export const categoriesLink = (unitId: number, scope: DashboardScope) => `/u/${u
  */
 export function KeyFigures({ d, unitId }: { d: Dashboard; unitId?: number }) {
   const register = scopeNames[d.scope].register;
-  const to = (card: string) => (unitId ? cardLink(unitId, card, d.scope, d.grouped) : undefined);
+  const to = (card: string) => (unitId ? cardLink(unitId, card, d.scope, d.grouped, d.part) : undefined);
   if (d.scope === "ei") {
+    const names = eiPartNames[d.part ?? "all"];
     return (
       <>
-        <Stat label="E&I tags" value={d.totalTags} detail="Electrical and instrumentation" to={to("ei-tags")} register={register} />
+        <Stat label={names.tags} value={d.totalTags} detail={names.detail} to={to("ei-tags")} register={register} />
         <Stat label="Preserved" value={d.preserved} detail="Steps E1–E7 completed (E8 not needed)" emphasis to={to("ei-preserved")} register={register} />
         <Stat label="On hold" value={d.totalHold} detail="By hold category" to={to("ei-hold")} register={register} />
         <Stat label="Not applicable" value={d.totalNotApplicable} detail="By N/A category" to={to("ei-na")} register={register} />
@@ -339,10 +379,12 @@ export function ActivityBar({ row, scope = "mechanical" }: { row: ActivityRow; s
   );
 }
 
-function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKeyword, grouped }: {
+function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKeyword, grouped, part }: {
   title: string; card: string; rows: CategoryRow[]; total: number; unitId: number; scope: DashboardScope; canEdit: boolean; byKeyword: boolean;
   /** Counted as the client: the register opens the same way. */
   grouped?: boolean;
+  /** E&I part counted: the register shows the same items. */
+  part?: EiPart;
 }) {
   const [open, setOpen] = useState<number | null>(null);
   const register = scopeNames[scope].register;
@@ -378,7 +420,7 @@ function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKey
               {open === c.id && (
                 <div className="px-5 pb-4">
                   {c.assets.length > 0 && (
-                    <Link to={cardLink(unitId, `category-${c.id}`, scope, grouped)} className="mb-2 inline-block text-sm font-semibold text-violet">
+                    <Link to={cardLink(unitId, `category-${c.id}`, scope, grouped, part)} className="mb-2 inline-block text-sm font-semibold text-violet">
                       Open these {c.count} in the {register} →
                     </Link>
                   )}
@@ -401,12 +443,94 @@ function CategoryPanel({ title, card, rows, total, unitId, scope, canEdit, byKey
             </li>
           ))}
           <li className="border-t border-line">
-            <Link to={cardLink(unitId, card, scope, grouped)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title={`Open in the ${register}`}>
+            <Link to={cardLink(unitId, card, scope, grouped, part)} className="flex justify-between px-5 py-3 font-semibold hover:bg-surface hover:text-violet" title={`Open in the ${register}`}>
               <span>Total</span>
               <span className="tabular-nums">{total}</span>
             </Link>
           </li>
         </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The two parts of the E&I items side by side (each its own preserved %), and their % weighted by the unit's weights.
+ * With assets.manage: the weights and whether the daily report counts the instruments (off: electrical only).
+ */
+function EiPartsPanel({ d, unitId, canEdit }: { d: Dashboard; unitId: number; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const settings = useQuery({
+    queryKey: ["ei-settings", unitId],
+    queryFn: ({ signal }) => api<EiSettings>(`/api/units/${unitId}/ei-settings`, { signal }),
+  });
+  const [editing, setEditing] = useState(false);
+  const [weight, setWeight] = useState("");
+  const save = useMutation({
+    mutationFn: (body: { electricalWeight: number; instrumentationInReport: boolean }) =>
+      api<EiSettings>(`/api/units/${unitId}/ei-settings`, { method: "PUT", body }),
+    onSuccess: (s) => {
+      queryClient.setQueryData(["ei-settings", unitId], s);
+      queryClient.invalidateQueries({ queryKey: ["dashboard", unitId] });
+      queryClient.invalidateQueries({ queryKey: ["daily-report"] });
+      queryClient.invalidateQueries({ queryKey: ["daily-card"] });
+      setEditing(false);
+    },
+  });
+  const s = settings.data;
+  const parts = d.parts ?? [];
+  const typed = Number(weight);
+  const valid = weight.trim() !== "" && Number.isInteger(typed) && typed >= 0 && typed <= 100;
+
+  return (
+    <section className="mt-4 rounded-lg border border-line bg-panel p-4" aria-label="E&I parts">
+      <div className="flex flex-wrap items-stretch gap-3">
+        {parts.map((p) => (
+          <div key={p.part} className={`min-w-44 flex-1 rounded-md border px-3 py-2 ${d.part === p.part ? "border-violet/40 bg-violet-soft" : "border-line"}`}>
+            <p className="text-sm font-semibold text-muted">{p.label} <span className="font-normal">· weight {p.weight}%</span></p>
+            <p className="font-display text-2xl font-bold text-ink tabular-nums">{p.tags > p.notApplicable ? `${p.preservedPct}%` : "—"}</p>
+            <p className="text-sm text-muted tabular-nums">{p.preserved} preserved of {p.tags - p.notApplicable} ({p.tags} tags, {p.notApplicable} N/A)</p>
+          </div>
+        ))}
+        <div className="min-w-44 flex-1 rounded-md border border-line px-3 py-2">
+          <p className="text-sm font-semibold text-muted">Weighted E&I</p>
+          <p className="font-display text-2xl font-bold text-ink tabular-nums">{d.weightedPreservedPct === null ? "—" : `${d.weightedPreservedPct}%`}</p>
+          <p className="text-sm text-muted">Each part's % × its weight; a part without tags is left out</p>
+        </div>
+      </div>
+      {s && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          {editing ? (
+            <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => {
+              e.preventDefault();
+              if (valid) save.mutate({ electricalWeight: typed, instrumentationInReport: s.instrumentationInReport });
+            }}>
+              <label className="flex items-center gap-2">Electrical weight
+                <input type="number" min={0} max={100} step={1} value={weight} onChange={(e) => setWeight(e.target.value)} autoFocus
+                  className="w-20 rounded-md border border-line bg-panel px-2 py-1 tabular-nums" />
+                %
+              </label>
+              <span className="text-muted">Instrumentation {valid ? 100 - typed : "—"}%</span>
+              <button type="submit" disabled={!valid || save.isPending} className="font-semibold text-violet disabled:opacity-50">Save</button>
+              <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink">Cancel</button>
+            </form>
+          ) : (
+            <span className="text-muted">
+              Weights: electrical {s.electricalWeight}% · instrumentation {s.instrumentationWeight}%
+              {canEdit && <button type="button" onClick={() => { setWeight(String(s.electricalWeight)); setEditing(true); }} className="ml-2 font-semibold text-violet">Change</button>}
+            </span>
+          )}
+          <label className="inline-flex items-center gap-2" title="Off: the daily report counts the electrical items only. On: the instruments too.">
+            <button type="button" role="switch" aria-checked={s.instrumentationInReport} disabled={!canEdit || save.isPending}
+              onClick={() => save.mutate({ electricalWeight: s.electricalWeight, instrumentationInReport: !s.instrumentationInReport })}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${s.instrumentationInReport ? "bg-violet" : "bg-line"}`}>
+              <span className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${s.instrumentationInReport ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+            Instrumentation in the daily report
+            <span className="text-muted">{s.instrumentationInReport ? "(counted)" : "(electrical only)"}</span>
+          </label>
+          {save.isError && <span className="text-hold">{save.error.message}</span>}
+        </div>
       )}
     </section>
   );

@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import { Perm, type BulkResult, type CategoryOption, type CustomField, type RegisterRow, type SearchHit } from "../../api/types";
-import { useCustomFields, useFields, useOptions, useUnit } from "../../app/useCatalog";
+import { useCustomFields, useDisciplines, useFields, useOptions, useUnit } from "../../app/useCatalog";
 import { useSession } from "../../app/session";
 import { AssetSearch } from "../../components/AssetSearch";
 import { Button } from "../../components/Button";
@@ -20,6 +20,8 @@ interface Picked {
 
 const PRESERVED = "PreservedAt";
 const CATEGORY = "DashboardCategory";
+const DISCIPLINE = "Discipline";
+const registerNames: Record<string, string> = { Equipment: "Equipment", ElectricalInstrument: "E&I", Pipeline: "Pipelines" };
 const CUSTOM = "cf:";
 
 /** Value of a custom field: its list, Yes/No, a date, or text. */
@@ -76,6 +78,12 @@ export function BulkEditPage() {
   const field = bulkFields.find((f) => f.key === fieldKey);
   const canPreserve = session.can("assets.markPreserved");
   const canCategory = session.can(Perm.assetsEdit);
+  // Discipline (e.g. instruments loaded as "E&I" moved to Instrumentation): within each register only.
+  const canDiscipline = session.can(Perm.assetsManage);
+  const disciplines = useDisciplines();
+  const disciplineGroups = Object.entries(registerNames)
+    .map(([type, label]) => ({ label, options: (disciplines.data ?? []).filter((d) => d.assetType === type) }))
+    .filter((g) => g.options.length > 0);
   // Custom fields (e.g. Cleaned? of lines), sent as "cf:" + key; one key can exist in several registers.
   const allCustom = useCustomFields().data ?? [];
   const customFields = canCategory ? [...new Map(allCustom.filter((c) => c.isActive).map((c) => [c.key, c])).values()].sort((a, b) => a.label.localeCompare(b.label)) : [];
@@ -131,6 +139,7 @@ export function BulkEditPage() {
         client.invalidateQueries({ queryKey: ["unit-summary"] });
         client.invalidateQueries({ queryKey: ["dashboard"] });
         client.invalidateQueries({ queryKey: ["categories"] });
+        client.invalidateQueries({ queryKey: ["daily-report"] });
         setPreview(null);
         setPicked([]);
         setValue("");
@@ -221,6 +230,7 @@ export function BulkEditPage() {
                 <option value="" disabled>Choose a field</option>
                 {canPreserve && <option value={PRESERVED}>Mark as preserved (date)</option>}
                 {canCategory && <option value={CATEGORY}>Dashboard category (Hold / N/A)</option>}
+                {canDiscipline && <option value={DISCIPLINE}>Discipline</option>}
                 {["Gates", "Status", "Client tracking", "Identification"].map((sec) => (
                   <optgroup key={sec} label={sec}>
                     {bulkFields.filter((f) => f.section === sec).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -252,6 +262,18 @@ export function BulkEditPage() {
                   : <span className="mt-1 block text-sm text-muted">Equipment categories only apply to equipment, E&I categories only to E&I items; the others are skipped.</span>}
               </Field>
             )}
+            {fieldKey === DISCIPLINE && (
+              <Field label="Discipline" hint="Only within the same register: other assets are skipped. The Equipment ID stays as it is.">
+                <SelectInput value={value} disabled={disciplines.isPending} onChange={(e) => { setValue(e.target.value); setPreview(null); }}>
+                  <option value="" disabled>Choose a discipline</option>
+                  {disciplineGroups.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </optgroup>
+                  ))}
+                </SelectInput>
+              </Field>
+            )}
             {field && (
               <label className="block">
                 <span className="text-sm font-semibold text-ink">New value</span>
@@ -273,7 +295,7 @@ export function BulkEditPage() {
             </p>
           )}
           <div className="mt-4 flex flex-col gap-2">
-            <Button variant="secondary" disabled={!fieldKey || list.length === 0} busy={busy && !preview} onClick={() => run(false)}>Preview</Button>
+            <Button variant="secondary" disabled={!fieldKey || list.length === 0 || (fieldKey === DISCIPLINE && !value)} busy={busy && !preview} onClick={() => run(false)}>Preview</Button>
             <Button disabled={!preview || preview.changed === 0} busy={busy && !!preview} onClick={() => run(true)}>
               {preview ? `Change ${preview.changed} assets` : "Apply"}
             </Button>
