@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using PresApp.Api.Assets;
 using PresApp.Api.Auth;
+using PresApp.Api.Hosting;
+using PresApp.Api.Reporting;
 using PresApp.Domain.Assets;
 using PresApp.Domain.Security;
 
@@ -78,11 +80,17 @@ public static class AssetEndpoints
         app.MapPost("/api/assets/{id:guid}/split", (Guid id, SplitAssetRequest request, ClaimsPrincipal user, AssetSplit s, CancellationToken ct) =>
             s.SplitAsync(id, request, user.Identity?.Name ?? "", ct)).RequirePermission(Permissions.AssetsManage);
 
-        app.MapPost("/api/bulk/preview", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
-            e.BulkAsync(request, apply: false, user, ct)).RequirePermission(Permissions.BulkEdit);
+        // Effective on: today's gate changes of the asset count in yesterday's daily report (or back to today).
+        app.MapGet("/api/assets/{id:guid}/effective-on", (Guid id, EffectiveOnService s, CancellationToken ct) =>
+            s.GetAsync(id, ct)).RequirePermission(Permissions.AssetsEffectiveOn);
+        app.MapPut("/api/assets/{id:guid}/effective-on", (Guid id, SetEffectiveOnRequest request, EffectiveOnService s, CancellationToken ct) =>
+            s.SetAsync(id, request, ct)).RequirePermission(Permissions.AssetsEffectiveOn);
 
-        app.MapPost("/api/bulk/apply", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
-            e.BulkAsync(request, apply: true, user, ct)).RequirePermission(Permissions.BulkEdit);
+        app.MapPost("/api/bulk/preview", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, EffectiveOnService s, CancellationToken ct) =>
+            Bulk(request, apply: false, user, e, s, ct)).RequirePermission(Permissions.BulkEdit);
+
+        app.MapPost("/api/bulk/apply", (BulkRequest request, ClaimsPrincipal user, AssetEditor e, EffectiveOnService s, CancellationToken ct) =>
+            Bulk(request, apply: true, user, e, s, ct)).RequirePermission(Permissions.BulkEdit);
 
         app.MapPost("/api/units/{id:int}/lines/bulk", (int id, bool? apply, BulkLinesRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.BulkLinesAsync(id, request.Text, apply == true, ct, request.CheckFormat, user)).RequirePermission(Permissions.AssetsManage);
@@ -90,6 +98,13 @@ public static class AssetEndpoints
         // Non-standard line numbers read again (after pipe specs or line codes were added): fills only empty fields.
         app.MapPost("/api/units/{id:int}/lines/reread", (int id, AssetEditor e, CancellationToken ct) =>
             e.ReReadNonStandardLinesAsync(id, ct)).RequirePermission(Permissions.LinesNonStandard).RequirePermission(Permissions.AssetsEdit);
+    }
+
+    private static Task<BulkResult> Bulk(BulkRequest request, bool apply, ClaimsPrincipal user, AssetEditor e, EffectiveOnService s, CancellationToken ct)
+    {
+        if (!request.Field.Equals(EffectiveOnService.BulkField, StringComparison.OrdinalIgnoreCase)) return e.BulkAsync(request, apply, user, ct);
+        if (!user.HasPermission(Permissions.AssetsEffectiveOn)) throw ApiProblem.Forbidden("Your role cannot change Effective on.");
+        return s.BulkAsync(request, apply, ct);
     }
 
     private static AssetType? ParseType(string? type) =>

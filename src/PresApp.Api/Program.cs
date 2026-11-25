@@ -58,6 +58,7 @@ builder.Services.AddScoped<PresApp.Api.Reporting.UnitDashboard>();
 builder.Services.AddScoped<PresApp.Api.Reporting.EiSettings>();
 builder.Services.AddScoped<PresApp.Api.Reporting.UnitHighlightService>();
 builder.Services.AddScoped<PresApp.Api.Reporting.DailySummary>();
+builder.Services.AddScoped<PresApp.Api.Reporting.EffectiveOnService>();
 builder.Services.AddHttpClient<PresApp.Api.Reporting.EpcsClient>(c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddScoped<PresApp.Api.Monitoring.MonitoringService>();
 builder.Services.AddScoped<PresApp.Api.Groups.GroupService>();

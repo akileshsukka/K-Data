@@ -10,7 +10,15 @@ import { Button } from "../../components/Button";
 import { Field, SelectInput, TextInput } from "../../components/Field";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
+import { formatDate, todayDubai } from "../../components/dates";
 import { FieldInput } from "../asset/FieldInput";
+
+/** Yesterday in Dubai as yyyy-MM-dd. */
+function yesterdayDubai(): string {
+  const d = new Date(`${todayDubai()}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 
 interface Picked {
   id: string;
@@ -21,6 +29,7 @@ interface Picked {
 const PRESERVED = "PreservedAt";
 const CATEGORY = "DashboardCategory";
 const DISCIPLINE = "Discipline";
+const EFFECTIVE = "EffectiveOn";
 const registerNames: Record<string, string> = { Equipment: "Equipment", ElectricalInstrument: "E&I", Pipeline: "Pipelines" };
 const CUSTOM = "cf:";
 
@@ -80,6 +89,8 @@ export function BulkEditPage() {
   const canCategory = session.can(Perm.assetsEdit);
   // Discipline (e.g. instruments loaded as "E&I" moved to Instrumentation): within each register only.
   const canDiscipline = session.can(Perm.assetsManage);
+  // Effective on: today's gate changes of the assets count in yesterday's daily report (or back to today).
+  const canEffective = session.can(Perm.assetsEffectiveOn);
   const disciplines = useDisciplines();
   const disciplineGroups = Object.entries(registerNames)
     .map(([type, label]) => ({ label, options: (disciplines.data ?? []).filter((d) => d.assetType === type) }))
@@ -231,6 +242,7 @@ export function BulkEditPage() {
                 {canPreserve && <option value={PRESERVED}>Mark as preserved (date)</option>}
                 {canCategory && <option value={CATEGORY}>Dashboard category (Hold / N/A)</option>}
                 {canDiscipline && <option value={DISCIPLINE}>Discipline</option>}
+                {canEffective && <option value={EFFECTIVE}>Effective on (daily report day)</option>}
                 {["Gates", "Status", "Client tracking", "Identification"].map((sec) => (
                   <optgroup key={sec} label={sec}>
                     {bulkFields.filter((f) => f.section === sec).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -274,6 +286,15 @@ export function BulkEditPage() {
                 </SelectInput>
               </Field>
             )}
+            {fieldKey === EFFECTIVE && (
+              <Field label="Today's gate changes count" hint="Only assets with gate changes recorded today; the others are skipped.">
+                <SelectInput value={value} onChange={(e) => { setValue(e.target.value); setPreview(null); }}>
+                  <option value="" disabled>Choose a day</option>
+                  <option value="Yesterday">Yesterday ({formatDate(yesterdayDubai())})</option>
+                  <option value="Today">Today ({formatDate(todayDubai())})</option>
+                </SelectInput>
+              </Field>
+            )}
             {field && (
               <label className="block">
                 <span className="text-sm font-semibold text-ink">New value</span>
@@ -295,7 +316,7 @@ export function BulkEditPage() {
             </p>
           )}
           <div className="mt-4 flex flex-col gap-2">
-            <Button variant="secondary" disabled={!fieldKey || list.length === 0 || (fieldKey === DISCIPLINE && !value)} busy={busy && !preview} onClick={() => run(false)}>Preview</Button>
+            <Button variant="secondary" disabled={!fieldKey || list.length === 0 || ((fieldKey === DISCIPLINE || fieldKey === EFFECTIVE) && !value)} busy={busy && !preview} onClick={() => run(false)}>Preview</Button>
             <Button disabled={!preview || preview.changed === 0} busy={busy && !!preview} onClick={() => run(true)}>
               {preview ? `Change ${preview.changed} assets` : "Apply"}
             </Button>

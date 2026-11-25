@@ -85,6 +85,7 @@ export const Perm = {
   usersManage: "users.manage",
   linesNonStandard: "lines.nonStandard",
   reportHighlights: "report.highlights",
+  assetsEffectiveOn: "assets.effectiveOn",
 } as const;
 
 export type AssetType = "Equipment" | "Pipeline" | "ElectricalInstrument";
@@ -416,6 +417,15 @@ export interface BulkRow {
   new: string | null;
   outcome: "Change" | "No change" | "Skipped";
   reason: string | null;
+}
+
+/** Effective on of one asset: the daily report day of the gate changes it had today ("Today" / "Yesterday"; null = none today). */
+export interface EffectiveOn {
+  today: string;
+  yesterday: string;
+  changes: number;
+  moved: number;
+  effectiveOn: "Today" | "Yesterday" | null;
 }
 
 export interface BulkResult {

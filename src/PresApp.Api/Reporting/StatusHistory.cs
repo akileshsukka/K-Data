@@ -29,7 +29,7 @@ public sealed class StatusHistory
         nameof(AssetPreservation.G5Status), nameof(AssetPreservation.G6Status), nameof(AssetPreservation.G7Status), nameof(AssetPreservation.G8Status),
     ];
 
-    private static readonly ChangeSource[] NotWork = [ChangeSource.Migration, ChangeSource.HistoryImport];
+    internal static readonly ChangeSource[] NotWork = [ChangeSource.Migration, ChangeSource.HistoryImport];
 
     private readonly Dictionary<(Guid Asset, string Field), List<Change>> changes;
     private readonly Dictionary<Guid, DateTime> createdAt;
@@ -56,13 +56,22 @@ public sealed class StatusHistory
         var rows = await db.ChangeLogs.AsNoTracking()
             .Where(c => c.ChangedAtUtc > fromUtc && c.AssetId != null && unitAssets.Contains(c.AssetId)
                         && ((c.EntityType == preservation && Fields.Contains(c.Field)) || c.Field == "(created)" || c.Field == AssetSplit.SplitField))
-            .Select(c => new { AssetId = c.AssetId!.Value, c.Field, c.OldValue, c.NewValue, c.ChangedAtUtc, c.Source, c.Id, c.BatchId })
+            .Select(c => new { AssetId = c.AssetId!.Value, c.Field, c.OldValue, c.NewValue, c.ChangedAtUtc, c.EffectiveAtUtc, c.Source, c.Id, c.BatchId })
             .ToListAsync(ct);
         var created = rows.Where(r => r.Field == "(created)").GroupBy(r => r.AssetId).ToDictionary(g => g.Key, g => g.Min(r => r.ChangedAtUtc));
         var byField = rows.Where(r => r.Field != "(created)" && r.Field != AssetSplit.SplitField)
             .GroupBy(r => (r.AssetId, r.Field))
-            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.ChangedAtUtc).ThenBy(r => r.Id)
-                .Select(r => new Change(r.ChangedAtUtc, r.OldValue, r.NewValue, !NotWork.Contains(r.Source))).ToList());
+            // Effective on: a change moved to the day before counts then (it is loaded by the moment it was recorded, which is
+            // always later, so it is never missed).
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.EffectiveAtUtc ?? r.ChangedAtUtc).ThenBy(r => r.Id)
+                .Select(r => new Change(r.EffectiveAtUtc ?? r.ChangedAtUtc, r.OldValue, r.NewValue, !NotWork.Contains(r.Source))).ToList());
+        // An asset created today whose changes were moved to yesterday existed, for the report, just before them: otherwise
+        // the moved changes would fall before its creation and count as statuses it was born with, never as work done.
+        foreach (var moved in rows.Where(r => r.EffectiveAtUtc != null).GroupBy(r => r.AssetId))
+        {
+            var first = moved.Min(r => r.EffectiveAtUtc!.Value).AddSeconds(-1);
+            if (created.TryGetValue(moved.Key, out var at) && first < at) created[moved.Key] = first;
+        }
 
         // Splits: one "(split)" row per part, all with the same batch. The original is the part that existed first (it keeps
         // its Id); the other parts were created by the split.

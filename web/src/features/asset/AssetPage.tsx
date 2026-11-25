@@ -16,6 +16,7 @@ import { HistoryList } from "./HistoryList";
 import { ElectricalTestTab } from "./ElectricalTestTab";
 import { ReadingsTab } from "./ReadingsTab";
 import { CategoryCard } from "./CategoryCard";
+import { EffectiveOnCard } from "./EffectiveOnCard";
 import { DocumentsTab } from "../documents/DocumentsTab";
 import { useAsset, useAssetHistory, useMarkPreserved, usePatchAsset, useSetActive, useSetCurrentGate } from "./useAsset";
 import { NonStandardBadge } from "../lines/FormatCheckToggle";
@@ -120,6 +121,7 @@ export function AssetPage() {
               <FieldSection title="Client tracking" fields={section("Client tracking")} asset={a} options={opts} onProposals={setProposals} />
               <FieldSection title="Latest readings" fields={section("Latest readings")} asset={a} options={opts} onProposals={setProposals} />
               <FieldSection title="Milestones" fields={section("Milestones").filter((f) => f.key !== "PreservedAtUtc")} asset={a} options={opts} onProposals={setProposals} />
+              <EffectiveOnCard asset={a} />
               <PreservedCard asset={a} />
               {a.groups.length > 0 && session.can(Perm.groupsView) && (
                 <section className="rounded-lg border border-line bg-panel p-4">
@@ -140,7 +142,12 @@ export function AssetPage() {
             </div>
           </div>
         )}
-        {tab === "gates" && <GatesTab asset={a} fields={defs} options={opts} onProposals={setProposals} />}
+        {tab === "gates" && (
+          <>
+            <EffectiveOnCard asset={a} className="mb-4" />
+            <GatesTab asset={a} fields={defs} options={opts} onProposals={setProposals} />
+          </>
+        )}
         {tab === "electrical" && <ElectricalTestTab asset={a} />}
         {tab === "readings" && <ReadingsTab asset={a} onProposals={setProposals} />}
         {tab === "documents" && <DocumentsTab asset={a} />}

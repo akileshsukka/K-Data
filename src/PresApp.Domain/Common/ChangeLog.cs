@@ -11,6 +11,13 @@ public class ChangeLog
     public string? OldValue { get; set; }
     public string? NewValue { get; set; }
     public DateTime ChangedAtUtc { get; set; }
+
+    /// <summary>
+    /// Effective on (25-nov-2026): a gate or walkdown change recorded today that counts in yesterday's daily report, set by
+    /// hand (data engineer / admin) when the work was done the day before. Null = it counts when it was recorded
+    /// (<see cref="ChangedAtUtc"/>, which never changes).
+    /// </summary>
+    public DateTime? EffectiveAtUtc { get; set; }
     public string ChangedBy { get; set; } = "";
     public ChangeSource Source { get; set; }
 

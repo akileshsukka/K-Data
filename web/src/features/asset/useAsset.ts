@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { AssetProfile, HistoryEntry, Proposals, Reading } from "../../api/types";
+import type { AssetProfile, EffectiveOn, HistoryEntry, Proposals, Reading } from "../../api/types";
 
 export interface FieldChange {
   field: string;
@@ -31,8 +31,31 @@ function useAssetMutation<TBody, TResult>(id: string, run: (body: TBody) => Prom
       client.setQueryData(assetKey(id), pick(result));
       client.invalidateQueries({ queryKey: ["asset", id, "history"] });
       client.invalidateQueries({ queryKey: ["asset", id, "readings"] });
+      client.invalidateQueries({ queryKey: ["asset", id, "effective-on"] });
       client.invalidateQueries({ queryKey: ["register"] });
       client.invalidateQueries({ queryKey: ["unit-summary"] });
+    },
+  });
+}
+
+/** Effective on: the daily report day of the gate changes the asset had today. Only for roles with assets.effectiveOn. */
+export function useEffectiveOn(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["asset", id, "effective-on"],
+    queryFn: ({ signal }) => api<EffectiveOn>(`/api/assets/${id}/effective-on`, { signal }),
+    enabled,
+  });
+}
+
+export function useSetEffectiveOn(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (day: "Today" | "Yesterday") => api<EffectiveOn>(`/api/assets/${id}/effective-on`, { method: "PUT", body: { day } }),
+    onSuccess: (result) => {
+      client.setQueryData(["asset", id, "effective-on"], result);
+      client.invalidateQueries({ queryKey: ["asset", id, "history"] });
+      client.invalidateQueries({ queryKey: ["dashboard"] });
+      client.invalidateQueries({ queryKey: ["daily-report"] });
     },
   });
 }
