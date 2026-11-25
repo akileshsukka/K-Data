@@ -1106,6 +1106,9 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<DateTime?>("EffectiveAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("EntityKey")
                         .IsRequired()
                         .HasMaxLength(100)
