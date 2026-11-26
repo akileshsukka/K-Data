@@ -169,8 +169,12 @@ public sealed class UnitDashboard(PresAppDbContext db)
         var rowOf = new Dictionary<Guid, string>();
         foreach (var g in groups)
             foreach (var a in g.Rows) rowOf.TryAdd(a.Id, g.Name);
+        // Gate progress of the whole scope, counted like the "Overall progress" of the discipline rows: steps completed ÷ steps
+        // (mechanical: every tag × 5, not applicable tags included, like the Excel; E&I: Not Applicable steps left out).
+        var steps = ei ? items.Sum(a => a.Steps.Count(s => !IsNotApplicable(s))) : items.Count * 5;
+        var stepsDone = items.Sum(a => a.Steps.Count(IsCompleted));
         return new ReportFigures(d.TotalTags, d.TotalNotApplicable, d.Preserved, d.TotalHold, rows,
-            preserved.ToDictionary(i => i.Ids.Min(), i => new PreservedTag(i.Tag ?? i.Code, rowOf.GetValueOrDefault(i.Id, "Other"))));
+            preserved.ToDictionary(i => i.Ids.Min(), i => new PreservedTag(i.Tag ?? i.Code, rowOf.GetValueOrDefault(i.Id, "Other"))), steps, stepsDone);
     }
 
     /// <summary>

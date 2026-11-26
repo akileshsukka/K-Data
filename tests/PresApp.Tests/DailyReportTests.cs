@@ -57,6 +57,11 @@ public sealed class DailyReportTests : IClassFixture<TestApp>
         Assert.Equal(4, unit.GetProperty("preserved").GetInt32());
         Assert.Equal(2, unit.GetProperty("preservedDayBefore").GetInt32());   // the migrated value counts as always there
         Assert.Equal(80m, unit.GetProperty("preservedPct").GetDecimal());
+        // Gate progress (the % the reports show): 4 mechanical tags × 5 steps + the motor's 9 steps less its N/A one = 28;
+        // done at the end of the day: three G4 + the motor's 7 closed steps = 10; at its start, the two G4 already there.
+        Assert.Equal((28, 10, 2), (unit.GetProperty("gateSteps").GetInt32(), unit.GetProperty("gateStepsDone").GetInt32(),
+            unit.GetProperty("gateStepsDoneDayBefore").GetInt32()));
+        Assert.Equal((35.7m, 7.1m), (unit.GetProperty("gateProgressPct").GetDecimal(), unit.GetProperty("gateProgressPctDayBefore").GetDecimal()));
         Assert.Equal(["39-EM-903", "39-P-902"], Strings(unit.GetProperty("completedTags")));
         // The same tags by discipline, in the order of the table (mechanical first, then E&I).
         var groups = unit.GetProperty("completedByDiscipline").EnumerateArray()
