@@ -9,10 +9,12 @@ import { api } from "../../api/client";
   for one unit only. Drawn off screen, turned into one image and placed on an A4 portrait page.
 */
 
-interface Discipline { discipline: string; tags: number; notApplicable: number; preserved: number; hold: number }
+interface Discipline { discipline: string; tags: number; notApplicable: number; preserved: number; hold: number; gateProgressPct: number | null }
 interface DailyUnit {
   unitNumber: number; unitName: string; plantName: string; applicable: number; preserved: number; hold: number;
-  preservedPct: number; preservedPctDayBefore: number; disciplines: Discipline[]; completedTags: string[];
+  preservedPct: number; preservedPctDayBefore: number;
+  /** The % the card shows (26-nov): gate steps completed ÷ gate steps, as the "Overall progress" of the unit PDF. */
+  gateProgressPct: number; gateProgressPctDayBefore: number; disciplines: Discipline[]; completedTags: string[];
   completedByDiscipline: { discipline: string; tags: string[] }[];
   lines: number; linesPreserved: number; highlights: { id: number; text: string }[];
 }
@@ -99,7 +101,7 @@ const TAGS_PER_GROUP = 4;
 export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boolean }) {
   const u = c.unit;
   const d = SHORT.format(day(c.date));
-  const delta = u.preservedPct - u.preservedPctDayBefore;
+  const delta = u.gateProgressPct - u.gateProgressPctDayBefore;
   const completed = u.completedTags;
   const w = (n: number) => `${u.applicable > 0 ? Math.max(0, Math.min(100, (100 * n) / u.applicable)) : 0}%`;
   return (
@@ -116,23 +118,24 @@ export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boo
             {u.preserved > 0 ? <span className="stage go">Preservation in progress</span> : <span className="stage prep">Preparing for preservation</span>}
           </div>
           <div className="pct">
-            <div className="big num">{f1(u.preservedPct)}%</div>
+            <div className="big num">{f1(u.gateProgressPct)}%</div>
             <div className="sub num">{u.preserved} of {u.applicable} preserved · {delta > 0.05 ? <span className="up">▲ {f1(delta)} pts on {d}</span> : <span>No change on {d}</span>}</div>
           </div>
-          <div className="bar"><span className="p" style={{ width: w(u.preserved - completed.length) }} /><span className="y" style={{ width: w(completed.length) }} /><span className="h" style={{ width: w(u.hold) }} /></div>
+          <div className="bar"><span className="p" style={{ width: w(u.gateProgressPctDayBefore) }} /><span className="y" style={{ width: w(Math.max(0, delta)) }} /></div>
           <div className="legend">
-            <span><i style={{ background: "var(--violet)" }} />Preserved</span><span><i style={{ background: "var(--done)" }} />Completed {d}</span>
-            <span><i style={{ background: "var(--hold)", opacity: 0.75 }} />On hold</span><span><i style={{ background: "var(--na-soft)" }} />Remaining</span>
+            <span><i style={{ background: "var(--violet)" }} />Progress</span><span><i style={{ background: "var(--done)" }} />Gained {d}</span>
+            <span><i style={{ background: "var(--na-soft)" }} />Remaining</span>
           </div>
         </div>
         <div className="sec">
           <h4>Status by discipline</h4>
           <table>
-            <thead><tr><th>Discipline</th><th>Tags</th><th>Preserved</th><th>On hold</th><th>% preserved</th></tr></thead>
+            <thead><tr><th>Discipline</th><th>Tags</th><th>Preserved</th><th>On hold</th><th>Overall progress</th></tr></thead>
             <tbody>
               {u.disciplines.map((r) => {
                 const allNa = r.notApplicable === r.tags;
-                const pct = allNa ? null : (100 * r.preserved) / (r.tags - r.notApplicable);
+                // The gate progress of the discipline, as in the unit PDF (null: every tag not applicable).
+                const pct = allNa ? null : r.gateProgressPct;
                 const dash = <span className="dim">—</span>;
                 return (
                   <tr key={r.discipline}>
@@ -147,7 +150,8 @@ export function DailyCard({ c, showPiping }: { c: DailyCardData; showPiping: boo
         {showPiping && u.lines > 0 && <div className="piping"><b>Piping</b> {u.linesPreserved} of {u.lines} lines preserved · {u.lines - u.linesPreserved} pending</div>}
         <div className="sec">
           <h4>Completed on {d}</h4>
-          {completed.length === 0 ? <p className="empty">No tags completed on {d}.</p> : (
+          {/* 26-nov: with no tags completed only the title stays (no "No tags completed" line); the activities follow. */}
+          {completed.length > 0 && (
             <div className="cgroups">
               {u.completedByDiscipline.map((g) => (
                 <div key={g.discipline} className="cgroup">

@@ -24,6 +24,9 @@ interface DailyUnit {
   preserved: number;
   preservedPct: number;
   preservedPctDayBefore: number;
+  /** The % the reports show (26-nov): gate steps completed ÷ gate steps, as the "Overall progress" of the dashboards. */
+  gateProgressPct: number;
+  gateProgressPctDayBefore: number;
   completedTags: string[];
   completedByDiscipline: { discipline: string; tags: string[] }[];
   lines: number;
@@ -93,11 +96,11 @@ export function DailyReportPanel({ unitId }: { unitId: number }) {
     onError: (e) => toast(e instanceof ApiError ? e.message : "Could not save.", "error"),
   });
 
-  const change = u ? u.preservedPct - u.preservedPctDayBefore : 0;
+  const change = u ? u.gateProgressPct - u.gateProgressPctDayBefore : 0;
   const completed = u?.completedTags ?? [];
   const summaryLine = !u
     ? summary.isError ? "could not load" : "loading…"
-    : `${pct(u.preservedPct)} preserved · ${completed.length} completed · ${highlights.length} highlight${highlights.length === 1 ? "" : "s"}`;
+    : `${pct(u.gateProgressPct)} progress · ${u.preserved} preserved · ${completed.length} completed · ${highlights.length} highlight${highlights.length === 1 ? "" : "s"}`;
 
   return (
     <section className="mt-4 rounded-lg border border-line bg-panel">
@@ -122,8 +125,8 @@ export function DailyReportPanel({ unitId }: { unitId: number }) {
           {summary.isError && <p className="text-hold">{summary.error.message}</p>}
           {u && (
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-              <p><span className="font-display text-2xl font-bold text-ink tabular-nums">{pct(u.preservedPct)}</span> <span className="text-muted">preserved · {u.preserved} of {u.applicable} applicable tags</span></p>
-              <p className={change > 0 ? "font-semibold text-done" : "text-muted"}>{change > 0 ? `▲ ${pct(Math.round(change * 10) / 10)} on ${formatDate(day)}` : `No change on ${formatDate(day)}`}</p>
+              <p><span className="font-display text-2xl font-bold text-ink tabular-nums">{pct(u.gateProgressPct)}</span> <span className="text-muted">{u.preserved} of {u.applicable} preserved</span></p>
+              <p className={change > 0 ? "font-semibold text-done" : "text-muted"}>{change > 0 ? `▲ ${Math.round(change * 10) / 10} pts on ${formatDate(day)}` : `No change on ${formatDate(day)}`}</p>
               {u.lines > 0 && <p className="text-muted">Piping: {u.linesPreserved} of {u.lines} lines preserved</p>}
             </div>
           )}

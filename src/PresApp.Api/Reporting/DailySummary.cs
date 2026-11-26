@@ -17,25 +17,31 @@ public sealed record DailyCompletedGroup(string Discipline, List<string> Tags);
 /// <summary>A preserved tag and the discipline row it is counted in.</summary>
 internal sealed record PreservedTag(string Tag, string Discipline);
 
-/// <summary>Figures of one scope (mechanical or E&amp;I) of a unit at a moment; <see cref="PreservedTags"/> by first asset id.</summary>
-internal sealed record ReportFigures(int Tags, int NotApplicable, int Preserved, int Hold, List<DailyDisciplineRow> Disciplines, Dictionary<Guid, PreservedTag> PreservedTags);
+/// <summary>Figures of one scope (mechanical or E&amp;I) of a unit at a moment; <see cref="PreservedTags"/> by first asset id;
+/// <see cref="Steps"/> / <see cref="StepsDone"/> = the gate steps counted in the gate progress and those completed.</summary>
+internal sealed record ReportFigures(int Tags, int NotApplicable, int Preserved, int Hold, List<DailyDisciplineRow> Disciplines, Dictionary<Guid, PreservedTag> PreservedTags,
+    int Steps, int StepsDone);
 
 /// <summary>
 /// One unit in the daily report, at the end of the day (and, for the change, at the end of the day before).
 /// <see cref="PreservedPct"/> = preserved ÷ (tags − not applicable). Piping lines are apart and never in these figures.
 /// <see cref="CompletedByDiscipline"/> = the same tags as <see cref="CompletedTags"/>, by discipline in the order of the
 /// table (24-nov; <see cref="CompletedTags"/> stays for readers that do not know the groups).
+/// <see cref="GateProgressPct"/> (26-nov) = the % the reports show: gate steps completed ÷ gate steps
+/// (<see cref="GateStepsDone"/> ÷ <see cref="GateSteps"/>), the same counting as the "Overall progress" of the Unit overview,
+/// so the daily report and the unit PDF agree; the steps let EPCS add units together.
 /// </summary>
 public sealed record DailyUnitDto(
     int UnitId, int UnitNumber, string UnitName, string PlantName, bool Grouped,
     int Tags, int NotApplicable, int Applicable, int Preserved, int Hold, decimal PreservedPct,
     int PreservedDayBefore, decimal PreservedPctDayBefore,
     List<DailyDisciplineRow> Disciplines, List<string> CompletedTags,
-    int Lines, int LinesPreserved, List<UnitHighlightDto> Highlights, List<DailyCompletedGroup> CompletedByDiscipline);
+    int Lines, int LinesPreserved, List<UnitHighlightDto> Highlights, List<DailyCompletedGroup> CompletedByDiscipline,
+    int GateSteps, int GateStepsDone, int GateStepsDoneDayBefore, decimal GateProgressPct, decimal GateProgressPctDayBefore);
 
-/// <summary>Sum of the units, counted by tag (never an average of the unit %).</summary>
+/// <summary>Sum of the units, counted by tag and by gate step (never an average of the unit %).</summary>
 public sealed record DailyTotalsDto(int Tags, int NotApplicable, int Applicable, int Preserved, int Hold, decimal PreservedPct, int CompletedOnDay,
-    int Lines, int LinesPreserved);
+    int Lines, int LinesPreserved, int GateSteps, int GateStepsDone, int GateStepsDoneDayBefore, decimal GateProgressPct, decimal GateProgressPctDayBefore);
 
 /// <summary>One unit's daily card: its figures and its activities from EPCS (<see cref="ActivitiesError"/> when they could not be read).</summary>
 public sealed record DailyCardDto(DateOnly Date, DailyUnitDto Unit, List<EpcsActivity> Activities, string? ActivitiesError);
@@ -97,6 +103,10 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, U
             var na = mechanical.NotApplicable + ei.NotApplicable;
             var preserved = mechanical.Preserved + ei.Preserved;
             var preservedBefore = mechanicalBefore.Preserved + eiBefore.Preserved;
+            // Categories are the current ones at both moments; the day before is measured over the steps of the end of the day.
+            var steps = mechanical.Steps + ei.Steps;
+            var stepsDone = mechanical.StepsDone + ei.StepsDone;
+            var stepsDoneBefore = mechanicalBefore.StepsDone + eiBefore.StepsDone;
 
             var lines = await db.Assets.AsNoTracking().Where(a => a.UnitId == unit.Id && a.IsActive && a.Type == AssetType.Pipeline)
                 .Select(a => new { a.Id, a.Preservation!.G4Status }).ToListAsync(ct);
@@ -107,12 +117,15 @@ public sealed class DailySummary(PresAppDbContext db, UnitDashboard dashboard, U
                 tags, na, tags - na, preserved, mechanical.Hold + ei.Hold, Pct(preserved, tags - na),
                 preservedBefore, Pct(preservedBefore, tags - na),
                 [.. mechanical.Disciplines, .. ei.Disciplines], completed,
-                lines.Count, linesPreserved, notes.GetValueOrDefault(unit.Id) ?? [], byDiscipline));
+                lines.Count, linesPreserved, notes.GetValueOrDefault(unit.Id) ?? [], byDiscipline,
+                steps, stepsDone, stepsDoneBefore, Pct(stepsDone, steps), Pct(stepsDoneBefore, steps)));
         }
 
         var t = new DailyTotalsDto(result.Sum(u => u.Tags), result.Sum(u => u.NotApplicable), result.Sum(u => u.Applicable), result.Sum(u => u.Preserved),
             result.Sum(u => u.Hold), Pct(result.Sum(u => u.Preserved), result.Sum(u => u.Applicable)), result.Sum(u => u.CompletedTags.Count),
-            result.Sum(u => u.Lines), result.Sum(u => u.LinesPreserved));
+            result.Sum(u => u.Lines), result.Sum(u => u.LinesPreserved),
+            result.Sum(u => u.GateSteps), result.Sum(u => u.GateStepsDone), result.Sum(u => u.GateStepsDoneDayBefore),
+            Pct(result.Sum(u => u.GateStepsDone), result.Sum(u => u.GateSteps)), Pct(result.Sum(u => u.GateStepsDoneDayBefore), result.Sum(u => u.GateSteps)));
         return new DailySummaryDto(day, endUtc, clock.GetUtcNow().UtcDateTime, result, t);
     }
 
