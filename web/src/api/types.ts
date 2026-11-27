@@ -882,7 +882,7 @@ export interface PipingTemplateInfo {
 export type GateFormKind = "Mechanical" | "Electrical";
 
 /** Field markers a gate form template can hold (server: GateFormDocument). */
-export type GateFormField = "UNIT" | "SOURCE" | "RECORD_NO" | "DATE" | "SECTION" | "WORKPACK" | "UNIT_ID";
+export type GateFormField = "UNIT" | "SOURCE" | "RECORD_NO" | "DATE" | "SECTION" | "WORKPACK" | "UNIT_ID" | "DESCRIPTION";
 
 export interface GateFormRow {
   assetId: string;

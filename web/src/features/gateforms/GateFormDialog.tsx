@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, download } from "../../api/client";
-import type { GateFormKind, GateFormPrepared, GateFormRow } from "../../api/types";
+import type { GateFormField, GateFormKind, GateFormPrepared, GateFormRow } from "../../api/types";
 import { Button } from "../../components/Button";
 import { Dialog } from "../../components/Dialog";
 import { TextInput } from "../../components/Field";
@@ -45,8 +45,10 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
   }, [open]);
 
   const data = prepared.data;
-  const has = (f: string) => data?.fields.includes(f as never) ?? false;
+  const has = (f: GateFormField) => data?.fields.includes(f) ?? false;
   const info = new Map(data?.rows.map((r) => [r.assetId, r]));
+  // Labels follow the fields of the template (an uploaded one may differ from the built-in form of its kind).
+  const sectionLabel = has("DESCRIPTION") ? "Equipment Tag Number" : "System / circuit / section";
 
   function update(i: number, patch: Partial<Editable>) {
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
@@ -135,7 +137,8 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
                 <table className="w-full min-w-[56rem] text-left text-sm">
                   <thead className="sticky top-0 bg-panel text-muted">
                     <tr>
-                      {["Asset", "Record No.", "Date", "System / circuit / section", ...(has("WORKPACK") ? ["Work pack / P&ID rev."] : []), ...(has("UNIT_ID") ? ["Unit ID"] : [])]
+                      {["Asset", has("RECORD_NO") ? "Record No." : "Record No. (not printed)", "Date", sectionLabel, ...(has("DESCRIPTION") ? ["Tag Description"] : []),
+                        ...(has("WORKPACK") ? ["Work pack / P&ID rev."] : []), ...(has("UNIT_ID") ? ["Unit ID"] : [])]
                         .map((h) => <th key={h} className="border-b border-line px-2 py-2 font-semibold">{h}</th>)}
                     </tr>
                   </thead>
@@ -157,6 +160,11 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
                           <td className="px-2 py-1.5">
                             <Cell value={r.section} onChange={(v) => update(i, { section: v ?? "" })} placeholder={a.sectionDefault} />
                           </td>
+                          {has("DESCRIPTION") && (
+                            <td className="px-2 py-1.5">
+                              <span className="block min-h-9 max-w-64 py-2 text-muted" title="Taken from the asset (edit it in the register)">{a.description || "— (blank line)"}</span>
+                            </td>
+                          )}
                           {has("WORKPACK") && <td className="px-2 py-1.5"><Cell value={r.workPack} onChange={(v) => update(i, { workPack: v })} placeholder={a.workPackDefault ?? "Paste here"} /></td>}
                           {has("UNIT_ID") && <td className="px-2 py-1.5"><Cell value={r.unitId} onChange={(v) => update(i, { unitId: v })} placeholder={a.unitIdDefault ?? ""} /></td>}
                         </tr>

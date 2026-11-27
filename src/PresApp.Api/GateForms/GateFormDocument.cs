@@ -30,6 +30,7 @@ public static partial class GateFormDocument
     public const string Section = "SECTION";
     public const string WorkPack = "WORKPACK";
     public const string UnitId = "UNIT_ID";
+    public const string Description = "DESCRIPTION";
 
     public static readonly IReadOnlyList<GateFormMarker> Markers =
     [
@@ -40,6 +41,7 @@ public static partial class GateFormDocument
         new(Section, "System / circuit / section (tag or line number)", false, new string('_', 18)),
         new(WorkPack, "Work pack / P&ID rev.", false, new string('_', 18)),
         new(UnitId, "Unit ID", false, new string('_', 18)),
+        new(Description, "Tag description", false, new string('_', 18)),
     ];
 
     private static readonly Dictionary<string, GateFormMarker> ByName = Markers.ToDictionary(m => m.Name);

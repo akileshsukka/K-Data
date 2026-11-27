@@ -33,7 +33,8 @@ public sealed record GateFormGenerateRequest(string? Kind, IReadOnlyList<GateFor
 /// <list type="bullet">
 /// <item><b>Mechanical</b> (G1–G8): equipment and lines. <b>Electrical</b> (E1–E8): E&amp;I items of discipline Electrical (motors).</item>
 /// <item>Template per plant and kind: the active uploaded version, or the built-in one (the client forms of Nov 2026).</item>
-/// <item>Unit values (Admin → Gate forms): source document of each form and the default Unit ID.</item>
+/// <item>Unit values (Admin → Gate forms): source document of each form (the electrical one falls back to the mechanical one) and the default Unit ID.</item>
+/// <item>The electrical form prints the tag description of each motor, always taken from the asset.</item>
 /// <item>Asset values: Record No., date, and overrides of section (tag / line number), work pack (P&amp;ID number of a line)
 /// and Unit ID. They are saved with the asset so the next print starts from them.</item>
 /// <item>Record No.: an asset printed without one gets the next of its discipline and unit (<see cref="RecordNumbers"/>).</item>
@@ -170,6 +171,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
             [GateFormDocument.Section] = $"{unit.Number}-V-101",
             [GateFormDocument.WorkPack] = $"{unit.Number}-00-30-201",
             [GateFormDocument.UnitId] = setting?.DefaultUnitId ?? unit.Number.ToString(CultureInfo.InvariantCulture),
+            [GateFormDocument.Description] = "REGEN. OVERHEAD COOLER FAN",
         };
         var bytes = GateFormDocument.Fill(content, unitValues, [filled, new Dictionary<string, string?>()]);
         return ($"Sample - {Path.GetFileNameWithoutExtension(name)}.docx", bytes);
@@ -251,6 +253,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
                 [GateFormDocument.Section] = section ?? SectionDefault(a),
                 [GateFormDocument.WorkPack] = workPack ?? WorkPackDefault(a),
                 [GateFormDocument.UnitId] = unitIdText ?? setting?.DefaultUnitId,
+                [GateFormDocument.Description] = a.Description,
             });
             if (!save) continue;
 
@@ -366,7 +369,14 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
         [GateFormDocument.Source] = SourceOf(setting, kind),
     };
 
-    private static string? SourceOf(GateFormUnitSetting? s, GateFormKind kind) => kind == GateFormKind.Electrical ? s?.ElectricalSource : s?.MechanicalSource;
+    /// <summary>
+    /// Source document printed on the form. The electrical form falls back to the mechanical source when it has none of its
+    /// own: both forms come from the same source document of the unit.
+    /// </summary>
+    private static string? SourceOf(GateFormUnitSetting? s, GateFormKind kind) =>
+        kind == GateFormKind.Electrical
+            ? s?.ElectricalSource ?? s?.MechanicalSource
+            : s?.MechanicalSource;
 
     private static string SectionDefault(FormAsset a) => string.IsNullOrWhiteSpace(a.Tag) ? a.Code : a.Tag.Trim();
 

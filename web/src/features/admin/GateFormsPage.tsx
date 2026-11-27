@@ -33,11 +33,11 @@ export function GateFormsPage() {
 
       <section className="mt-6 rounded-lg border border-line bg-panel">
         <h2 className="px-5 pt-5 text-xl font-semibold">Values of each unit</h2>
-        <p className="px-5 pt-1 text-muted">Printed on every form of the unit. A unit without a source can still print its forms, with the source left empty, after a warning.</p>
+        <p className="px-5 pt-1 text-muted">Printed on every form of the unit. The electrical form left empty uses the mechanical source (the same source document). A unit without a source can still print its forms, with the source left empty, after a warning.</p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[52rem] text-left">
             <thead className="text-sm text-muted">
-              <tr>{["Unit", "Source – mechanical form", "Source – electrical form", "Unit ID", ""].map((h) => <th key={h} className="border-y border-line px-4 py-2.5 font-semibold">{h}</th>)}</tr>
+              <tr>{["Unit", "Source – mechanical form", "Source – electrical form (empty: the mechanical one)", "Unit ID", ""].map((h) => <th key={h} className="border-y border-line px-4 py-2.5 font-semibold">{h}</th>)}</tr>
             </thead>
             <tbody>{settings.data?.map((s) => <SettingRow key={s.unitId} s={s} />)}</tbody>
           </table>
@@ -141,7 +141,7 @@ function SettingRow({ s }: { s: GateFormUnitSetting }) {
     <tr className="border-b border-line last:border-0">
       <td className="px-4 py-2.5"><span className="font-semibold text-ink">{s.unitName}</span><span className="block text-sm text-muted">{s.plantName}</span></td>
       <td className="px-4 py-2.5"><TextInput value={v.mechanicalSource} placeholder="Not set" onChange={(e) => setV({ ...v, mechanicalSource: e.target.value })} /></td>
-      <td className="px-4 py-2.5"><TextInput value={v.electricalSource} placeholder="Not set" onChange={(e) => setV({ ...v, electricalSource: e.target.value })} /></td>
+      <td className="px-4 py-2.5"><TextInput value={v.electricalSource} placeholder={v.mechanicalSource.trim() ? `Mechanical: ${v.mechanicalSource.trim()}` : "Not set"} title="Left empty, the electrical form prints the mechanical source" onChange={(e) => setV({ ...v, electricalSource: e.target.value })} /></td>
       <td className="px-4 py-2.5"><TextInput value={v.defaultUnitId} className="w-28" placeholder="—" title="Printed on forms with a Unit ID field when the asset has none of its own" onChange={(e) => setV({ ...v, defaultUnitId: e.target.value })} /></td>
       <td className="px-4 py-2.5 text-right"><Button variant="secondary" busy={save.isPending} disabled={!dirty} onClick={() => save.mutate()}>Save</Button></td>
     </tr>
