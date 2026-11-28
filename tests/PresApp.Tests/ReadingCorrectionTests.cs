@@ -156,6 +156,15 @@ public sealed class ReadingCorrectionTests : IClassFixture<TestApp>
         Assert.DoesNotContain((await reader.GetFromJsonAsync<JsonElement>($"/api/units/{unitId}/history?take=1000")).EnumerateArray(), Correction);
         Assert.Contains((await admin.GetFromJsonAsync<JsonElement>($"/api/assets/{id}/history")).EnumerateArray(), Correction);
 
+        // Field Technician records readings but does not see corrections; Engineer does.
+        const string tech = "tech.cor@enermech.com", engineer = "engineer.view.cor@enermech.com";
+        await app.AddUserAsync(tech, RoleNames.FieldTechnician);
+        await app.AddUserAsync(engineer, RoleNames.Engineer);
+        Assert.DoesNotContain((await app.ClientFor(tech).GetFromJsonAsync<JsonElement>($"/api/assets/{id}/history")).EnumerateArray(), Correction);
+        Assert.Contains((await app.ClientFor(engineer).GetFromJsonAsync<JsonElement>($"/api/assets/{id}/history")).EnumerateArray(), Correction);
+        var viewers = await app.WithDbAsync(db => db.Roles.Where(r => r.Permissions.Any(p => p.Permission == Permissions.ReadingsCorrectionsView)).Select(r => r.Name).OrderBy(n => n).ToListAsync());
+        Assert.Equal([RoleNames.Admin, RoleNames.Engineer], viewers);
+
         // The reading itself keeps who entered it and when, as any other.
         var after = Assert.Single(await reader.GetFromJsonAsync<JsonElement>($"/api/assets/{id}/readings").ContinueWith(t => t.Result.EnumerateArray().ToList()));
         Assert.Equal(Utc(reading, "recordedAtUtc"), Utc(after, "recordedAtUtc"));

@@ -153,8 +153,8 @@ public sealed class ReadingCorrection(PresAppDbContext db, AssetQueries queries,
 
     /// <summary>
     /// Saves without the automatic history of the asset's latest values (Pressure 1.1 → 0.9 with no new reading would show
-    /// a change to anyone who reads the history): the only trace is the internal reading row, seen by roles that record
-    /// readings (<see cref="AssetQueries.HistoryAsync"/>).
+    /// a change to anyone who reads the history): the only trace is the internal reading row, seen by roles with
+    /// readings.correctionsView, Engineer and Admin (<see cref="AssetQueries.HistoryAsync"/>).
     /// </summary>
     private async Task SaveInternalAsync(CancellationToken ct)
     {
