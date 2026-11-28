@@ -36,10 +36,10 @@ public class GateFormTemplate
 public static class GateFormDefaults
 {
     /// <summary>Unit settings created once when the unit has none (an admin's later changes, emptying included, are kept).</summary>
-    public static readonly (int UnitNumber, string? MechanicalSource, string? DefaultUnitId)[] Units =
+    public static readonly (int UnitNumber, string? MechanicalSource)[] Units =
     [
-        (39, "DOD-52618-H2-39-69-00-156", null),
-        (541, "DOD-52618-H5-541-69-00-156", "541"),
+        (39, "DOD-52618-H2-39-69-00-156"),
+        (541, "DOD-52618-H5-541-69-00-156"),
     ];
 }
 
@@ -55,13 +55,16 @@ public class GateFormUnitSetting
     /// <summary>Source document of the electrical form. Empty = not known yet.</summary>
     public string? ElectricalSource { get; set; }
 
-    /// <summary>Unit ID printed on forms that have that field (Habshan 5: "541") when the asset has none of its own.</summary>
-    public string? DefaultUnitId { get; set; }
+    /// <summary>
+    /// Documents number of the electrical form, the same for every motor of the unit; each unit has its own
+    /// (Admin → Gate forms). Only the electrical form has this field. Empty = printed as the blank line.
+    /// </summary>
+    public string? ElectricalDocumentsNo { get; set; }
 }
 
 /// <summary>
-/// The values typed for an asset's gate form, kept so the next print starts from them. Section, work pack and unit ID
-/// are stored only when they differ from what the app fills by itself (tag, P&amp;ID number, the unit's Unit ID).
+/// The values typed for an asset's gate form, kept so the next print starts from them. Section and work pack
+/// are stored only when they differ from what the app fills by itself (tag, P&amp;ID number).
 /// </summary>
 public class GateFormEntry : AuditableEntity, IFieldAudited
 {
@@ -73,7 +76,6 @@ public class GateFormEntry : AuditableEntity, IFieldAudited
     public DateOnly? Date { get; set; }
     public string? Section { get; set; }
     public string? WorkPack { get; set; }
-    public string? UnitIdText { get; set; }
 
     Guid? IFieldAudited.AuditAssetId => AssetId;
 }

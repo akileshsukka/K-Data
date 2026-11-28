@@ -1292,10 +1292,6 @@ namespace PresApp.Infrastructure.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<string>("UnitIdText")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -1363,7 +1359,7 @@ namespace PresApp.Infrastructure.Data.Migrations
                     b.Property<int>("UnitId")
                         .HasColumnType("int");
 
-                    b.Property<string>("DefaultUnitId")
+                    b.Property<string>("ElectricalDocumentsNo")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 

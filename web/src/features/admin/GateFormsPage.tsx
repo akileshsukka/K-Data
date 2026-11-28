@@ -18,7 +18,8 @@ const markers: [string, string][] = [
   ["{{DATE}}", "Date, 25/11/2026"],
   ["{{SECTION}}", "Tag or line number (required)"],
   ["{{WORKPACK}}", "Work pack / P&ID rev."],
-  ["{{UNIT_ID}}", "Unit ID"],
+  ["{{DESCRIPTION}}", "Tag description (from the asset)"],
+  ["{{DOCUMENTS_NO}}", "Documents number of the unit (below) · electrical form only"],
 ];
 
 /** Printable gate forms: values of each unit and the Word templates of each plant (versions, sample, built-in). */
@@ -33,11 +34,11 @@ export function GateFormsPage() {
 
       <section className="mt-6 rounded-lg border border-line bg-panel">
         <h2 className="px-5 pt-5 text-xl font-semibold">Values of each unit</h2>
-        <p className="px-5 pt-1 text-muted">Printed on every form of the unit. The electrical form left empty uses the mechanical source (the same source document). A unit without a source can still print its forms, with the source left empty, after a warning.</p>
+        <p className="px-5 pt-1 text-muted">Printed on every form of the unit. The electrical form left empty uses the mechanical source (the same source document). The documents number is only on the electrical form, the same for every motor of the unit. A unit without a source or documents number can still print its forms, with them left empty, after a warning.</p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[52rem] text-left">
             <thead className="text-sm text-muted">
-              <tr>{["Unit", "Source – mechanical form", "Source – electrical form (empty: the mechanical one)", "Unit ID", ""].map((h) => <th key={h} className="border-y border-line px-4 py-2.5 font-semibold">{h}</th>)}</tr>
+              <tr>{["Unit", "Source – mechanical form", "Source – electrical form (empty: the mechanical one)", "Documents number – electrical form", ""].map((h) => <th key={h} className="border-y border-line px-4 py-2.5 font-semibold">{h}</th>)}</tr>
             </thead>
             <tbody>{settings.data?.map((s) => <SettingRow key={s.unitId} s={s} />)}</tbody>
           </table>
@@ -51,7 +52,7 @@ export function GateFormsPage() {
         <p className="mt-1 max-w-4xl text-muted">
           A template is the client's Word form with markers where the app writes the values; everything else (fonts, colours, tables, logo) is printed as it is.
           To change one, download the template in use, edit it in Word, keep the markers and upload it. It is checked and kept as a new version:
-          download its sample, then activate it. Headers and footers can only hold <code>{"{{UNIT}}"}</code> and <code>{"{{SOURCE}}"}</code>.
+          download its sample, then activate it. Headers and footers can only hold <code>{"{{UNIT}}"}</code>, <code>{"{{SOURCE}}"}</code> and, on the electrical form, <code>{"{{DOCUMENTS_NO}}"}</code>.
         </p>
         <dl className="mt-3 grid max-w-3xl grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm">
           {markers.map(([m, d]) => <div key={m} className="contents"><dt><code>{m}</code></dt><dd className="text-muted">{d}</dd></div>)}
@@ -128,10 +129,10 @@ function CodeRow({ c }: { c: RecordNoCode }) {
 function SettingRow({ s }: { s: GateFormUnitSetting }) {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const initial = { mechanicalSource: s.mechanicalSource ?? "", electricalSource: s.electricalSource ?? "", defaultUnitId: s.defaultUnitId ?? "" };
+  const initial = { mechanicalSource: s.mechanicalSource ?? "", electricalSource: s.electricalSource ?? "", electricalDocumentsNo: s.electricalDocumentsNo ?? "" };
   const [v, setV] = useState(initial);
-  useEffect(() => setV({ mechanicalSource: s.mechanicalSource ?? "", electricalSource: s.electricalSource ?? "", defaultUnitId: s.defaultUnitId ?? "" }), [s]);
-  const dirty = v.mechanicalSource !== initial.mechanicalSource || v.electricalSource !== initial.electricalSource || v.defaultUnitId !== initial.defaultUnitId;
+  useEffect(() => setV({ mechanicalSource: s.mechanicalSource ?? "", electricalSource: s.electricalSource ?? "", electricalDocumentsNo: s.electricalDocumentsNo ?? "" }), [s]);
+  const dirty = v.mechanicalSource !== initial.mechanicalSource || v.electricalSource !== initial.electricalSource || v.electricalDocumentsNo !== initial.electricalDocumentsNo;
   const save = useMutation({
     mutationFn: () => api<GateFormUnitSetting>(`/api/gate-forms/settings/${s.unitId}`, { method: "PUT", body: v }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["gate-form-settings"] }); toast(`${s.unitName} saved`); },
@@ -142,7 +143,7 @@ function SettingRow({ s }: { s: GateFormUnitSetting }) {
       <td className="px-4 py-2.5"><span className="font-semibold text-ink">{s.unitName}</span><span className="block text-sm text-muted">{s.plantName}</span></td>
       <td className="px-4 py-2.5"><TextInput value={v.mechanicalSource} placeholder="Not set" onChange={(e) => setV({ ...v, mechanicalSource: e.target.value })} /></td>
       <td className="px-4 py-2.5"><TextInput value={v.electricalSource} placeholder={v.mechanicalSource.trim() ? `Mechanical: ${v.mechanicalSource.trim()}` : "Not set"} title="Left empty, the electrical form prints the mechanical source" onChange={(e) => setV({ ...v, electricalSource: e.target.value })} /></td>
-      <td className="px-4 py-2.5"><TextInput value={v.defaultUnitId} className="w-28" placeholder="—" title="Printed on forms with a Unit ID field when the asset has none of its own" onChange={(e) => setV({ ...v, defaultUnitId: e.target.value })} /></td>
+      <td className="px-4 py-2.5"><TextInput value={v.electricalDocumentsNo} placeholder="Not set" title="Printed on every electrical form of the unit; the mechanical form has no documents number" onChange={(e) => setV({ ...v, electricalDocumentsNo: e.target.value })} /></td>
       <td className="px-4 py-2.5 text-right"><Button variant="secondary" busy={save.isPending} disabled={!dirty} onClick={() => save.mutate()}>Save</Button></td>
     </tr>
   );

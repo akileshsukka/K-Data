@@ -3,19 +3,28 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using PresApp.Domain.GateForms;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace PresApp.Api.GateForms;
 
-/// <summary>A field of the gate form: its marker in the Word template and what is printed when it has no value.</summary>
-public sealed record GateFormMarker(string Name, string Label, bool PerUnit, string Blank);
+/// <summary>
+/// A field of the gate form: its marker in the Word template and what is printed when it has no value. <paramref name="OnlyFor"/>:
+/// the one form that has the field (null: both forms).
+/// </summary>
+public sealed record GateFormMarker(string Name, string Label, bool PerUnit, string Blank, GateFormKind? OnlyFor = null)
+{
+    public bool AppliesTo(GateFormKind kind) => OnlyFor is null || OnlyFor == kind;
+}
 
 /// <summary>
 /// The Word side of the gate forms. A template is the client's form with markers (<c>{{RECORD_NO}}</c>…) where the values go;
 /// everything else (fonts, colours, tables, logo) is copied as it is.
 /// <list type="bullet">
 /// <item>The body is repeated once per asset, each copy starting on a new page.</item>
-/// <item>Headers and footers are shared by every page, so they may only hold the unit's markers (<c>{{UNIT}}</c>, <c>{{SOURCE}}</c>).</item>
+/// <item>Headers and footers are shared by every page, so they may only hold the unit's markers (<c>{{UNIT}}</c>, <c>{{SOURCE}}</c>,
+/// <c>{{DOCUMENTS_NO}}</c>).</item>
+/// <item>A field of one form only (<c>{{DOCUMENTS_NO}}</c>: electrical) is refused in a template of the other form.</item>
 /// <item>A marker may be split by Word into several pieces of text (spelling marks, partial formatting): it is still found,
 /// and the value takes the formatting of its first character.</item>
 /// <item>A field without a value prints the blank line of the client form.</item>
@@ -29,8 +38,8 @@ public static partial class GateFormDocument
     public const string Date = "DATE";
     public const string Section = "SECTION";
     public const string WorkPack = "WORKPACK";
-    public const string UnitId = "UNIT_ID";
     public const string Description = "DESCRIPTION";
+    public const string DocumentsNo = "DOCUMENTS_NO";
 
     public static readonly IReadOnlyList<GateFormMarker> Markers =
     [
@@ -40,8 +49,8 @@ public static partial class GateFormDocument
         new(Date, "Date", false, new string('_', 30)),
         new(Section, "System / circuit / section (tag or line number)", false, new string('_', 18)),
         new(WorkPack, "Work pack / P&ID rev.", false, new string('_', 18)),
-        new(UnitId, "Unit ID", false, new string('_', 18)),
         new(Description, "Tag description", false, new string('_', 18)),
+        new(DocumentsNo, "Documents number of the unit", true, new string('_', 22), GateFormKind.Electrical),
     ];
 
     private static readonly Dictionary<string, GateFormMarker> ByName = Markers.ToDictionary(m => m.Name);
@@ -56,7 +65,8 @@ public static partial class GateFormDocument
     /// <summary>What a template holds. <see cref="Errors"/> not empty = it cannot be used.</summary>
     public sealed record Inspection(List<string> Fields, List<string> Errors, List<string> Notes);
 
-    public static Inspection Inspect(byte[] content)
+    /// <summary>Checks a template of the <paramref name="kind"/> form: a field of the other form only is an error.</summary>
+    public static Inspection Inspect(byte[] content, GateFormKind kind)
     {
         var errors = new List<string>();
         var notes = new List<string>();
@@ -76,14 +86,16 @@ public static partial class GateFormDocument
         }
 
         foreach (var name in bodyMarkers.Concat(sharedMarkers).Distinct().Where(n => !ByName.ContainsKey(n)))
-            errors.Add($"{{{{{name}}}}} is not a known field. Known fields: {string.Join(", ", Markers.Select(m => $"{{{{{m.Name}}}}}"))}.");
+            errors.Add($"{{{{{name}}}}} is not a known field. Known fields: {string.Join(", ", Markers.Where(m => m.AppliesTo(kind)).Select(m => $"{{{{{m.Name}}}}}"))}.");
+        foreach (var name in bodyMarkers.Concat(sharedMarkers).Distinct().Where(n => ByName.TryGetValue(n, out var m) && !m.AppliesTo(kind)))
+            errors.Add($"{{{{{name}}}}} is a field of the {ByName[name].OnlyFor!.Value.ToString().ToLowerInvariant()} form only, not of this one.");
         foreach (var name in sharedMarkers.Distinct().Where(n => ByName.TryGetValue(n, out var m) && !m.PerUnit))
-            errors.Add($"{{{{{name}}}}} is in a header or footer, which every page shares: only {{{{{Unit}}}}} and {{{{{Source}}}}} can go there.");
+            errors.Add($"{{{{{name}}}}} is in a header or footer, which every page shares: only {string.Join(", ", Markers.Where(m => m.PerUnit && m.AppliesTo(kind)).Select(m => $"{{{{{m.Name}}}}}"))} can go there.");
         if (!bodyMarkers.Contains(Section))
             errors.Add($"{{{{{Section}}}}} is missing: it is where the tag or line number of each asset goes.");
 
         var all = bodyMarkers.Concat(sharedMarkers).ToHashSet();
-        foreach (var m in Markers.Where(m => m.Name != Section && !all.Contains(m.Name)))
+        foreach (var m in Markers.Where(m => m.Name != Section && m.AppliesTo(kind) && !all.Contains(m.Name)))
             notes.Add($"No {{{{{m.Name}}}}}: {m.Label} is not printed by the app.");
 
         var fields = Markers.Select(m => m.Name).Where(all.Contains).ToList();
@@ -110,7 +122,7 @@ public static partial class GateFormDocument
 
     /// <summary>
     /// The filled document: one copy of the template body per page, in order. <paramref name="unit"/> holds the values shared by
-    /// every page (unit, source); each page holds its own. A missing or empty value prints the field's blank line.
+    /// every page (unit, source, documents number); each page holds its own. A missing or empty value prints the field's blank line.
     /// </summary>
     public static byte[] Fill(byte[] template, IReadOnlyDictionary<string, string?> unit, IReadOnlyList<IReadOnlyDictionary<string, string?>> pages)
     {

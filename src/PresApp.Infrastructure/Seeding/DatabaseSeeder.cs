@@ -211,16 +211,16 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
         }
     }
 
-    /// <summary>Source references and Unit ID known when the gate forms were added; only for units without settings yet.</summary>
+    /// <summary>Source references known when the gate forms were added; only for units without settings yet.</summary>
     private async Task SeedGateFormSettingsAsync(CancellationToken ct)
     {
         var withSettings = await db.GateFormUnitSettings.Select(s => s.UnitId).ToListAsync(ct);
         var units = await db.Units.Select(u => new { u.Id, u.Number }).ToListAsync(ct);
-        foreach (var (number, source, unitIdText) in GateFormDefaults.Units)
+        foreach (var (number, source) in GateFormDefaults.Units)
         {
             var unit = units.FirstOrDefault(u => u.Number == number);
             if (unit is null || withSettings.Contains(unit.Id)) continue;
-            db.GateFormUnitSettings.Add(new GateFormUnitSetting { UnitId = unit.Id, MechanicalSource = source, DefaultUnitId = unitIdText });
+            db.GateFormUnitSettings.Add(new GateFormUnitSetting { UnitId = unit.Id, MechanicalSource = source });
         }
         await db.SaveChangesAsync(ct);
     }

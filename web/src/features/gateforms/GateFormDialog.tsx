@@ -7,7 +7,7 @@ import { Dialog } from "../../components/Dialog";
 import { TextInput } from "../../components/Field";
 import { useToast } from "../../components/Toast";
 
-type Editable = Pick<GateFormRow, "assetId" | "recordNo" | "date" | "section" | "workPack" | "unitId">;
+type Editable = Pick<GateFormRow, "assetId" | "recordNo" | "date" | "section" | "workPack">;
 
 const titles: Record<GateFormKind, string> = {
   Mechanical: "Gate verification forms",
@@ -34,14 +34,14 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
     refetchOnReconnect: false,
   });
   const [rows, setRows] = useState<Editable[]>([]);
-  const [all, setAll] = useState({ date: "", workPack: "", unitId: "" });
+  const [all, setAll] = useState({ date: "", workPack: "" });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (prepared.data) setRows(prepared.data.rows.map(({ assetId, recordNo, date, section, workPack, unitId }) => ({ assetId, recordNo, date, section, workPack, unitId })));
+    if (prepared.data) setRows(prepared.data.rows.map(({ assetId, recordNo, date, section, workPack }) => ({ assetId, recordNo, date, section, workPack })));
   }, [prepared.data]);
   useEffect(() => {
-    if (!open) setAll({ date: "", workPack: "", unitId: "" });
+    if (!open) setAll({ date: "", workPack: "" });
   }, [open]);
 
   const data = prepared.data;
@@ -49,18 +49,23 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
   const info = new Map(data?.rows.map((r) => [r.assetId, r]));
   // Labels follow the fields of the template (an uploaded one may differ from the built-in form of its kind).
   const sectionLabel = has("DESCRIPTION") ? "Equipment Tag Number" : "System / circuit / section";
+  // Unit values the template prints but Admin → Gate forms does not have yet.
+  const missing = [
+    ...(has("SOURCE") && !data?.source ? ["source document"] : []),
+    ...(has("DOCUMENTS_NO") && !data?.documentsNo ? ["documents number"] : []),
+  ].join(" and ");
 
   function update(i: number, patch: Partial<Editable>) {
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
   }
-  function applyToAll(key: "date" | "workPack" | "unitId") {
+  function applyToAll(key: "date" | "workPack") {
     const value = all[key].trim() || null;
     setRows((prev) => prev.map((r) => ({ ...r, [key]: value })));
   }
 
   const body = () => ({
     kind,
-    rows: rows.map((r) => ({ ...r, recordNo: r.recordNo?.trim() || null, date: r.date || null, workPack: r.workPack || null, unitId: r.unitId || null })),
+    rows: rows.map((r) => ({ ...r, recordNo: r.recordNo?.trim() || null, date: r.date || null, workPack: r.workPack || null })),
   });
   const done = () => {
     queryClient.invalidateQueries({ queryKey: ["gate-form-prepare"] });
@@ -70,8 +75,8 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
 
   async function generate() {
     if (!data) return;
-    if (has("SOURCE") && !data.source
-      && !window.confirm(`The source document of this unit is not set (Admin → Gate forms). The forms will be printed with the source left empty.\n\nGenerate anyway?`)) return;
+    if (missing
+      && !window.confirm(`The ${missing} of this unit ${missing.includes(" and ") ? "are" : "is"} not set (Admin → Gate forms). The forms will be printed with ${missing.includes(" and ") ? "them" : "it"} left empty.\n\nGenerate anyway?`)) return;
     setBusy(true);
     try {
       const name = await download(`/api/units/${unitId}/gate-forms/generate`, body());
@@ -109,9 +114,12 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
             {!data.canSave && " Your role cannot save these values: they are used for this file only."}
           </p>
 
-          {has("SOURCE") && !data.source && (
+          {has("DOCUMENTS_NO") && data.documentsNo && (
+            <p className="text-muted">Documents number of the unit: <span className="font-semibold text-ink">{data.documentsNo}</span> (Admin → Gate forms).</p>
+          )}
+          {missing && (
             <p className="rounded-md border border-ongoing/40 bg-ongoing/10 px-3 py-2 text-ongoing">
-              The source document of this unit is not set yet (Admin → Gate forms): it will be printed empty.
+              The {missing} of this unit {missing.includes(" and ") ? "are" : "is"} not set yet (Admin → Gate forms): {missing.includes(" and ") ? "they" : "it"} will be printed empty.
             </p>
           )}
           {data.skipped.length > 0 && (
@@ -129,16 +137,14 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
             <>
               <div className="flex flex-wrap items-end gap-3 rounded-md bg-violet-soft/40 p-3">
                 <AllField label="Date for all" type="date" value={all.date} onChange={(v) => setAll({ ...all, date: v })} onApply={() => applyToAll("date")} />
-                {has("WORKPACK") && <AllField label="Work pack / P&ID rev. for all" value={all.workPack} onChange={(v) => setAll({ ...all, workPack: v })} onApply={() => applyToAll("workPack")} />}
-                {has("UNIT_ID") && <AllField label="Unit ID for all" value={all.unitId} onChange={(v) => setAll({ ...all, unitId: v })} onApply={() => applyToAll("unitId")} />}
-              </div>
+                {has("WORKPACK") && <AllField label="Work pack / P&ID rev. for all" value={all.workPack} onChange={(v) => setAll({ ...all, workPack: v })} onApply={() => applyToAll("workPack")} />}              </div>
 
               <div className="max-h-[55vh] overflow-auto rounded-md border border-line">
                 <table className="w-full min-w-[56rem] text-left text-sm">
                   <thead className="sticky top-0 bg-panel text-muted">
                     <tr>
                       {["Asset", has("RECORD_NO") ? "Record No." : "Record No. (not printed)", "Date", sectionLabel, ...(has("DESCRIPTION") ? ["Tag Description"] : []),
-                        ...(has("WORKPACK") ? ["Work pack / P&ID rev."] : []), ...(has("UNIT_ID") ? ["Unit ID"] : [])]
+                        ...(has("WORKPACK") ? ["Work pack / P&ID rev."] : [])]
                         .map((h) => <th key={h} className="border-b border-line px-2 py-2 font-semibold">{h}</th>)}
                     </tr>
                   </thead>
@@ -165,9 +171,7 @@ export function GateFormDialog({ open, onClose, unitId, kind, assetIds }: { open
                               <span className="block min-h-9 max-w-64 py-2 text-muted" title="Taken from the asset (edit it in the register)">{a.description || "— (blank line)"}</span>
                             </td>
                           )}
-                          {has("WORKPACK") && <td className="px-2 py-1.5"><Cell value={r.workPack} onChange={(v) => update(i, { workPack: v })} placeholder={a.workPackDefault ?? "Paste here"} /></td>}
-                          {has("UNIT_ID") && <td className="px-2 py-1.5"><Cell value={r.unitId} onChange={(v) => update(i, { unitId: v })} placeholder={a.unitIdDefault ?? ""} /></td>}
-                        </tr>
+                          {has("WORKPACK") && <td className="px-2 py-1.5"><Cell value={r.workPack} onChange={(v) => update(i, { workPack: v })} placeholder={a.workPackDefault ?? "Paste here"} /></td>}                        </tr>
                       );
                     })}
                   </tbody>
