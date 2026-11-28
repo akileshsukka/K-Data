@@ -72,6 +72,7 @@ export const Perm = {
   historySource: "history.source",
   readingsWrite: "readings.write",
   readingsCorrect: "readings.correct",
+  readingsCorrectionsView: "readings.correctionsView",
   gatesEdit: "gates.edit",
   assetsEdit: "assets.edit",
   assetsMarkPreserved: "assets.markPreserved",

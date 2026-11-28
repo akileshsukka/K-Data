@@ -135,7 +135,7 @@ export function ReadingsTab({ asset, onProposals }: { asset: AssetProfile; onPro
 
 /**
  * Admin correction of a reading typed with a wrong date or value, or removal of one entered by mistake.
- * The reading as it was and the reason stay in the asset history (internal: only roles that record readings see it).
+ * The reading as it was and the reason stay in the asset history (internal: only Engineer and Admin see it).
  */
 function CorrectReadingDialog({ assetId, reading, onClose }: { assetId: string; reading: Reading; onClose: () => void }) {
   const correct = useCorrectReading(assetId);
@@ -188,7 +188,7 @@ function CorrectReadingDialog({ assetId, reading, onClose }: { assetId: string; 
         <p className="text-sm text-muted">
           Entered by {reading.recordedBy} on {formatDateTime(reading.recordedAtUtc)}: {reading.value}
           {reading.unitOfMeasure ? ` ${reading.unitOfMeasure}` : ""} measured {formatDateTime(reading.measuredAtUtc)}. The reading as it is now and
-          the reason stay in the asset history, seen only by roles that record readings. It cannot be dated after it was entered.
+          the reason stay in the asset history, seen only by Engineer and Admin. It cannot be dated after it was entered.
         </p>
         <Field label="Measured at (Dubai time)">
           <TextInput type="datetime-local" value={measuredAt} max={utcToDubaiLocal(reading.recordedAtUtc)} onChange={(e) => setMeasuredAt(e.target.value)} required />

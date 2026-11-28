@@ -23,7 +23,7 @@ internal static class SeedData
         (RoleNames.Engineer, "Full preservation editing and bulk edit",
             [Permissions.AssetsView, Permissions.HistoryView, Permissions.GroupsView, Permissions.DocumentsView, Permissions.DocumentsUpload,
              Permissions.ExcelExport, Permissions.ReadingsWrite,
-             Permissions.GatesEdit, Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit, Permissions.LinesNonStandard, Permissions.ReportHighlights]),
+             Permissions.GatesEdit, Permissions.AssetsEdit, Permissions.AssetsMarkPreserved, Permissions.BulkEdit, Permissions.LinesNonStandard, Permissions.ReportHighlights, Permissions.ReadingsCorrectionsView]),
         (RoleNames.Admin, "Everything, including Excel uploads, Simpro, lists and users",
             Permissions.All.Select(p => p.Key).ToArray()),
     ];

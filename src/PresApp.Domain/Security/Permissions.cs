@@ -15,6 +15,7 @@ public static class Permissions
     public const string ExcelExport = "excel.export";
     public const string ReadingsWrite = "readings.write";
     public const string ReadingsCorrect = "readings.correct";
+    public const string ReadingsCorrectionsView = "readings.correctionsView";
     public const string GatesEdit = "gates.edit";
     public const string AssetsEdit = "assets.edit";
     public const string AssetsMarkPreserved = "assets.markPreserved";
@@ -44,6 +45,7 @@ public static class Permissions
         new(ExcelExport, "Download a unit Excel"),
         new(ReadingsWrite, "Record monitoring readings"),
         new(ReadingsCorrect, "Correct the date or value of a monitoring reading, or remove it (the reading before and the reason stay in the history). Admin only by default"),
+        new(ReadingsCorrectionsView, "See the corrections and removals of readings in the history (internal: never shown to the client). Engineer and Admin by default"),
         new(GatesEdit, "Edit gate statuses and comments"),
         new(AssetsEdit, "Edit all other fields and gate documentation"),
         new(AssetsMarkPreserved, "Mark an asset as preserved"),

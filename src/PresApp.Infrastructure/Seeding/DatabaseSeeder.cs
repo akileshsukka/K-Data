@@ -78,6 +78,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
     /// <item>documents.delete: Admin only (added by the Admin rule).</item>
     /// <item>lines.nonStandard: Engineer (Admin gets it by the Admin rule).</item>
     /// <item>report.highlights: every role that can edit gates or other fields.</item>
+    /// <item>readings.correctionsView: Engineer (Admin gets it by the Admin rule); not Field Technician.</item>
     /// </list>
     /// </summary>
     private async Task GrantNewPermissionsOnceAsync(CancellationToken ct)
@@ -91,6 +92,7 @@ public sealed class DatabaseSeeder(PresAppDbContext db, ILogger<DatabaseSeeder> 
             (Permissions.DocumentsUpload, r => Has(r, Permissions.GatesEdit) || Has(r, Permissions.AssetsEdit)),
             (Permissions.LinesNonStandard, r => r.Name == RoleNames.Engineer),
             (Permissions.ReportHighlights, r => Has(r, Permissions.GatesEdit) || Has(r, Permissions.AssetsEdit)),
+            (Permissions.ReadingsCorrectionsView, r => r.Name == RoleNames.Engineer),
         };
         var roles = await db.Roles.Include(r => r.Permissions).ToListAsync(ct);
         foreach (var (permission, gets) in grants)

@@ -124,8 +124,8 @@ public static class AssetEndpoints
         WithSourceOnly(user.HasPermission(Permissions.LinesNonStandard) ? entries
             : entries.Where(e => e.Field is not (nameof(PipelineDetail.NonStandardNumber) or nameof(PipelineDetail.NumberNote))).ToList(), user);
 
-    /// <summary>Reading corrections are internal: only roles that record readings (engineers, admins…) see them in the history.</summary>
-    private static bool ReadingCorrections(ClaimsPrincipal user) => user.HasPermission(Permissions.ReadingsWrite);
+    /// <summary>Reading corrections are internal: only roles with readings.correctionsView (Engineer, Admin) see them in the history.</summary>
+    private static bool ReadingCorrections(ClaimsPrincipal user) => user.HasPermission(Permissions.ReadingsCorrectionsView);
 
     private static List<HistoryEntry> WithSourceOnly(List<HistoryEntry> entries, ClaimsPrincipal user) =>
         user.HasPermission(Permissions.HistorySource) ? entries : entries.Select(e => e with { Source = null }).ToList();
