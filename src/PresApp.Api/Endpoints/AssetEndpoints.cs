@@ -21,7 +21,7 @@ public static class AssetEndpoints
         view.MapGet("/units/{unitId:int}/summary", (int unitId, AssetQueries q, CancellationToken ct) => q.SummaryAsync(unitId, ct));
 
         view.MapGet("/units/{unitId:int}/history", async (int unitId, DateTime? before, int? take, ClaimsPrincipal user, AssetQueries q, CancellationToken ct) =>
-            WithSource(await q.HistoryAsync(null, unitId, before, take ?? 200, ct), user)).RequirePermission(Permissions.HistoryView);
+            WithSource(await q.HistoryAsync(null, unitId, before, take ?? 200, ct, ReadingCorrections(user)), user)).RequirePermission(Permissions.HistoryView);
 
         view.MapGet("/assets/search", (string q, int? unitId, string? type, int? take, AssetQueries queries, CancellationToken ct) =>
             queries.SearchAsync(q, unitId, ParseType(type), take ?? 20, ct));
@@ -29,7 +29,7 @@ public static class AssetEndpoints
         view.MapGet("/assets/{id:guid}", (Guid id, AssetQueries q, CancellationToken ct) => q.ProfileAsync(id, ct));
 
         view.MapGet("/assets/{id:guid}/history", async (Guid id, DateTime? before, int? take, ClaimsPrincipal user, AssetQueries q, CancellationToken ct) =>
-            WithSource(await q.HistoryAsync(id, null, before, take ?? 300, ct), user)).RequirePermission(Permissions.HistoryView);
+            WithSource(await q.HistoryAsync(id, null, before, take ?? 300, ct, ReadingCorrections(user)), user)).RequirePermission(Permissions.HistoryView);
 
         view.MapGet("/assets/{id:guid}/readings", (Guid id, AssetEditor e, CancellationToken ct) => e.ReadingsAsync(id, ct));
 
@@ -54,6 +54,12 @@ public static class AssetEndpoints
 
         app.MapPost("/api/assets/{id:guid}/readings", (Guid id, AddReadingsRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
             e.AddReadingsAsync(id, request, user, ct)).RequirePermission(Permissions.ReadingsWrite);
+
+        // Correction of a reading entered with a wrong date or value, or removal of one entered by mistake (Admin only by default).
+        app.MapPut("/api/assets/{id:guid}/readings/{readingId:long}", (Guid id, long readingId, CorrectReadingRequest request, ReadingCorrection c, CancellationToken ct) =>
+            c.CorrectAsync(id, readingId, request, ct)).RequirePermission(Permissions.ReadingsCorrect);
+        app.MapPost("/api/assets/{id:guid}/readings/{readingId:long}/remove", (Guid id, long readingId, RemoveReadingRequest request, ReadingCorrection c, CancellationToken ct) =>
+            c.RemoveAsync(id, readingId, request, ct)).RequirePermission(Permissions.ReadingsCorrect);
 
         app.MapPost("/api/assets", async (CreateAssetRequest request, ClaimsPrincipal user, AssetEditor e, CancellationToken ct) =>
         {
@@ -117,6 +123,9 @@ public static class AssetEndpoints
     private static List<HistoryEntry> WithSource(List<HistoryEntry> entries, ClaimsPrincipal user) =>
         WithSourceOnly(user.HasPermission(Permissions.LinesNonStandard) ? entries
             : entries.Where(e => e.Field is not (nameof(PipelineDetail.NonStandardNumber) or nameof(PipelineDetail.NumberNote))).ToList(), user);
+
+    /// <summary>Reading corrections are internal: only roles that record readings (engineers, admins…) see them in the history.</summary>
+    private static bool ReadingCorrections(ClaimsPrincipal user) => user.HasPermission(Permissions.ReadingsWrite);
 
     private static List<HistoryEntry> WithSourceOnly(List<HistoryEntry> entries, ClaimsPrincipal user) =>
         user.HasPermission(Permissions.HistorySource) ? entries : entries.Select(e => e with { Source = null }).ToList();

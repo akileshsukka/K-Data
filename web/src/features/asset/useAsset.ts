@@ -111,6 +111,26 @@ export function useAddReadings(id: string) {
   );
 }
 
+/** Correction of a reading (date and/or value) by a role with readings.correct; the reason stays in the history. */
+export function useCorrectReading(id: string) {
+  return useAssetMutation(
+    id,
+    ({ readingId, ...body }: { readingId: number; measuredAtUtc: string; value: number; reason: string; expected: { measuredAtUtc: string; value: number } }) =>
+      api<AssetProfile>(`/api/assets/${id}/readings/${readingId}`, { method: "PUT", body }),
+    (r) => r,
+  );
+}
+
+/** Removal of a reading entered by mistake (readings.correct); the reading and the reason stay in the history. */
+export function useRemoveReading(id: string) {
+  return useAssetMutation(
+    id,
+    ({ readingId, ...body }: { readingId: number; reason: string; expected: { measuredAtUtc: string; value: number } }) =>
+      api<AssetProfile>(`/api/assets/${id}/readings/${readingId}/remove`, { method: "POST", body }),
+    (r) => r,
+  );
+}
+
 export function useSetActive(id: string) {
   return useAssetMutation(id, (active: boolean) => api<AssetProfile>(`/api/assets/${id}/active?active=${active}`, { method: "POST" }), (r) => r);
 }

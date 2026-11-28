@@ -71,6 +71,7 @@ export const Perm = {
   excelPage: "excel.page",
   historySource: "history.source",
   readingsWrite: "readings.write",
+  readingsCorrect: "readings.correct",
   gatesEdit: "gates.edit",
   assetsEdit: "assets.edit",
   assetsMarkPreserved: "assets.markPreserved",

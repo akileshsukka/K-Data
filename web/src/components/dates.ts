@@ -41,3 +41,9 @@ export function nowDubaiLocal(): string {
 export function dubaiLocalToUtc(local: string): string {
   return new Date(`${local}:00+04:00`).toISOString();
 }
+
+/** A UTC timestamp from the API as a Dubai local "yyyy-MM-ddTHH:mm" for <input type="datetime-local"> (Dubai is UTC+4). */
+export function utcToDubaiLocal(utc: string): string {
+  const d = new Date(asUtc(utc).getTime() + 4 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 16);
+}
