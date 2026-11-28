@@ -884,7 +884,7 @@ export interface PipingTemplateInfo {
 export type GateFormKind = "Mechanical" | "Electrical";
 
 /** Field markers a gate form template can hold (server: GateFormDocument). */
-export type GateFormField = "UNIT" | "SOURCE" | "RECORD_NO" | "DATE" | "SECTION" | "WORKPACK" | "UNIT_ID" | "DESCRIPTION";
+export type GateFormField = "UNIT" | "SOURCE" | "RECORD_NO" | "DATE" | "SECTION" | "WORKPACK" | "DESCRIPTION" | "DOCUMENTS_NO";
 
 export interface GateFormRow {
   assetId: string;
@@ -898,8 +898,6 @@ export interface GateFormRow {
   sectionDefault: string;
   workPack: string | null;
   workPackDefault: string | null;
-  unitId: string | null;
-  unitIdDefault: string | null;
   /** Record No. the asset gets when printed with the field empty; null = typed by hand only. */
   recordNoNext: string | null;
 }
@@ -910,6 +908,8 @@ export interface GateFormPrepared {
   isBuiltIn: boolean;
   fields: GateFormField[];
   source: string | null;
+  /** Documents number of the unit (electrical form only). */
+  documentsNo: string | null;
   canSave: boolean;
   rows: GateFormRow[];
   skipped: { code: string; tag: string | null; reason: string }[];
@@ -941,7 +941,8 @@ export interface GateFormUnitSetting {
   plantName: string;
   mechanicalSource: string | null;
   electricalSource: string | null;
-  defaultUnitId: string | null;
+  /** Documents number printed on every electrical form of the unit. */
+  electricalDocumentsNo: string | null;
 }
 
 export interface GateFormTemplateVersion {

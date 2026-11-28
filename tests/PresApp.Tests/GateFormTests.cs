@@ -26,13 +26,13 @@ public sealed class GateFormTests : IClassFixture<TestApp>
 
     [Theory]
     [InlineData(GateFormKind.Mechanical, "GateForm_WorkPack.docx", new[] { "UNIT", "SOURCE", "RECORD_NO", "DATE", "SECTION", "WORKPACK" })]
-    // The signed client form: Equipment Tag Number, Date, Tag Description, Documents number (filled by hand); no Record No.
-    [InlineData(GateFormKind.Electrical, "GateForm_Electrical.docx", new[] { "UNIT", "SOURCE", "DATE", "SECTION", "DESCRIPTION" })]
+    // The signed client form: Equipment Tag Number, Date, Tag Description, Documents number (of the unit); no Record No.
+    [InlineData(GateFormKind.Electrical, "GateForm_Electrical.docx", new[] { "UNIT", "SOURCE", "DATE", "SECTION", "DESCRIPTION", "DOCUMENTS_NO" })]
     public void Built_in_templates_hold_every_field_of_the_client_form(GateFormKind kind, string resource, string[] fields)
     {
         var (name, content) = GateFormService.BuiltIn(kind);
         Assert.Equal(resource, name);
-        var check = GateFormDocument.Inspect(content);
+        var check = GateFormDocument.Inspect(content, kind);
         Assert.Empty(check.Errors);
         Assert.Equal(fields, check.Fields);
     }
@@ -53,8 +53,8 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal("39-00-30-201, 39-00-30-202", rows[1].GetProperty("workPack").GetString());
 
         var doc = await GenerateAsync(admin, unitId, "Mechanical",
-            new { assetId = vessel, recordNo = "REC-7", date = "2026-11-25", section = "39-V-901 / circuit 2", workPack = "WP-12 rev B", unitId = (string?)null },
-            new { assetId = line, recordNo = (string?)null, date = (string?)null, section = rows[1].GetProperty("section").GetString(), workPack = rows[1].GetProperty("workPack").GetString(), unitId = (string?)null });
+            new { assetId = vessel, recordNo = "REC-7", date = "2026-11-25", section = "39-V-901 / circuit 2", workPack = "WP-12 rev B" },
+            new { assetId = line, recordNo = (string?)null, date = (string?)null, section = rows[1].GetProperty("section").GetString(), workPack = rows[1].GetProperty("workPack").GetString() });
 
         Assert.Equal(2, doc.Pages.Count);
         Assert.Contains("UNIT 39 PRESERVATION CHECKLISTS AND ITRs", doc.Header);
@@ -97,9 +97,9 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var prepared = await PrepareAsync(admin, unitId, "Mechanical", line);
         var fields = prepared.GetProperty("fields").EnumerateArray().Select(f => f.GetString()).ToList();
         Assert.Contains("WORKPACK", fields);
-        Assert.DoesNotContain("UNIT_ID", fields);
+        Assert.DoesNotContain("DOCUMENTS_NO", fields);
 
-        var doc = await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+        var doc = await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null });
 
         Assert.Single(doc.Pages);
         Assert.Contains("UNIT 541 PRESERVATION", doc.Header);
@@ -119,14 +119,14 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var vessel = await CreateAsync(unitId, "Equipment", "Static", "42-V-901");
 
         var prepared = await PrepareAsync(admin, unitId, "Electrical", motor, bare, analyser, vessel);
-        Assert.Equal(["UNIT", "SOURCE", "DATE", "SECTION", "DESCRIPTION"], prepared.GetProperty("fields").EnumerateArray().Select(f => f.GetString()));
+        Assert.Equal(["UNIT", "SOURCE", "DATE", "SECTION", "DESCRIPTION", "DOCUMENTS_NO"], prepared.GetProperty("fields").EnumerateArray().Select(f => f.GetString()));
         Assert.Equal(2, prepared.GetProperty("rows").GetArrayLength());
         Assert.Equal(2, prepared.GetProperty("skipped").GetArrayLength());
 
         var doc = await GenerateAsync(admin, unitId, "Electrical",
-            new { assetId = motor, recordNo = "E-1", date = "2026-11-25", section = (string?)null, workPack = (string?)null, unitId = (string?)null },
-            new { assetId = bare, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null },
-            new { assetId = analyser, recordNo = "E-2", date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+            new { assetId = motor, recordNo = "E-1", date = "2026-11-25", section = (string?)null, workPack = (string?)null },
+            new { assetId = bare, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null },
+            new { assetId = analyser, recordNo = "E-2", date = (string?)null, section = (string?)null, workPack = (string?)null });
         Assert.Equal(2, doc.Pages.Count);
         Assert.Contains("UNIT 42 PRESERVATION", doc.Header);
         Assert.Contains("Printable section acceptance gate for Electrical motors", doc.Pages[0]);
@@ -135,7 +135,8 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Contains("Equipment Tag Number 42-PM-901", doc.Pages[0]);
         Assert.Contains("Date 25/11/2026", doc.Pages[0]);
         Assert.Contains("Tag Description Item 42-PM-901", doc.Pages[0]);
-        Assert.Contains("Documents number ___", doc.Pages[0]);
+        // Unit 42 has no documents number: the blank line of the form.
+        Assert.Contains("Documents number ______________________", doc.Pages[0]);
         // No description: the blank line of the form.
         Assert.Contains("Equipment Tag Number 42-PM-902", doc.Pages[1]);
         Assert.Contains("Tag Description __________________", doc.Pages[1]);
@@ -159,9 +160,9 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     {
         var unitId = await UnitAsync("Unit 31");
         var motor = await CreateAsync(unitId, "ElectricalInstrument", "Electrical", "31-PM-901");
-        var row = new { assetId = motor, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null };
+        var row = new { assetId = motor, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null };
         async Task SetAsync(string? mechanical, string? electrical) =>
-            (await admin.PutAsJsonAsync($"/api/gate-forms/settings/{unitId}", new { mechanicalSource = mechanical, electricalSource = electrical, defaultUnitId = (string?)null })).EnsureSuccessStatusCode();
+            (await admin.PutAsJsonAsync($"/api/gate-forms/settings/{unitId}", new { mechanicalSource = mechanical, electricalSource = electrical, electricalDocumentsNo = (string?)null })).EnsureSuccessStatusCode();
 
         // Neither: empty.
         await SetAsync(null, null);
@@ -182,6 +183,62 @@ public sealed class GateFormTests : IClassFixture<TestApp>
     }
 
     [Fact]
+    public async Task Documents_number_is_set_per_unit_and_printed_on_every_electrical_page_only()
+    {
+        var unit39 = await UnitAsync("Unit 39");
+        var unit541 = await UnitAsync("Unit 541");
+        var motors = new[] { await CreateAsync(unit39, "ElectricalInstrument", "Electrical", "39-PM-961"), await CreateAsync(unit39, "ElectricalInstrument", "Electrical", "39-PM-962") };
+        var motor541 = await CreateAsync(unit541, "ElectricalInstrument", "Electrical", "541-PM-961");
+        var vessel = await CreateAsync(unit39, "Equipment", "Static", "39-V-961");
+        object Row(Guid id) => new { assetId = id, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null };
+
+        // No value in the code: a unit starts without one.
+        var settings = await admin.GetFromJsonAsync<JsonElement>("/api/gate-forms/settings");
+        Assert.All(settings.EnumerateArray(), s => Assert.Equal(JsonValueKind.Null, s.GetProperty("electricalDocumentsNo").ValueKind));
+
+        var saved = await admin.PutAsJsonAsync($"/api/gate-forms/settings/{unit39}",
+            new { mechanicalSource = "DOD-52618-H2-39-69-00-156", electricalSource = (string?)null, electricalDocumentsNo = "  5231-039-1631-014 " });
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync());
+        Assert.Equal("5231-039-1631-014", (await saved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("electricalDocumentsNo").GetString());
+        try
+        {
+            Assert.Equal("5231-039-1631-014", (await PrepareAsync(admin, unit39, "Electrical", motors)).GetProperty("documentsNo").GetString());
+            var doc = await GenerateAsync(admin, unit39, "Electrical", Row(motors[0]), Row(motors[1]));
+            Assert.Equal(2, doc.Pages.Count);
+            Assert.All(doc.Pages, p => Assert.Contains("Documents number 5231-039-1631-014", p));
+
+            // Each unit has its own: 541 has none yet, so the blank line.
+            Assert.Equal(JsonValueKind.Null, (await PrepareAsync(admin, unit541, "Electrical", motor541)).GetProperty("documentsNo").ValueKind);
+            Assert.Contains("Documents number ______________________", (await GenerateAsync(admin, unit541, "Electrical", Row(motor541))).Pages[0]);
+
+            // The mechanical form (static, rotating, piping) has no documents number.
+            var mechanical = await PrepareAsync(admin, unit39, "Mechanical", vessel);
+            Assert.Equal(JsonValueKind.Null, mechanical.GetProperty("documentsNo").ValueKind);
+            var page = (await GenerateAsync(admin, unit39, "Mechanical", Row(vessel))).Pages[0];
+            Assert.DoesNotContain("Documents number", page);
+            Assert.DoesNotContain("5231-039-1631-014", page);
+        }
+        finally
+        {
+            (await admin.PutAsJsonAsync($"/api/gate-forms/settings/{unit39}",
+                new { mechanicalSource = "DOD-52618-H2-39-69-00-156", electricalSource = (string?)null, electricalDocumentsNo = (string?)null })).EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
+    public async Task Documents_number_marker_is_refused_in_a_mechanical_template()
+    {
+        var plantId = await app.WithDbAsync(db => db.Units.Where(u => u.Name == "Unit 39").Select(u => u.PlantId).FirstAsync());
+        var (_, builtIn) = GateFormService.BuiltIn(GateFormKind.Mechanical);
+        var withDocumentsNo = Edit(builtIn, body => body.Descendants<Text>().First(t => t.Text == "Record No. {{RECORD_NO}}").Text = "Record No. {{RECORD_NO}} {{DOCUMENTS_NO}}");
+        Assert.Contains("{{DOCUMENTS_NO}} is a field of the electrical form only", await ErrorAsync(await UploadAsync(plantId, withDocumentsNo, "mech.docx")));
+
+        // A template with the old {{UNIT_ID}} is no longer valid.
+        var withUnitId = Edit(builtIn, body => body.Descendants<Text>().First(t => t.Text == "Record No. {{RECORD_NO}}").Text = "Record No. {{RECORD_NO}} {{UNIT_ID}}");
+        Assert.Contains("{{UNIT_ID}} is not a known field", await ErrorAsync(await UploadAsync(plantId, withUnitId, "unitid.docx")));
+    }
+
+    [Fact]
     public async Task Unit_541_motor_prints_the_electrical_form_with_the_mechanical_source_and_takes_its_record_no()
     {
         var unitId = await UnitAsync("Unit 541");
@@ -191,7 +248,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         Assert.Equal("DOD-52618-H5-541-69-00-156", prepared.GetProperty("source").GetString());
         Assert.StartsWith("ITR-541-ELEC-", prepared.GetProperty("rows")[0].GetProperty("recordNoNext").GetString());
 
-        var doc = await GenerateAsync(admin, unitId, "Electrical", new { assetId = motor, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+        var doc = await GenerateAsync(admin, unitId, "Electrical", new { assetId = motor, recordNo = (string?)null, date = (string?)null, section = (string?)null, workPack = (string?)null });
         Assert.Single(doc.Pages);
         Assert.Contains("UNIT 541 PRESERVATION", doc.Header);
         Assert.Contains("Form ELECTRICAL GATE | Source: DOD-52618-H5-541-69-00-156 Rev 01", doc.Pages[0]);
@@ -229,7 +286,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var vessel = await CreateAsync(unitId, "Equipment", "Static", "31-V-901");
 
         Assert.False((await PrepareAsync(viewer, unitId, "Mechanical", vessel)).GetProperty("canSave").GetBoolean());
-        var doc = await GenerateAsync(viewer, unitId, "Mechanical", new { assetId = vessel, recordNo = "R-1", date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+        var doc = await GenerateAsync(viewer, unitId, "Mechanical", new { assetId = vessel, recordNo = "R-1", date = (string?)null, section = (string?)null, workPack = (string?)null });
         Assert.Contains("Record No. R-1", doc.Pages[0]);
         Assert.False(await app.WithDbAsync(db => db.GateFormEntries.AnyAsync(e => e.AssetId == vessel)));
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync("/api/gate-forms/templates")).StatusCode);
@@ -257,7 +314,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
 
         // Not active yet: the forms still use the built-in template. The sample shows the new one.
         var vessel = await CreateAsync(unitId, "Equipment", "Static", "32-V-901");
-        var row = new { assetId = vessel, recordNo = "R-9", date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null };
+        var row = new { assetId = vessel, recordNo = "R-9", date = (string?)null, section = (string?)null, workPack = (string?)null };
         Assert.Contains("Rev 01", (await GenerateAsync(admin, unitId, "Mechanical", row)).Pages[0]);
         var sample = await ReadAsync(await admin.GetByteArrayAsync($"/api/gate-forms/templates/{plantId}/Mechanical/sample?version={version.GetProperty("id").GetInt32()}"));
         Assert.Equal(2, sample.Pages.Count);
@@ -311,9 +368,9 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var noForm = await CreateAsync(unitId, "Equipment", "Static", "39-V-952");
 
         // Two prints: only the last date counts.
-        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-10", section = (string?)null, workPack = "WP-1", unitId = (string?)null });
-        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-20", section = (string?)null, workPack = "WP-2", unitId = (string?)null });
-        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = "2026-11-21", section = (string?)null, workPack = (string?)null, unitId = (string?)null });
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-10", section = (string?)null, workPack = "WP-1" });
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = signed, recordNo = (string?)null, date = "2026-11-20", section = (string?)null, workPack = "WP-2" });
+        await GenerateAsync(admin, unitId, "Mechanical", new { assetId = line, recordNo = (string?)null, date = "2026-11-21", section = (string?)null, workPack = (string?)null });
 
         // The signed file of G8 for the vessel; a G1 file for the line does not count.
         foreach (var (id, gate) in new[] { (signed, 8), (line, 1) })
@@ -360,7 +417,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var b = await CreateAsync(unitId, "Equipment", "Static", "41-V-902");
         var c = await CreateAsync(unitId, "Equipment", "Static", "41-V-903");
         var d = await CreateAsync(unitId, "Equipment", "Static", "41-V-904");
-        object Row(Guid id, string? recordNo = null) => new { assetId = id, recordNo, date = (string?)null, section = (string?)null, workPack = (string?)null, unitId = (string?)null };
+        object Row(Guid id, string? recordNo = null) => new { assetId = id, recordNo, date = (string?)null, section = (string?)null, workPack = (string?)null };
 
         // The dialog shows what each asset will get, in the order of the rows.
         var rows = (await PrepareAsync(admin, unitId, "Mechanical", a, b)).GetProperty("rows");
@@ -387,7 +444,7 @@ public sealed class GateFormTests : IClassFixture<TestApp>
         var fifth = await CreateAsync(unitId, "Equipment", "Static", "41-V-905");
         var taken = await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/generate", new { kind = "Mechanical", rows = new[] { Row(fifth, "ITR-041-STAT-002") } });
         Assert.Contains("already used by 41-V-902", await ErrorAsync(taken));
-        (await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { new { assetId = fifth, recordNo = (string?)null, date = "2026-11-22", section = (string?)null, workPack = (string?)null, unitId = (string?)null } } })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync($"/api/units/{unitId}/gate-forms/save", new { kind = "Mechanical", rows = new[] { new { assetId = fifth, recordNo = (string?)null, date = "2026-11-22", section = (string?)null, workPack = (string?)null } } })).EnsureSuccessStatusCode();
         Assert.Null(await app.WithDbAsync(db => db.GateFormEntries.Where(x => x.AssetId == fifth).Select(x => x.RecordNo).FirstAsync()));
 
         // Admin: the counter of each code and unit, and the code of each discipline.

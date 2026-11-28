@@ -169,7 +169,7 @@ public sealed partial class AssetSplit(PresAppDbContext db, AssetQueries queries
         {
             foreach (var l in links) db.DocumentLinks.Add(new DocumentLink { DocumentId = l.DocumentId, AssetId = b.Id, Gate = l.Gate, LinkedAtUtc = now, LinkedBy = user });
             if (form is not null)
-                db.GateFormEntries.Add(new GateFormEntry { AssetId = b.Id, RecordNo = null, Date = form.Date, Section = form.Section, WorkPack = form.WorkPack, UnitIdText = form.UnitIdText });
+                db.GateFormEntries.Add(new GateFormEntry { AssetId = b.Id, RecordNo = null, Date = form.Date, Section = form.Section, WorkPack = form.WorkPack });
         }
 
         // Gates as set in the preview. Current Gate follows them when they changed (the engineer approved them in the preview).

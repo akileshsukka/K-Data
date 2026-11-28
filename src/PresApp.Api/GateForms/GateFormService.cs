@@ -10,8 +10,8 @@ using PresApp.Infrastructure.Data;
 
 namespace PresApp.Api.GateForms;
 
-public sealed record GateFormUnitSettingDto(int UnitId, string UnitName, string PlantName, string? MechanicalSource, string? ElectricalSource, string? DefaultUnitId);
-public sealed record SaveGateFormUnitSetting(string? MechanicalSource, string? ElectricalSource, string? DefaultUnitId);
+public sealed record GateFormUnitSettingDto(int UnitId, string UnitName, string PlantName, string? MechanicalSource, string? ElectricalSource, string? ElectricalDocumentsNo);
+public sealed record SaveGateFormUnitSetting(string? MechanicalSource, string? ElectricalSource, string? ElectricalDocumentsNo);
 
 public sealed record GateFormTemplateVersionDto(int Id, string FileName, DateTime UploadedAtUtc, string UploadedBy, bool IsActive, List<string> Fields);
 public sealed record GateFormTemplateSlotDto(int PlantId, string PlantName, string Kind, string Units, bool IsBuiltIn, string FileName, List<string> Fields, List<GateFormTemplateVersionDto> Versions);
@@ -20,12 +20,13 @@ public sealed record GateFormUploadResult(GateFormTemplateVersionDto Version, Li
 public sealed record GateFormPrepareRequest(string? Kind, IReadOnlyList<Guid>? AssetIds);
 /// <param name="RecordNoNext">Record No. the asset gets when printed with the field empty (null: typed by hand only).</param>
 public sealed record GateFormRowDto(Guid AssetId, string Code, string? Tag, string? Description, string? RecordNo, DateOnly? Date,
-    string Section, string SectionDefault, string? WorkPack, string? WorkPackDefault, string? UnitId, string? UnitIdDefault,
+    string Section, string SectionDefault, string? WorkPack, string? WorkPackDefault,
     string? RecordNoNext = null);
 public sealed record GateFormSkippedDto(string Code, string? Tag, string Reason);
-public sealed record GateFormPrepareDto(string Kind, string TemplateName, bool IsBuiltIn, List<string> Fields, string? Source, bool CanSave,
-    List<GateFormRowDto> Rows, List<GateFormSkippedDto> Skipped);
-public sealed record GateFormGenerateRow(Guid AssetId, string? RecordNo, DateOnly? Date, string? Section, string? WorkPack, string? UnitId);
+/// <param name="DocumentsNo">Documents number of the unit (electrical form only; null for the mechanical one).</param>
+public sealed record GateFormPrepareDto(string Kind, string TemplateName, bool IsBuiltIn, List<string> Fields, string? Source, string? DocumentsNo,
+    bool CanSave, List<GateFormRowDto> Rows, List<GateFormSkippedDto> Skipped);
+public sealed record GateFormGenerateRow(Guid AssetId, string? RecordNo, DateOnly? Date, string? Section, string? WorkPack);
 public sealed record GateFormGenerateRequest(string? Kind, IReadOnlyList<GateFormGenerateRow>? Rows);
 
 /// <summary>
@@ -33,10 +34,11 @@ public sealed record GateFormGenerateRequest(string? Kind, IReadOnlyList<GateFor
 /// <list type="bullet">
 /// <item><b>Mechanical</b> (G1–G8): equipment and lines. <b>Electrical</b> (E1–E8): E&amp;I items of discipline Electrical (motors).</item>
 /// <item>Template per plant and kind: the active uploaded version, or the built-in one (the client forms of Nov 2026).</item>
-/// <item>Unit values (Admin → Gate forms): source document of each form (the electrical one falls back to the mechanical one) and the default Unit ID.</item>
+/// <item>Unit values (Admin → Gate forms): source document of each form (the electrical one falls back to the mechanical one) and the
+/// documents number of the electrical form (that form only; the same for every motor of the unit).</item>
 /// <item>The electrical form prints the tag description of each motor, always taken from the asset.</item>
-/// <item>Asset values: Record No., date, and overrides of section (tag / line number), work pack (P&amp;ID number of a line)
-/// and Unit ID. They are saved with the asset so the next print starts from them.</item>
+/// <item>Asset values: Record No., date, and overrides of section (tag / line number) and work pack (P&amp;ID number of a
+/// line). They are saved with the asset so the next print starts from them.</item>
 /// <item>Record No.: an asset printed without one gets the next of its discipline and unit (<see cref="RecordNumbers"/>).</item>
 /// </list>
 /// </summary>
@@ -64,7 +66,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
         return units.Select(u =>
         {
             settings.TryGetValue(u.Id, out var s);
-            return new GateFormUnitSettingDto(u.Id, u.Name, u.Plant, s?.MechanicalSource, s?.ElectricalSource, s?.DefaultUnitId);
+            return new GateFormUnitSettingDto(u.Id, u.Name, u.Plant, s?.MechanicalSource, s?.ElectricalSource, s?.ElectricalDocumentsNo);
         }).ToList();
     }
 
@@ -75,7 +77,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
         if (s is null) db.GateFormUnitSettings.Add(s = new GateFormUnitSetting { UnitId = unitId });
         s.MechanicalSource = Clean(request.MechanicalSource, "Source");
         s.ElectricalSource = Clean(request.ElectricalSource, "Source");
-        s.DefaultUnitId = Clean(request.DefaultUnitId, "Unit ID");
+        s.ElectricalDocumentsNo = Clean(request.ElectricalDocumentsNo, "Documents number");
         await db.SaveChangesAsync(ct);
         return (await SettingsAsync(ct)).First(x => x.UnitId == unitId);
     }
@@ -96,7 +98,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
                 var active = mine.FirstOrDefault(v => v.IsActive);
                 var (name, content) = active is null ? BuiltIn(kind) : (active.FileName, active.Content);
                 result.Add(new GateFormTemplateSlotDto(plant.Id, plant.Name, kind.ToString(), string.Join(", ", plant.Units), active is null, name,
-                    GateFormDocument.Inspect(content).Fields, mine.Select(ToDto).ToList()));
+                    GateFormDocument.Inspect(content, kind).Fields, mine.Select(ToDto).ToList()));
             }
         }
         return result;
@@ -111,7 +113,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
         await file.CopyToAsync(buffer, ct);
         if (buffer.Length == 0 || buffer.Length > MaxFileBytes) throw ApiProblem.Invalid("Upload a .docx file of at most 10 MB.");
         var bytes = buffer.ToArray();
-        var check = GateFormDocument.Inspect(bytes);
+        var check = GateFormDocument.Inspect(bytes, kind);
         if (check.Errors.Count > 0) throw ApiProblem.Invalid(string.Join(" ", check.Errors), new { errors = check.Errors });
 
         var version = new GateFormTemplate
@@ -170,7 +172,6 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
             [GateFormDocument.Date] = FormatDate(SiteClock.Today(clock)),
             [GateFormDocument.Section] = $"{unit.Number}-V-101",
             [GateFormDocument.WorkPack] = $"{unit.Number}-00-30-201",
-            [GateFormDocument.UnitId] = setting?.DefaultUnitId ?? unit.Number.ToString(CultureInfo.InvariantCulture),
             [GateFormDocument.Description] = "REGEN. OVERHEAD COOLER FAN",
         };
         var bytes = GateFormDocument.Fill(content, unitValues, [filled, new Dictionary<string, string?>()]);
@@ -186,7 +187,6 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
         var setting = await db.GateFormUnitSettings.AsNoTracking().FirstOrDefaultAsync(s => s.UnitId == unitId, ct);
         var (assets, skipped) = await AssetsAsync(unitId, kind, request.AssetIds, ct);
         var (isBuiltIn, templateName, content) = await TemplateAsync(unit.PlantId, kind, null, ct);
-        var unitIdDefault = setting?.DefaultUnitId;
         // What the assets without a Record No. will get, in the order of the rows (only a role that saves takes numbers).
         var counter = canSave ? await recordNumbers.CounterAsync(tracking: false, ct) : null;
 
@@ -197,9 +197,10 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
             var e = a.Entry;
             var next = counter is not null && e?.RecordNo is null && a.RecordNoCode is { } code ? counter.Next(code, unit.Number, a.Id) : null;
             return new GateFormRowDto(a.Id, a.Code, a.Tag, a.Description, e?.RecordNo, e?.Date,
-                e?.Section ?? sectionDefault, sectionDefault, e?.WorkPack ?? workPackDefault, workPackDefault, e?.UnitIdText ?? unitIdDefault, unitIdDefault, next);
+                e?.Section ?? sectionDefault, sectionDefault, e?.WorkPack ?? workPackDefault, workPackDefault, next);
         }).ToList();
-        return new GateFormPrepareDto(kind.ToString(), templateName, isBuiltIn, GateFormDocument.Inspect(content).Fields, SourceOf(setting, kind), canSave, rows, skipped);
+        return new GateFormPrepareDto(kind.ToString(), templateName, isBuiltIn, GateFormDocument.Inspect(content, kind).Fields, SourceOf(setting, kind),
+            DocumentsNoOf(setting, kind), canSave, rows, skipped);
     }
 
     /// <summary>
@@ -245,14 +246,12 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
             if (counter is not null) recordNo = await RecordNoAsync(counter, a, unit, recordNo, entries.GetValueOrDefault(a.Id)?.RecordNo, assignRecordNo, ct);
             var section = Clean(r.Section, "System / circuit / section");
             var workPack = Clean(r.WorkPack, "Work pack");
-            var unitIdText = Clean(r.UnitId, "Unit ID");
             pages.Add(new Dictionary<string, string?>
             {
                 [GateFormDocument.RecordNo] = recordNo,
                 [GateFormDocument.Date] = r.Date is { } d ? FormatDate(d) : null,
                 [GateFormDocument.Section] = section ?? SectionDefault(a),
                 [GateFormDocument.WorkPack] = workPack ?? WorkPackDefault(a),
-                [GateFormDocument.UnitId] = unitIdText ?? setting?.DefaultUnitId,
                 [GateFormDocument.Description] = a.Description,
             });
             if (!save) continue;
@@ -260,18 +259,16 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
             // Only what differs from what the app fills by itself is kept, so a later change of tag or P&ID still shows.
             var sectionOverride = section is null || section == SectionDefault(a) ? null : section;
             var workPackOverride = workPack is null || workPack == WorkPackDefault(a) ? null : workPack;
-            var unitIdOverride = unitIdText is null || unitIdText == setting?.DefaultUnitId ? null : unitIdText;
             entries.TryGetValue(a.Id, out var entry);
             if (entry is null)
             {
-                if (recordNo is null && r.Date is null && sectionOverride is null && workPackOverride is null && unitIdOverride is null) continue;
+                if (recordNo is null && r.Date is null && sectionOverride is null && workPackOverride is null) continue;
                 db.GateFormEntries.Add(entry = new GateFormEntry { AssetId = a.Id });
             }
             entry.RecordNo = recordNo;
             entry.Date = r.Date;
             entry.Section = sectionOverride;
             entry.WorkPack = workPackOverride;
-            entry.UnitIdText = unitIdOverride;
         }
         if (save) await db.SaveChangesAsync(ct);
         return (kind, unit, setting, pages);
@@ -351,7 +348,7 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
     /// <summary>Built-in template: the client's forms of Nov 2026 with markers in place of the blanks.</summary>
     internal static (string FileName, byte[] Content) BuiltIn(GateFormKind kind)
     {
-        // Every plant (unit 541 of Habshan 5 included) uses the work pack layout; {{UNIT_ID}} is only in uploaded templates.
+        // Every plant (unit 541 of Habshan 5 included) uses the work pack layout.
         var resource = kind == GateFormKind.Electrical ? "GateForm_Electrical.docx" : "GateForm_WorkPack.docx";
         var content = BuiltInCache.GetOrAdd(resource, r =>
         {
@@ -367,7 +364,12 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
     {
         [GateFormDocument.Unit] = unit.Number.ToString(CultureInfo.InvariantCulture),
         [GateFormDocument.Source] = SourceOf(setting, kind),
+        [GateFormDocument.DocumentsNo] = DocumentsNoOf(setting, kind),
     };
+
+    /// <summary>Documents number of the unit: the electrical form only, with no fallback (each unit has its own).</summary>
+    private static string? DocumentsNoOf(GateFormUnitSetting? s, GateFormKind kind) =>
+        kind == GateFormKind.Electrical ? s?.ElectricalDocumentsNo : null;
 
     /// <summary>
     /// Source document printed on the form. The electrical form falls back to the mechanical source when it has none of its
@@ -400,5 +402,5 @@ public sealed class GateFormService(PresAppDbContext db, TimeProvider clock, Rec
     }
 
     private static GateFormTemplateVersionDto ToDto(GateFormTemplate t) =>
-        new(t.Id, t.FileName, t.UploadedAtUtc, t.UploadedBy, t.IsActive, GateFormDocument.Inspect(t.Content).Fields);
+        new(t.Id, t.FileName, t.UploadedAtUtc, t.UploadedBy, t.IsActive, GateFormDocument.Inspect(t.Content, t.Kind).Fields);
 }
