@@ -13,7 +13,7 @@ public enum MonitoringPhase
     Post = 1
 }
 
-/// <summary>One field measurement. Append-only: never edited, repeats allowed.</summary>
+/// <summary>One field measurement. Repeats allowed. Never edited, except a correction or removal by an admin (readings.correct, see ReadingCorrection), which leaves its trace in the history.</summary>
 public class Reading
 {
     public long Id { get; set; }

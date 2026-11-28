@@ -160,12 +160,14 @@ public sealed class AssetQueries(PresAppDbContext db, IHttpContextAccessor http)
             .ToList();
     }
 
-    public async Task<List<HistoryEntry>> HistoryAsync(Guid? assetId, int? unitId, DateTime? before, int take, CancellationToken ct)
+    /// <param name="readingCorrections">False: the corrections and removals of readings (internal) are left out.</param>
+    public async Task<List<HistoryEntry>> HistoryAsync(Guid? assetId, int? unitId, DateTime? before, int take, CancellationToken ct, bool readingCorrections = false)
     {
         var query = db.ChangeLogs.AsNoTracking().Where(c => c.AssetId != null);
         if (assetId is not null) query = query.Where(c => c.AssetId == assetId);
         if (unitId is not null) query = query.Where(c => db.Assets.Any(a => a.Id == c.AssetId && a.UnitId == unitId));
         if (before is not null) query = query.Where(c => c.ChangedAtUtc < before);
+        if (!readingCorrections) query = query.Where(c => c.EntityType != ReadingCorrection.HistoryEntity);
 
         var rows = await query.OrderByDescending(c => c.ChangedAtUtc).ThenByDescending(c => c.Id)
             .Take(Math.Clamp(take, 1, 1000))
